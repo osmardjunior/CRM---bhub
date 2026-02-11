@@ -1,34 +1,47 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import ConversationList from '@/components/inbox/ConversationList';
 import ChatPanel from '@/components/inbox/ChatPanel';
 import ContactProfilePanel from '@/components/inbox/ContactProfilePanel';
-import { conversations, type Conversation } from '@/data/mock';
+import { useConversations, useConversationDetail } from '@/hooks/useConversations';
+import type { ConversationFilters } from '@/services/api';
+import type { Enums } from '@/integrations/supabase/types';
 
 export default function InboxPage() {
-  const [selectedId, setSelectedId] = useState<string | null>(conversations[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(true);
+  const [filters, setFilters] = useState<ConversationFilters>({});
 
-  const selected = conversations.find((c) => c.id === selectedId) ?? null;
+  const { data: conversations, isLoading: listLoading } = useConversations(filters);
+  const { data: detail, isLoading: detailLoading } = useConversationDetail(selectedId);
+
+  // Auto-select first conversation
+  const effectiveSelectedId = selectedId ?? conversations?.[0]?.id ?? null;
+
+  const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
+    setFilters((prev) => ({ ...prev, ...newFilters }));
+  };
 
   return (
     <div className="flex h-[calc(100vh-7rem)] gap-0 -mt-2 rounded-xl border border-border bg-card card-shadow overflow-hidden">
-      {/* A – Conversation List */}
       <ConversationList
-        selectedId={selectedId}
+        conversations={conversations ?? []}
+        loading={listLoading}
+        selectedId={effectiveSelectedId}
         onSelect={setSelectedId}
+        filters={filters}
+        onFilterChange={handleFilterChange}
       />
 
-      {/* B – Chat Panel */}
       <ChatPanel
-        conversation={selected}
+        conversation={effectiveSelectedId ? (detail ?? null) : null}
+        loading={detailLoading && !!effectiveSelectedId}
         onToggleProfile={() => setProfileOpen((p) => !p)}
         profileOpen={profileOpen}
       />
 
-      {/* C – Contact Profile Panel */}
-      {profileOpen && selected && (
+      {profileOpen && detail && (
         <ContactProfilePanel
-          conversation={selected}
+          conversation={detail}
           onClose={() => setProfileOpen(false)}
         />
       )}

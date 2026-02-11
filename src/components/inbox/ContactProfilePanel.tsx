@@ -2,36 +2,25 @@ import {
   X,
   Phone,
   Mail,
-  Tag,
   Plus,
   CheckCircle,
   Briefcase,
-  MessageSquare,
-  UserCircle,
   Clock,
-  ArrowRightLeft,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { timelineEvents, type Conversation, type TimelineEvent } from '@/data/mock';
-
-const timelineIcons: Record<TimelineEvent['type'], typeof MessageSquare> = {
-  message: MessageSquare,
-  note: Tag,
-  status: ArrowRightLeft,
-  assign: UserCircle,
-  tag: Tag,
-};
+import type { ConversationDetail } from '@/services/api';
 
 interface Props {
-  conversation: Conversation;
+  conversation: ConversationDetail;
   onClose: () => void;
 }
 
 export default function ContactProfilePanel({ conversation, onClose }: Props) {
-  const events = timelineEvents[conversation.id] || [];
+  const contact = conversation.contact;
+  const tags = (contact.tags as string[]) || [];
 
   return (
     <div className="flex w-72 min-w-[288px] flex-col border-l border-border">
@@ -47,34 +36,37 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         {/* Contact card */}
         <div className="flex flex-col items-center p-4 pb-3">
           <Avatar className="h-16 w-16 mb-3">
-            <AvatarImage src={conversation.contactAvatar} />
-            <AvatarFallback>{conversation.contactName[0]}</AvatarFallback>
+            <AvatarFallback>{contact.name[0]}</AvatarFallback>
           </Avatar>
-          <h3 className="text-sm font-semibold text-foreground">{conversation.contactName}</h3>
+          <h3 className="text-sm font-semibold text-foreground">{contact.name}</h3>
 
           <div className="mt-3 w-full space-y-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Phone size={12} className="shrink-0" />
-              <span>{conversation.contactPhone}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Mail size={12} className="shrink-0" />
-              <span className="truncate">{conversation.contactEmail}</span>
-            </div>
+            {contact.phone && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Phone size={12} className="shrink-0" />
+                <span>{contact.phone}</span>
+              </div>
+            )}
+            {contact.email && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Mail size={12} className="shrink-0" />
+                <span className="truncate">{contact.email}</span>
+              </div>
+            )}
           </div>
 
           {/* Tags */}
-          <div className="mt-3 w-full">
-            {conversation.contactTags.length > 0 && (
+          {tags.length > 0 && (
+            <div className="mt-3 w-full">
               <div className="flex flex-wrap gap-1">
-                {conversation.contactTags.map((tag) => (
+                {tags.map((tag) => (
                   <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
                     {tag}
                   </Badge>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <Separator />
@@ -97,40 +89,13 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
 
         <Separator />
 
-        {/* Timeline */}
-        <div className="p-4">
-          <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">Linha do Tempo</h4>
-          {events.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nenhum evento registrado.</p>
-          ) : (
-            <div className="space-y-0">
-              {events.map((event, i) => {
-                const Icon = timelineIcons[event.type];
-                return (
-                  <div key={event.id} className="flex gap-3 relative pb-4">
-                    {/* Line connector */}
-                    {i < events.length - 1 && (
-                      <div className="absolute left-[11px] top-6 bottom-0 w-px bg-border" />
-                    )}
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
-                      <Icon size={12} className="text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-foreground leading-snug">{event.description}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <Clock size={10} className="text-muted-foreground" />
-                        <span className="text-[10px] text-muted-foreground">{event.timestamp}</span>
-                        {event.user && (
-                          <span className="text-[10px] text-muted-foreground">• {event.user}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {/* Notes */}
+        {contact.notes && (
+          <div className="p-4">
+            <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">Observações</h4>
+            <p className="text-xs text-muted-foreground">{contact.notes}</p>
+          </div>
+        )}
       </div>
     </div>
   );

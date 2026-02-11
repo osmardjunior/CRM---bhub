@@ -1,49 +1,38 @@
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import type { Tables } from '@/integrations/supabase/types';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  listConversations,
+  getConversation,
+  sendMessage,
+  type ConversationFilters,
+} from '@/services/api';
 
-export type Conversation = Tables<'conversations'> & {
-  contact: Tables<'contacts'>;
-  assigned_user: Tables<'profiles'> | null;
-};
-
-export type Message = Tables<'messages'> & {
-  sender: Tables<'profiles'> | null;
-};
-
-export function useConversations() {
+export function useConversations(filters?: ConversationFilters) {
   return useQuery({
-    queryKey: ['conversations'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('conversations')
-        .select(`
-          *,
-          contact:contacts!conversations_contact_id_fkey(*),
-          assigned_user:profiles!conversations_assigned_user_id_fkey(*)
-        `)
-        .order('last_message_at', { ascending: false });
-      if (error) throw error;
-      return data as Conversation[];
-    },
+    queryKey: ['conversations', filters],
+    queryFn: () => listConversations(filters),
   });
 }
 
-export function useMessages(conversationId: string | null) {
+export function useConversationDetail(conversationId: string | null) {
   return useQuery({
-    queryKey: ['messages', conversationId],
+    queryKey: ['conversation', conversationId],
     enabled: !!conversationId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('messages')
-        .select(`
-          *,
-          sender:profiles!messages_sender_id_fkey(*)
-        `)
-        .eq('conversation_id', conversationId!)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      return data as Message[];
+    queryFn: () => getConversation(conversationId!),
+  });
+}
+
+export function useSendMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, body }: { conversationId: string; body: string }) =>
+      sendMessage(conversationId, body),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
     },
   });
 }
