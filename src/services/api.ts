@@ -310,14 +310,11 @@ export async function getUnreadCounts(
   if (conversationIds.length === 0) return {};
 
   const counts: Record<string, number> = {};
-
-  // Build a map of last_read_at per conversation
   const readMap: Record<string, string> = {};
   for (const r of reads) {
     readMap[r.conversation_id] = r.last_read_at;
   }
 
-  // For each conversation, count messages after last_read_at where sender_type = 'user'
   for (const convId of conversationIds) {
     const lastRead = readMap[convId];
     let query = supabase
@@ -337,4 +334,20 @@ export async function getUnreadCounts(
   }
 
   return counts;
+}
+
+// ── Close conversation ────────────────────────────────
+export async function closeConversation(
+  conversationId: string,
+  closeReason: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('conversations')
+    .update({
+      status: 'closed' as any,
+      close_reason: closeReason,
+    } as any)
+    .eq('id', conversationId);
+
+  if (error) handleError(error);
 }

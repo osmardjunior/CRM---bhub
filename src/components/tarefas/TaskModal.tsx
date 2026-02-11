@@ -22,13 +22,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { agents, contacts, type Task, type TaskPriority, type TaskStatus } from '@/data/mock';
+import { useTeamMembers, useContacts } from '@/hooks/useContacts';
+import { useCreateTask, useUpdateTask } from '@/hooks/useTasks';
+import type { TaskWithRelations } from '@/services/tasks';
+
+type TaskPriority = 'alta' | 'media' | 'baixa';
+type TaskStatus = 'pendente' | 'em_progresso' | 'concluida';
 
 interface TaskModalProps {
   open: boolean;
   onClose: () => void;
-  task?: Task | null;
-  onSave: (task: Task) => void;
+  task?: TaskWithRelations | null;
+  /** Pre-fill contact when creating from contact profile */
+  defaultContactId?: string;
+  defaultContactName?: string;
 }
 
 interface FormErrors {
@@ -37,41 +44,66 @@ interface FormErrors {
   assignedTo?: string;
 }
 
-export default function TaskModal({ open, onClose, task, onSave }: TaskModalProps) {
+export default function TaskModal({ open, onClose, task, defaultContactId, defaultContactName }: TaskModalProps) {
   const isEdit = !!task;
+  const { data: teamMembers } = useTeamMembers();
+  const { data: contacts } = useContacts();
+  const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+
   const [form, setForm] = useState({
     title: task?.title || '',
     description: task?.description || '',
     priority: (task?.priority || 'media') as TaskPriority,
     status: (task?.status || 'pendente') as TaskStatus,
-    dueDate: task?.dueDate ? new Date(task.dueDate) : undefined as Date | undefined,
-    assignedTo: task?.assignedTo || '',
-    contactName: task?.contactName || '',
+    dueDate: task?.due_date ? new Date(task.due_date) : undefined as Date | undefined,
+    assignedUserId: task?.assigned_user_id || '',
+    contactId: task?.contact_id || defaultContactId || '',
   });
   const [errors, setErrors] = useState<FormErrors>({});
+
+  // Reset form when modal opens with new task
+  useState(() => {
+    if (open) {
+      setForm({
+        title: task?.title || '',
+        description: task?.description || '',
+        priority: (task?.priority || 'media') as TaskPriority,
+        status: (task?.status || 'pendente') as TaskStatus,
+        dueDate: task?.due_date ? new Date(task.due_date) : undefined,
+        assignedUserId: task?.assigned_user_id || '',
+        contactId: task?.contact_id || defaultContactId || '',
+      });
+    }
+  });
 
   const validate = (): boolean => {
     const e: FormErrors = {};
     if (!form.title.trim()) e.title = 'Título é obrigatório';
     if (!form.dueDate) e.dueDate = 'Prazo é obrigatório';
-    if (!form.assignedTo) e.assignedTo = 'Responsável é obrigatório';
+    if (!form.assignedUserId) e.assignedTo = 'Responsável é obrigatório';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSubmit = () => {
     if (!validate()) return;
-    onSave({
-      id: task?.id || String(Date.now()),
+
+    const payload = {
       title: form.title,
       description: form.description,
       priority: form.priority,
       status: form.status,
-      dueDate: form.dueDate ? format(form.dueDate, 'yyyy-MM-dd') : '',
-      assignedTo: form.assignedTo,
-      contactName: form.contactName || undefined,
-    });
-    onClose();
+      due_date: form.dueDate ? format(form.dueDate, 'yyyy-MM-dd') : null,
+      assigned_user_id: form.assignedUserId || null,
+      contact_id: form.contactId || null,
+    };
+
+    if (isEdit && task) {
+      updateTask.mutate({ id: task.id, ...payload }, { onSuccess: () => onClose() });
+    } else {
+      createTask.mutate(payload, { onSuccess: () => onClose() });
+    }
   };
 
   const handleClose = () => {
@@ -154,13 +186,13 @@ export default function TaskModal({ open, onClose, task, onSave }: TaskModalProp
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Responsável *</Label>
-              <Select value={form.assignedTo} onValueChange={(v) => setForm({ ...form, assignedTo: v })}>
+              <Select value={form.assignedUserId} onValueChange={(v) => setForm({ ...form, assignedUserId: v })}>
                 <SelectTrigger className={`mt-1 ${errors.assignedTo ? 'border-destructive' : ''}`}>
                   <SelectValue placeholder="Selecionar" />
                 </SelectTrigger>
                 <SelectContent>
-                  {agents.map((a) => (
-                    <SelectItem key={a} value={a}>{a}</SelectItem>
+                  {(teamMembers ?? []).map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -169,12 +201,12 @@ export default function TaskModal({ open, onClose, task, onSave }: TaskModalProp
 
             <div>
               <Label className="text-xs">Contato vinculado</Label>
-              <Select value={form.contactName} onValueChange={(v) => setForm({ ...form, contactName: v })}>
+              <Select value={form.contactId} onValueChange={(v) => setForm({ ...form, contactId: v })}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">Nenhum</SelectItem>
-                  {contacts.map((c) => (
-                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                  {(contacts ?? []).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -198,7 +230,9 @@ export default function TaskModal({ open, onClose, task, onSave }: TaskModalProp
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-          <Button onClick={handleSubmit}>{isEdit ? 'Salvar' : 'Criar Tarefa'}</Button>
+          <Button onClick={handleSubmit} disabled={createTask.isPending || updateTask.isPending}>
+            {isEdit ? 'Salvar' : 'Criar Tarefa'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

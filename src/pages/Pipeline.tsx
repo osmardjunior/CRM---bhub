@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Search, Plus, User, CalendarDays, DollarSign } from 'lucide-react';
+import { Search, Plus, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,9 +12,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import DealDetailDrawer from '@/components/pipeline/DealDetailDrawer';
-import { pipelineDeals as initialDeals, agents, type PipelineDeal, type PipelineStage } from '@/data/mock';
+import EmptyState from '@/components/shared/EmptyState';
+import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
+import { useDeals, useUpdateDeal, useCreateDeal } from '@/hooks/useDeals';
+import { useTeamMembers } from '@/hooks/useContacts';
+import type { DealStage, DealWithRelations } from '@/services/deals';
+import { Briefcase } from 'lucide-react';
 
-const stages: { key: PipelineStage; label: string; color: string }[] = [
+const stages: { key: DealStage; label: string; color: string }[] = [
   { key: 'novo_lead', label: 'Novo Lead', color: 'bg-muted-foreground' },
   { key: 'em_contato', label: 'Em Contato', color: 'bg-info' },
   { key: 'proposta', label: 'Proposta', color: 'bg-warning' },
@@ -32,35 +37,44 @@ function getDaysAgo(dateStr: string) {
 }
 
 export default function PipelinePage() {
-  const [deals, setDeals] = useState<PipelineDeal[]>(initialDeals);
+  const { data: deals, isLoading } = useDeals();
+  const { data: teamMembers } = useTeamMembers();
+  const updateDeal = useUpdateDeal();
   const [search, setSearch] = useState('');
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
+    if (!deals) return [];
     return deals.filter((d) => {
       const matchSearch =
         d.title.toLowerCase().includes(search.toLowerCase()) ||
-        d.contactName.toLowerCase().includes(search.toLowerCase());
-      const matchAgent = agentFilter === 'all' || d.assignedTo === agentFilter;
+        (d.contact?.name ?? '').toLowerCase().includes(search.toLowerCase());
+      const matchAgent = agentFilter === 'all' || d.assigned_user_id === agentFilter;
       return matchSearch && matchAgent;
     });
   }, [deals, search, agentFilter]);
 
-  const selectedDeal = deals.find((d) => d.id === selectedDealId) || null;
+  const selectedDeal = deals?.find((d) => d.id === selectedDealId) || null;
 
   const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
-    const newStage = result.destination.droppableId as PipelineStage;
-    setDeals((prev) =>
-      prev.map((d) => (d.id === result.draggableId ? { ...d, stage: newStage } : d))
-    );
+    const newStage = result.destination.droppableId as DealStage;
+    updateDeal.mutate({ id: result.draggableId, stage: newStage });
   };
 
-  const handleDealUpdate = (updated: PipelineDeal) => {
-    setDeals((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+  const handleDealUpdate = (id: string, updates: Record<string, any>) => {
+    updateDeal.mutate({ id, ...updates });
     setSelectedDealId(null);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-[calc(100vh-7rem)] -m-4 lg:-m-6">
+        <div className="p-4 lg:p-6"><TableSkeleton rows={5} cols={4} /></div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -m-4 lg:-m-6">
@@ -81,8 +95,8 @@ export default function PipelinePage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            {agents.map((a) => (
-              <SelectItem key={a} value={a}>{a}</SelectItem>
+            {(teamMembers ?? []).map((m) => (
+              <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -97,7 +111,7 @@ export default function PipelinePage() {
         <div className="flex flex-1 gap-3 overflow-x-auto p-4 lg:p-6">
           {stages.map((stage) => {
             const stageDeals = filtered.filter((d) => d.stage === stage.key);
-            const total = stageDeals.reduce((s, d) => s + d.value, 0);
+            const total = stageDeals.reduce((s, d) => s + Number(d.value), 0);
 
             return (
               <Droppable key={stage.key} droppableId={stage.key}>
@@ -109,7 +123,6 @@ export default function PipelinePage() {
                       snapshot.isDraggingOver ? 'border-primary/40 bg-accent/30' : ''
                     }`}
                   >
-                    {/* Column header */}
                     <div className="flex items-center justify-between border-b border-border px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className={`h-2.5 w-2.5 rounded-full ${stage.color}`} />
@@ -119,7 +132,6 @@ export default function PipelinePage() {
                       <span className="text-[11px] text-muted-foreground font-medium">{formatCurrency(total)}</span>
                     </div>
 
-                    {/* Cards */}
                     <div className="flex-1 space-y-2 overflow-y-auto p-2">
                       {stageDeals.length === 0 ? (
                         <div className="py-10 text-center text-xs text-muted-foreground">
@@ -139,14 +151,14 @@ export default function PipelinePage() {
                                 }`}
                               >
                                 <p className="text-sm font-medium text-foreground leading-snug">{deal.title}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">{deal.contactName}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{deal.contact?.name ?? '—'}</p>
                                 <div className="mt-2.5 flex items-center justify-between">
-                                  <span className="text-sm font-semibold text-foreground">{formatCurrency(deal.value)}</span>
-                                  <span className="text-[11px] text-muted-foreground">{getDaysAgo(deal.createdAt)}d</span>
+                                  <span className="text-sm font-semibold text-foreground">{formatCurrency(Number(deal.value))}</span>
+                                  <span className="text-[11px] text-muted-foreground">{getDaysAgo(deal.created_at)}d</span>
                                 </div>
                                 <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
                                   <User size={12} />
-                                  <span className="truncate">{deal.assignedTo}</span>
+                                  <span className="truncate">{deal.assigned_user?.name ?? '—'}</span>
                                 </div>
                               </div>
                             )}
