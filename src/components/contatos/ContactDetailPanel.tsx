@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import type { Tables } from '@/integrations/supabase/types';
 import { useUpdateContact } from '@/hooks/useContacts';
+import { useTags } from '@/hooks/useTags';
 import { useNavigate } from 'react-router-dom';
 
 type Contact = Tables<'contacts'>;
@@ -21,6 +22,7 @@ interface ContactDetailPanelProps {
 export default function ContactDetailPanel({ contact, onClose }: ContactDetailPanelProps) {
   const navigate = useNavigate();
   const updateContact = useUpdateContact();
+  const { data: availableTags } = useTags();
   const [form, setForm] = useState({
     name: contact.name,
     phone: contact.phone || '',
@@ -29,14 +31,9 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
     notes: contact.notes || '',
   });
   const [tags, setTags] = useState<string[]>((contact.tags as string[]) || []);
-  const [newTag, setNewTag] = useState('');
 
-  const handleAddTag = () => {
-    const trimmed = newTag.trim();
-    if (trimmed && !tags.includes(trimmed)) {
-      setTags([...tags, trimmed]);
-      setNewTag('');
-    }
+  const toggleTag = (tagName: string) => {
+    setTags(prev => prev.includes(tagName) ? prev.filter(t => t !== tagName) : [...prev, tagName]);
   };
 
   const handleRemoveTag = (tag: string) => {
@@ -105,15 +102,22 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
         <div>
           <Label className="text-xs text-muted-foreground">Tags</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {tags.map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-destructive/15 hover:text-destructive transition-colors" onClick={() => handleRemoveTag(tag)}>
-                {tag} ×
+            {tags.map((tag) => {
+              const tagData = availableTags?.find(t => t.name === tag);
+              return (
+                <Badge key={tag} variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-destructive/15 hover:text-destructive transition-colors" style={tagData ? { backgroundColor: tagData.color + '30', color: tagData.color, borderColor: tagData.color + '40' } : {}} onClick={() => handleRemoveTag(tag)}>
+                  {tag} ×
+                </Badge>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {(availableTags ?? []).filter(t => !tags.includes(t.name)).map(tag => (
+              <Badge key={tag.id} variant="outline" className="text-xs cursor-pointer hover:bg-accent transition-colors" onClick={() => toggleTag(tag.name)}>
+                <span className="h-2 w-2 rounded-full mr-1" style={{ backgroundColor: tag.color }} />
+                {tag.name}
               </Badge>
             ))}
-          </div>
-          <div className="mt-2 flex gap-1.5">
-            <Input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTag()} placeholder="Nova tag..." className="flex-1 h-8 text-xs bg-secondary border-0" />
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleAddTag}>Adicionar</Button>
           </div>
         </div>
 

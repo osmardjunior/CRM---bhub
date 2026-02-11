@@ -262,6 +262,47 @@ export type Database = {
           },
         ]
       }
+      integrations: {
+        Row: {
+          channel: string
+          company_id: string
+          config: Json
+          created_at: string
+          id: string
+          provider: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          company_id: string
+          config?: Json
+          created_at?: string
+          id?: string
+          provider?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          company_id?: string
+          config?: Json
+          created_at?: string
+          id?: string
+          provider?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integrations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           body: string
@@ -354,6 +395,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tags: {
+        Row: {
+          color: string
+          company_id: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          color?: string
+          company_id: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          color?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tags_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"

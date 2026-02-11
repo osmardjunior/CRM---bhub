@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useCreateContact } from '@/hooks/useContacts';
+import { useTags } from '@/hooks/useTags';
 
 const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
 
@@ -34,8 +36,10 @@ interface FormErrors {
 
 export default function NewContactModal({ open, onClose, companyId }: NewContactModalProps) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: '' });
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const createContact = useCreateContact();
+  const { data: availableTags } = useTags();
 
   const validate = (): boolean => {
     const e: FormErrors = {};
@@ -54,7 +58,7 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
       phone: form.phone.trim(),
       email: form.email.trim() || null,
       source: form.source || null,
-      tags: [],
+      tags: selectedTags,
     });
     handleClose();
   };
@@ -62,6 +66,7 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
   const handleClose = () => {
     onClose();
     setForm({ name: '', phone: '', email: '', source: '' });
+    setSelectedTags([]);
     setErrors({});
   };
 
@@ -98,6 +103,29 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          {/* Tags */}
+          <div>
+            <Label className="text-xs">Tags</Label>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {(availableTags ?? []).map(tag => {
+                const selected = selectedTags.includes(tag.name);
+                return (
+                  <Badge
+                    key={tag.id}
+                    variant={selected ? 'default' : 'outline'}
+                    className="text-xs cursor-pointer transition-colors"
+                    style={selected ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+                    onClick={() => setSelectedTags(prev => selected ? prev.filter(t => t !== tag.name) : [...prev, tag.name])}
+                  >
+                    {tag.name}
+                  </Badge>
+                );
+              })}
+              {(!availableTags || availableTags.length === 0) && (
+                <p className="text-xs text-muted-foreground">Nenhuma tag cadastrada. Crie em Configurações → Tags.</p>
+              )}
+            </div>
           </div>
         </div>
 
