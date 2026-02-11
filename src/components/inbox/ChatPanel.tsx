@@ -28,7 +28,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
-import EmptyState from '@/components/EmptyState';
+import EmptyState from '@/components/shared/EmptyState';
 import { messages, agents, quickReplies, type Conversation } from '@/data/mock';
 
 interface Props {
