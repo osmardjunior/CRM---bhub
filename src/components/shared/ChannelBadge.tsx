@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
-import type { Channel } from '@/data/mock';
+
+type Channel = 'whatsapp' | 'instagram' | 'webchat';
 
 const channelConfig: Record<Channel, { label: string; className: string }> = {
   whatsapp: { label: 'WhatsApp', className: 'bg-success/15 text-success border-success/20' },

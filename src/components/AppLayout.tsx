@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSidebarStats } from '@/hooks/useSidebarStats';
+import GlobalSearchCommand from '@/components/GlobalSearchCommand';
 import {
   MessageSquare,
   Users,
@@ -17,8 +19,9 @@ import {
   Building2,
   LogOut,
   User,
+  LayoutDashboard,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,69 +33,63 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { stats } from '@/data/mock';
+import { useCompany } from '@/hooks/useCompany';
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
-const navItems = [
-  { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats.openConversations },
-  { to: '/contatos', label: 'Contatos', icon: Users },
-  { to: '/pipeline', label: 'Pipeline', icon: Kanban },
-  { to: '/tarefas', label: 'Tarefas', icon: CheckSquare, badge: stats.overdueTasks },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings },
-];
-
-const companies = ['Empresa A', 'Empresa B'];
-
 export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState(companies[0]);
+  const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, role, signOut } = useAuth();
+  const { data: stats } = useSidebarStats();
+  const { data: company } = useCompany();
+
   const userName = profile?.name || 'Usuário';
   const userInitials = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const companyName = company?.name ?? 'Minha Empresa';
+
+  // Keyboard shortcut for search
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, []);
+
+  const navItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
+    { to: '/contatos', label: 'Contatos', icon: Users },
+    { to: '/pipeline', label: 'Pipeline', icon: Kanban },
+    { to: '/tarefas', label: 'Tarefas', icon: CheckSquare, badge: stats?.overdueTasks },
+    { to: '/configuracoes', label: 'Configurações', icon: Settings },
+  ];
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Sidebar */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 lg:static lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } ${collapsed ? 'w-16' : 'w-64'}`}
-      >
-        {/* Logo */}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'w-16' : 'w-64'}`}>
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-bold text-sm">
-            AI
-          </div>
-          {!collapsed && (
-            <span className="text-lg font-semibold text-sidebar-accent-foreground whitespace-nowrap">
-              All In CRM
-            </span>
-          )}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="ml-auto text-sidebar-muted hover:text-sidebar-foreground lg:hidden"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-bold text-sm">AI</div>
+          {!collapsed && <span className="text-lg font-semibold text-sidebar-accent-foreground whitespace-nowrap">All In CRM</span>}
+          <button onClick={() => setSidebarOpen(false)} className="ml-auto text-sidebar-muted hover:text-sidebar-foreground lg:hidden"><X size={20} /></button>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 space-y-1 px-2 py-4">
-          {navItems.map((item) => {
+          {navItems.map(item => {
             const isActive = location.pathname === item.to;
             return (
               <NavLink
@@ -100,40 +97,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 to={item.to}
                 onClick={() => setSidebarOpen(false)}
                 title={collapsed ? item.label : undefined}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'
-                } ${collapsed ? 'justify-center px-0' : ''}`}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'} ${collapsed ? 'justify-center px-0' : ''}`}
               >
                 <item.icon size={18} className="shrink-0" />
                 {!collapsed && <span>{item.label}</span>}
                 {!collapsed && item.badge ? (
-                  <Badge className="ml-auto bg-sidebar-primary text-sidebar-primary-foreground text-xs px-1.5 py-0 min-w-[20px] justify-center">
-                    {item.badge}
-                  </Badge>
+                  <Badge className="ml-auto bg-sidebar-primary text-sidebar-primary-foreground text-xs px-1.5 py-0 min-w-[20px] justify-center">{item.badge}</Badge>
                 ) : null}
               </NavLink>
             );
           })}
         </nav>
 
-        {/* Collapse toggle (desktop only) */}
         <div className="hidden lg:flex justify-center border-t border-sidebar-border py-2">
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="rounded-md p-1.5 text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors"
-          >
+          <button onClick={() => setCollapsed(!collapsed)} className="rounded-md p-1.5 text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/60 transition-colors">
             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
 
-        {/* User footer */}
         <div className="border-t border-sidebar-border p-3">
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
-            <Avatar className="h-8 w-8 shrink-0">
-              <AvatarFallback>{userInitials}</AvatarFallback>
-            </Avatar>
+            <Avatar className="h-8 w-8 shrink-0"><AvatarFallback>{userInitials}</AvatarFallback></Avatar>
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-sidebar-accent-foreground truncate">{userName}</p>
@@ -146,68 +130,41 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header / Topbar */}
         <header className="flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu size={20} />
-          </Button>
-
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu size={20} /></Button>
           <h1 className="text-lg font-semibold text-foreground">
-            {navItems.find((i) => i.to === location.pathname)?.label || 'Dashboard'}
+            {navItems.find(i => i.to === location.pathname)?.label || 'Dashboard'}
           </h1>
 
           <div className="ml-auto flex items-center gap-3">
-            {/* Global search */}
+            {/* Global search trigger */}
             <div className="relative hidden md:block">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Buscar..."
-                className="w-64 pl-9 bg-secondary border-0 focus-visible:ring-1"
+                placeholder="Buscar... (⌘K)"
+                className="w-64 pl-9 bg-secondary border-0 focus-visible:ring-1 cursor-pointer"
+                readOnly
+                onClick={() => setSearchOpen(true)}
               />
             </div>
 
-            {/* Company switcher */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
-                  <Building2 size={14} />
-                  <span className="max-w-[120px] truncate">{selectedCompany}</span>
-                  <ChevronDown size={14} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Trocar empresa</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {companies.map((c) => (
-                  <DropdownMenuItem
-                    key={c}
-                    onClick={() => setSelectedCompany(c)}
-                    className={c === selectedCompany ? 'bg-accent' : ''}
-                  >
-                    {c}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Company name */}
+            <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
+              <Building2 size={14} />
+              <span className="max-w-[120px] truncate">{companyName}</span>
+            </Button>
 
             {/* Notifications */}
             <Button variant="ghost" size="icon" className="relative">
               <Bell size={18} />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />
+              {(stats?.overdueTasks ?? 0) > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />}
             </Button>
 
             {/* User menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
-                  <Avatar className="h-7 w-7">
-                    <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
-                  </Avatar>
+                  <Avatar className="h-7 w-7"><AvatarFallback className="text-xs">{userInitials}</AvatarFallback></Avatar>
                   <span className="text-sm font-medium">{userName}</span>
                   <ChevronDown size={14} />
                 </Button>
@@ -218,29 +175,25 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   <p className="text-xs text-muted-foreground capitalize">{role || 'agent'}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <User size={14} className="mr-2" />
-                  Meu Perfil
+                <DropdownMenuItem onClick={() => navigate('/perfil')}>
+                  <User size={14} className="mr-2" /> Meu Perfil
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate('/configuracoes')}>
-                  <Settings size={14} className="mr-2" />
-                  Configurações
+                  <Settings size={14} className="mr-2" /> Configurações
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive" onClick={() => signOut()}>
-                  <LogOut size={14} className="mr-2" />
-                  Sair
+                  <LogOut size={14} className="mr-2" /> Sair
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
+
+      <GlobalSearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

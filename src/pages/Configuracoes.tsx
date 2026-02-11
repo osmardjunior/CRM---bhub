@@ -1,52 +1,25 @@
 import { useState } from 'react';
 import {
-  Building2,
-  Users,
-  Wifi,
-  Save,
-  Plus,
-  Copy,
-  Check,
-  ImageIcon,
-  Shield,
-  Eye,
-  Headphones,
-  Lock,
+  Building2, Users, Wifi, Save, Plus, Copy, Check, ImageIcon,
+  Shield, Eye, Headphones, Lock,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import StatusBadge from '@/components/StatusBadge';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
+import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { useCompany, useUpdateCompany } from '@/hooks/useCompany';
+import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 
-const mockUsers = [
-  { id: '1', name: 'Davi César', email: 'davi@allinsistemas.com', role: 'Admin', status: 'online' as const },
-  { id: '2', name: 'Ana Silva', email: 'ana@allinsistemas.com', role: 'Supervisor', status: 'online' as const },
-  { id: '3', name: 'Carlos Rocha', email: 'carlos@allinsistemas.com', role: 'Agente', status: 'ausente' as const },
-  { id: '4', name: 'Felipe Moura', email: 'felipe@allinsistemas.com', role: 'Agente', status: 'offline' as const },
-];
+const roleLabels: Record<string, string> = { admin: 'Admin', supervisor: 'Supervisor', agent: 'Agente' };
 
 const roleDescriptions = [
   { role: 'Admin', icon: Shield, desc: 'Acesso total ao sistema. Gerencia usuários, configurações e todas as áreas.' },
@@ -65,8 +38,19 @@ export default function ConfiguracoesPage() {
 
   const [invite, setInvite] = useState({ name: '', email: '', role: '' });
   const [inviteErrors, setInviteErrors] = useState<Record<string, string>>({});
-
   const [waForm, setWaForm] = useState({ provider: '', token: '', phoneId: '' });
+
+  // Real data hooks
+  const { data: teamMembers, isLoading: loadingTeam } = useTeamProfiles();
+  const { data: company, isLoading: loadingCompany } = useCompany();
+  const updateCompany = useUpdateCompany();
+
+  const [companyName, setCompanyName] = useState('');
+  // Sync company name when loaded
+  if (company && !companyName && company.name) {
+    // Only set initial value once
+    setTimeout(() => setCompanyName(company.name), 0);
+  }
 
   const webhookUrl = 'https://api.allinsistemas.com/webhooks/whatsapp/abc123def';
 
@@ -88,10 +72,16 @@ export default function ConfiguracoesPage() {
 
   const handleInvite = () => {
     if (validateInvite()) {
+      toast.info('Funcionalidade de convite em breve!');
       setInviteOpen(false);
       setInvite({ name: '', email: '', role: '' });
       setInviteErrors({});
     }
+  };
+
+  const handleSaveCompany = () => {
+    if (!companyName.trim()) return;
+    updateCompany.mutate({ name: companyName.trim() });
   };
 
   return (
@@ -117,7 +107,6 @@ export default function ConfiguracoesPage() {
             <div className="rounded-xl border border-border bg-card card-shadow p-6">
               <h2 className="text-base font-semibold text-foreground mb-4">Dados da Empresa</h2>
 
-              {/* Logo placeholder */}
               <div className="flex items-center gap-4 mb-6">
                 <div className="h-16 w-16 rounded-xl bg-muted flex items-center justify-center border-2 border-dashed border-border">
                   <ImageIcon size={24} className="text-muted-foreground" />
@@ -128,41 +117,26 @@ export default function ConfiguracoesPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Nome da empresa</Label>
-                  <Input defaultValue="All In Sistemas" className="bg-secondary border-0" />
+              {loadingCompany ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">CNPJ</Label>
-                  <Input defaultValue="12.345.678/0001-90" className="bg-secondary border-0" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Fuso horário</Label>
-                  <Select defaultValue="america_sp">
-                    <SelectTrigger className="bg-secondary border-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="america_sp">América/São_Paulo (GMT-3)</SelectItem>
-                      <SelectItem value="america_manaus">América/Manaus (GMT-4)</SelectItem>
-                      <SelectItem value="america_belem">América/Belém (GMT-3)</SelectItem>
-                      <SelectItem value="america_noronha">América/Noronha (GMT-2)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Horário de atendimento</Label>
-                  <div className="flex items-center gap-2">
-                    <Input defaultValue="08:00" type="time" className="bg-secondary border-0 flex-1" />
-                    <span className="text-xs text-muted-foreground">até</span>
-                    <Input defaultValue="18:00" type="time" className="bg-secondary border-0 flex-1" />
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Nome da empresa</Label>
+                    <Input value={companyName} onChange={e => setCompanyName(e.target.value)} className="bg-secondary border-0" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Plano</Label>
+                    <Input value={company?.plan ?? 'free'} readOnly className="bg-secondary border-0 opacity-60 capitalize" />
                   </div>
                 </div>
-              </div>
+              )}
 
-              <Button className="mt-5 gap-1.5" size="sm">
-                <Save size={14} /> Salvar
+              <Button className="mt-5 gap-1.5" size="sm" onClick={handleSaveCompany} disabled={updateCompany.isPending || !permissions.canManageUsers}>
+                <Save size={14} /> {updateCompany.isPending ? 'Salvando...' : 'Salvar'}
               </Button>
             </div>
           </TabsContent>
@@ -175,28 +149,18 @@ export default function ConfiguracoesPage() {
                 <p className="text-xs text-warning">Você não tem permissão para gerenciar usuários. Entre em contato com um administrador.</p>
               </div>
             )}
-            {/* Users table */}
             <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <h2 className="text-base font-semibold text-foreground">Membros da equipe</h2>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span>
-                      <Button
-                        size="sm"
-                        className="gap-1.5 h-8"
-                        onClick={() => setInviteOpen(true)}
-                        disabled={!permissions.canManageUsers}
-                      >
+                      <Button size="sm" className="gap-1.5 h-8" onClick={() => setInviteOpen(true)} disabled={!permissions.canManageUsers}>
                         <Plus size={14} /> Convidar
                       </Button>
                     </span>
                   </TooltipTrigger>
-                  {manageTooltip && (
-                    <TooltipContent>
-                      <p className="text-xs">{manageTooltip}</p>
-                    </TooltipContent>
-                  )}
+                  {manageTooltip && <TooltipContent><p className="text-xs">{manageTooltip}</p></TooltipContent>}
                 </Tooltip>
               </div>
               <table className="w-full text-sm">
@@ -209,15 +173,24 @@ export default function ConfiguracoesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockUsers.map((u) => (
+                  {loadingTeam ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
+                        <td className="px-4 py-3 hidden md:table-cell"><Skeleton className="h-4 w-40" /></td>
+                        <td className="px-4 py-3"><Skeleton className="h-5 w-16" /></td>
+                        <td className="px-4 py-3 hidden sm:table-cell"><Skeleton className="h-5 w-16" /></td>
+                      </tr>
+                    ))
+                  ) : (teamMembers ?? []).map(u => (
                     <tr key={u.id} className="border-b border-border last:border-0 hover:bg-accent/30 transition-colors">
                       <td className="px-4 py-3 font-medium text-foreground">{u.name}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{u.email}</td>
                       <td className="px-4 py-3">
-                        <Badge variant="secondary" className="text-xs">{u.role}</Badge>
+                        <Badge variant="secondary" className="text-xs">{roleLabels[u.role] ?? u.role}</Badge>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <StatusBadge status={u.status} />
+                        <StatusBadge status={u.status as 'online' | 'ausente' | 'offline'} />
                       </td>
                     </tr>
                   ))}
@@ -229,7 +202,7 @@ export default function ConfiguracoesPage() {
             <div className="rounded-xl border border-border bg-card card-shadow p-5">
               <h3 className="text-sm font-semibold text-foreground mb-3">Descrição dos cargos</h3>
               <div className="space-y-3">
-                {roleDescriptions.map((r) => (
+                {roleDescriptions.map(r => (
                   <div key={r.role} className="flex items-start gap-3 rounded-lg bg-secondary/50 p-3">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                       <r.icon size={16} className="text-primary" />
@@ -246,7 +219,6 @@ export default function ConfiguracoesPage() {
 
           {/* ===== CANAIS ===== */}
           <TabsContent value="canais" className="mt-0 space-y-6">
-            {/* WhatsApp card */}
             <div className="rounded-xl border border-border bg-card card-shadow p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
@@ -260,10 +232,7 @@ export default function ConfiguracoesPage() {
                     <p className="text-xs text-muted-foreground">Conecte seu número para enviar e receber mensagens</p>
                   </div>
                 </div>
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${whatsappConnected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}
-                >
+                <Badge variant="outline" className={`text-xs ${whatsappConnected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
                   {whatsappConnected ? 'Conectado' : 'Desconectado'}
                 </Badge>
               </div>
@@ -283,9 +252,7 @@ export default function ConfiguracoesPage() {
                       </Button>
                     </div>
                   </div>
-                  <Button variant="destructive" size="sm" className="text-xs" onClick={() => setWhatsappConnected(false)}>
-                    Desconectar
-                  </Button>
+                  <Button variant="destructive" size="sm" className="text-xs" onClick={() => setWhatsappConnected(false)}>Desconectar</Button>
                 </div>
               ) : (
                 <Button size="sm" className="gap-1.5" onClick={() => setWhatsappOpen(true)}>
@@ -294,8 +261,7 @@ export default function ConfiguracoesPage() {
               )}
             </div>
 
-            {/* Other channels placeholder */}
-            {['Instagram Direct', 'Webchat Widget'].map((name) => (
+            {['Instagram Direct', 'Webchat Widget'].map(name => (
               <div key={name} className="rounded-xl border border-border bg-card card-shadow p-5 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">{name}</h3>
@@ -311,30 +277,28 @@ export default function ConfiguracoesPage() {
       {/* Invite modal */}
       <Dialog open={inviteOpen} onOpenChange={() => { setInviteOpen(false); setInviteErrors({}); setInvite({ name: '', email: '', role: '' }); }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Convidar Membro</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Convidar Membro</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div>
               <Label className="text-xs">Nome *</Label>
-              <Input value={invite.name} onChange={(e) => setInvite({ ...invite, name: e.target.value })} placeholder="Nome completo" className={`mt-1 ${inviteErrors.name ? 'border-destructive' : ''}`} />
+              <Input value={invite.name} onChange={e => setInvite({ ...invite, name: e.target.value })} placeholder="Nome completo" className={`mt-1 ${inviteErrors.name ? 'border-destructive' : ''}`} />
               {inviteErrors.name && <p className="text-xs text-destructive mt-1">{inviteErrors.name}</p>}
             </div>
             <div>
               <Label className="text-xs">Email *</Label>
-              <Input value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="email@empresa.com" className={`mt-1 ${inviteErrors.email ? 'border-destructive' : ''}`} />
+              <Input value={invite.email} onChange={e => setInvite({ ...invite, email: e.target.value })} placeholder="email@empresa.com" className={`mt-1 ${inviteErrors.email ? 'border-destructive' : ''}`} />
               {inviteErrors.email && <p className="text-xs text-destructive mt-1">{inviteErrors.email}</p>}
             </div>
             <div>
               <Label className="text-xs">Cargo *</Label>
-              <Select value={invite.role} onValueChange={(v) => setInvite({ ...invite, role: v })}>
+              <Select value={invite.role} onValueChange={v => setInvite({ ...invite, role: v })}>
                 <SelectTrigger className={`mt-1 ${inviteErrors.role ? 'border-destructive' : ''}`}>
                   <SelectValue placeholder="Selecionar cargo" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Supervisor">Supervisor</SelectItem>
-                  <SelectItem value="Agente">Agente</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="supervisor">Supervisor</SelectItem>
+                  <SelectItem value="agent">Agente</SelectItem>
                 </SelectContent>
               </Select>
               {inviteErrors.role && <p className="text-xs text-destructive mt-1">{inviteErrors.role}</p>}
@@ -350,13 +314,11 @@ export default function ConfiguracoesPage() {
       {/* WhatsApp connect modal */}
       <Dialog open={whatsappOpen} onOpenChange={setWhatsappOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Conectar WhatsApp</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Conectar WhatsApp</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div>
               <Label className="text-xs">Provedor</Label>
-              <Select value={waForm.provider} onValueChange={(v) => setWaForm({ ...waForm, provider: v })}>
+              <Select value={waForm.provider} onValueChange={v => setWaForm({ ...waForm, provider: v })}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Selecionar provedor" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="meta">Meta (Cloud API)</SelectItem>
@@ -367,11 +329,11 @@ export default function ConfiguracoesPage() {
             </div>
             <div>
               <Label className="text-xs">Token de acesso</Label>
-              <Input value={waForm.token} onChange={(e) => setWaForm({ ...waForm, token: e.target.value })} placeholder="EAABx..." className="mt-1" type="password" />
+              <Input value={waForm.token} onChange={e => setWaForm({ ...waForm, token: e.target.value })} placeholder="EAABx..." className="mt-1" type="password" />
             </div>
             <div>
               <Label className="text-xs">Phone Number ID</Label>
-              <Input value={waForm.phoneId} onChange={(e) => setWaForm({ ...waForm, phoneId: e.target.value })} placeholder="1234567890" className="mt-1" />
+              <Input value={waForm.phoneId} onChange={e => setWaForm({ ...waForm, phoneId: e.target.value })} placeholder="1234567890" className="mt-1" />
             </div>
             <div className="rounded-lg bg-secondary/50 p-3">
               <p className="text-xs text-muted-foreground mb-1">Webhook URL (copie para o painel do provedor)</p>
