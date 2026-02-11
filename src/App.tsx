@@ -13,6 +13,8 @@ import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import Tarefas from "./pages/Tarefas";
 import Configuracoes from "./pages/Configuracoes";
+import Integracoes from "./pages/Integracoes";
+import Tags from "./pages/Tags";
 import MeuPerfil from "./pages/MeuPerfil";
 import NotFound from "./pages/NotFound";
 
@@ -33,6 +35,8 @@ const App = () => (
             <Route path="/contatos" element={<ProtectedRoute><AppLayout><Contatos /></AppLayout></ProtectedRoute>} />
             <Route path="/pipeline" element={<ProtectedRoute><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
             <Route path="/tarefas" element={<ProtectedRoute><AppLayout><Tarefas /></AppLayout></ProtectedRoute>} />
+            <Route path="/integracoes" element={<ProtectedRoute><AppLayout><Integracoes /></AppLayout></ProtectedRoute>} />
+            <Route path="/tags" element={<ProtectedRoute><AppLayout><Tags /></AppLayout></ProtectedRoute>} />
             <Route path="/configuracoes" element={<ProtectedRoute><AppLayout><Configuracoes /></AppLayout></ProtectedRoute>} />
             <Route path="/perfil" element={<ProtectedRoute><AppLayout><MeuPerfil /></AppLayout></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
