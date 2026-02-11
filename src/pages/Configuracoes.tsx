@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Building2, Users, Wifi, Save, Plus, Copy, Check, ImageIcon,
-  Shield, Eye, Headphones, Lock,
+  Shield, Eye, Headphones, Lock, Tag, Trash2, Pencil,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,8 +16,12 @@ import StatusBadge from '@/components/StatusBadge';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { useCompany, useUpdateCompany } from '@/hooks/useCompany';
+import { useIntegrations, useUpsertIntegration, useDisconnectIntegration } from '@/hooks/useIntegrations';
+import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/hooks/useTags';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 const roleLabels: Record<string, string> = { admin: 'Admin', supervisor: 'Supervisor', agent: 'Agente' };
 
@@ -27,32 +31,54 @@ const roleDescriptions = [
   { role: 'Agente', icon: Headphones, desc: 'Atende conversas, gerencia contatos atribuídos e cria tarefas.' },
 ];
 
+const TAG_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b',
+  '#10b981', '#06b6d4', '#3b82f6', '#64748b', '#d946ef',
+];
+
 export default function ConfiguracoesPage() {
   const permissions = usePermissions();
+  const { companyId } = useAuth();
   const manageTooltip = getPermissionTooltip('canManageUsers', permissions);
   const [activeTab, setActiveTab] = useState('empresa');
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [whatsappOpen, setWhatsappOpen] = useState(false);
-  const [whatsappConnected, setWhatsappConnected] = useState(false);
-  const [copied, setCopied] = useState(false);
 
+  // Invite modal
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [invite, setInvite] = useState({ name: '', email: '', role: '' });
   const [inviteErrors, setInviteErrors] = useState<Record<string, string>>({});
+  const [inviting, setInviting] = useState(false);
+
+  // WhatsApp modal
+  const [whatsappOpen, setWhatsappOpen] = useState(false);
   const [waForm, setWaForm] = useState({ provider: '', token: '', phoneId: '' });
+  const [copied, setCopied] = useState(false);
+
+  // Tags
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
+  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string } | null>(null);
 
   // Real data hooks
   const { data: teamMembers, isLoading: loadingTeam } = useTeamProfiles();
   const { data: company, isLoading: loadingCompany } = useCompany();
   const updateCompany = useUpdateCompany();
+  const { data: integrations, isLoading: loadingIntegrations } = useIntegrations();
+  const upsertIntegration = useUpsertIntegration();
+  const disconnectIntegration = useDisconnectIntegration();
+  const { data: tags, isLoading: loadingTags } = useTags();
+  const createTag = useCreateTag();
+  const updateTag = useUpdateTag();
+  const deleteTag = useDeleteTag();
 
   const [companyName, setCompanyName] = useState('');
-  // Sync company name when loaded
-  if (company && !companyName && company.name) {
-    // Only set initial value once
-    setTimeout(() => setCompanyName(company.name), 0);
-  }
+  useEffect(() => {
+    if (company?.name && !companyName) setCompanyName(company.name);
+  }, [company]);
 
-  const webhookUrl = 'https://api.allinsistemas.com/webhooks/whatsapp/abc123def';
+  const whatsappIntegration = integrations?.find(i => i.channel === 'whatsapp');
+  const isWhatsappConnected = whatsappIntegration?.status === 'connected';
+
+  const webhookUrl = `https://loamacrszlgxhaqvnkzw.supabase.co/functions/v1/incoming-message`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(webhookUrl);
@@ -70,18 +96,64 @@ export default function ConfiguracoesPage() {
     return Object.keys(e).length === 0;
   };
 
-  const handleInvite = () => {
-    if (validateInvite()) {
-      toast.info('Funcionalidade de convite em breve!');
+  const handleInvite = async () => {
+    if (!validateInvite()) return;
+    setInviting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await supabase.functions.invoke('invite-user', {
+        body: { name: invite.name, email: invite.email, role: invite.role },
+      });
+      if (resp.error) throw new Error(resp.error.message);
+      const result = resp.data as any;
+      if (result.error) throw new Error(result.error);
+      toast.success(`Usuário ${invite.email} criado com sucesso!`);
       setInviteOpen(false);
       setInvite({ name: '', email: '', role: '' });
       setInviteErrors({});
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao convidar usuário');
+    } finally {
+      setInviting(false);
     }
   };
 
   const handleSaveCompany = () => {
     if (!companyName.trim()) return;
     updateCompany.mutate({ name: companyName.trim() });
+  };
+
+  const handleConnectWhatsApp = () => {
+    if (!waForm.provider || !waForm.token) {
+      toast.error('Preencha provedor e token');
+      return;
+    }
+    upsertIntegration.mutate({
+      channel: 'whatsapp',
+      provider: waForm.provider,
+      config: { token: waForm.token, phone_id: waForm.phoneId },
+      status: 'connected',
+    });
+    setWhatsappOpen(false);
+    setWaForm({ provider: '', token: '', phoneId: '' });
+  };
+
+  const handleDisconnectWhatsApp = () => {
+    disconnectIntegration.mutate('whatsapp');
+  };
+
+  const handleCreateTag = () => {
+    const name = newTagName.trim();
+    if (!name) return;
+    createTag.mutate({ name, color: newTagColor });
+    setNewTagName('');
+    setNewTagColor(TAG_COLORS[0]);
+  };
+
+  const handleSaveEditTag = () => {
+    if (!editingTag) return;
+    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color });
+    setEditingTag(null);
   };
 
   return (
@@ -93,10 +165,13 @@ export default function ConfiguracoesPage() {
               <Building2 size={14} /> Empresa
             </TabsTrigger>
             <TabsTrigger value="usuarios" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
-              <Users size={14} /> Usuários & Permissões
+              <Users size={14} /> Usuários
             </TabsTrigger>
-            <TabsTrigger value="canais" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
-              <Wifi size={14} /> Canais
+            <TabsTrigger value="integracoes" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
+              <Wifi size={14} /> Integrações
+            </TabsTrigger>
+            <TabsTrigger value="tags" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
+              <Tag size={14} /> Tags
             </TabsTrigger>
           </TabsList>
         </div>
@@ -106,7 +181,6 @@ export default function ConfiguracoesPage() {
           <TabsContent value="empresa" className="mt-0 space-y-6">
             <div className="rounded-xl border border-border bg-card card-shadow p-6">
               <h2 className="text-base font-semibold text-foreground mb-4">Dados da Empresa</h2>
-
               <div className="flex items-center gap-4 mb-6">
                 <div className="h-16 w-16 rounded-xl bg-muted flex items-center justify-center border-2 border-dashed border-border">
                   <ImageIcon size={24} className="text-muted-foreground" />
@@ -116,12 +190,8 @@ export default function ConfiguracoesPage() {
                   <p className="text-[11px] text-muted-foreground mt-1">PNG, JPG até 2MB</p>
                 </div>
               </div>
-
               {loadingCompany ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
+                <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
@@ -134,7 +204,6 @@ export default function ConfiguracoesPage() {
                   </div>
                 </div>
               )}
-
               <Button className="mt-5 gap-1.5" size="sm" onClick={handleSaveCompany} disabled={updateCompany.isPending || !permissions.canManageUsers}>
                 <Save size={14} /> {updateCompany.isPending ? 'Salvando...' : 'Salvar'}
               </Button>
@@ -146,7 +215,7 @@ export default function ConfiguracoesPage() {
             {!permissions.canManageUsers && (
               <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
                 <Lock size={14} className="text-warning shrink-0" />
-                <p className="text-xs text-warning">Você não tem permissão para gerenciar usuários. Entre em contato com um administrador.</p>
+                <p className="text-xs text-warning">Você não tem permissão para gerenciar usuários.</p>
               </div>
             )}
             <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
@@ -198,7 +267,6 @@ export default function ConfiguracoesPage() {
               </table>
             </div>
 
-            {/* Role descriptions */}
             <div className="rounded-xl border border-border bg-card card-shadow p-5">
               <h3 className="text-sm font-semibold text-foreground mb-3">Descrição dos cargos</h3>
               <div className="space-y-3">
@@ -217,52 +285,59 @@ export default function ConfiguracoesPage() {
             </div>
           </TabsContent>
 
-          {/* ===== CANAIS ===== */}
-          <TabsContent value="canais" className="mt-0 space-y-6">
-            <div className="rounded-xl border border-border bg-card card-shadow p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5 text-success" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">WhatsApp Business API</h3>
-                    <p className="text-xs text-muted-foreground">Conecte seu número para enviar e receber mensagens</p>
-                  </div>
-                </div>
-                <Badge variant="outline" className={`text-xs ${whatsappConnected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
-                  {whatsappConnected ? 'Conectado' : 'Desconectado'}
-                </Badge>
-              </div>
-
-              {whatsappConnected ? (
-                <div className="space-y-3">
-                  <div className="rounded-lg bg-secondary/50 p-3">
-                    <p className="text-xs text-muted-foreground mb-1">Número conectado</p>
-                    <p className="text-sm font-medium text-foreground">+55 (11) 99999-0000</p>
-                  </div>
-                  <div className="rounded-lg bg-secondary/50 p-3">
-                    <p className="text-xs text-muted-foreground mb-1">Webhook URL</p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs text-foreground bg-muted rounded px-2 py-1.5 truncate">{webhookUrl}</code>
-                      <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={handleCopy}>
-                        {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-                      </Button>
+          {/* ===== INTEGRAÇÕES ===== */}
+          <TabsContent value="integracoes" className="mt-0 space-y-6">
+            {loadingIntegrations ? (
+              <Skeleton className="h-40 w-full rounded-xl" />
+            ) : (
+              <div className="rounded-xl border border-border bg-card card-shadow p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 text-success" fill="currentColor">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">WhatsApp Business API</h3>
+                      <p className="text-xs text-muted-foreground">Conecte seu número para enviar e receber mensagens</p>
                     </div>
                   </div>
-                  <Button variant="destructive" size="sm" className="text-xs" onClick={() => setWhatsappConnected(false)}>Desconectar</Button>
+                  <Badge variant="outline" className={`text-xs ${isWhatsappConnected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
+                    {isWhatsappConnected ? 'Conectado' : 'Desconectado'}
+                  </Badge>
                 </div>
-              ) : (
-                <Button size="sm" className="gap-1.5" onClick={() => setWhatsappOpen(true)}>
-                  <Wifi size={14} /> Conectar WhatsApp
-                </Button>
-              )}
-            </div>
 
+                {isWhatsappConnected ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg bg-secondary/50 p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Provedor</p>
+                      <p className="text-sm font-medium text-foreground capitalize">{whatsappIntegration?.provider}</p>
+                    </div>
+                    <div className="rounded-lg bg-secondary/50 p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Webhook URL</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs text-foreground bg-muted rounded px-2 py-1.5 truncate">{webhookUrl}</code>
+                        <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={handleCopy}>
+                          {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                        </Button>
+                      </div>
+                    </div>
+                    <Button variant="destructive" size="sm" className="text-xs" onClick={handleDisconnectWhatsApp} disabled={disconnectIntegration.isPending}>
+                      {disconnectIntegration.isPending ? 'Desconectando...' : 'Desconectar'}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" className="gap-1.5" onClick={() => setWhatsappOpen(true)} disabled={!permissions.isAdmin}>
+                    <Wifi size={14} /> Conectar WhatsApp
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Future channels */}
             {['Instagram Direct', 'Webchat Widget'].map(name => (
-              <div key={name} className="rounded-xl border border-border bg-card card-shadow p-5 flex items-center justify-between">
+              <div key={name} className="rounded-xl border border-border bg-card card-shadow p-5 flex items-center justify-between opacity-60">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">{name}</h3>
                   <p className="text-xs text-muted-foreground">Em breve</p>
@@ -270,6 +345,98 @@ export default function ConfiguracoesPage() {
                 <Badge variant="outline" className="text-xs">Em breve</Badge>
               </div>
             ))}
+          </TabsContent>
+
+          {/* ===== TAGS ===== */}
+          <TabsContent value="tags" className="mt-0 space-y-6">
+            <div className="rounded-xl border border-border bg-card card-shadow p-5">
+              <h2 className="text-base font-semibold text-foreground mb-4">Tags da Empresa</h2>
+              <p className="text-xs text-muted-foreground mb-4">Tags centralizadas usadas em contatos. Apenas admins podem gerenciar.</p>
+
+              {/* Create new tag */}
+              {permissions.isAdmin && (
+                <div className="flex items-end gap-2 mb-5">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">Nova tag</Label>
+                    <Input
+                      value={newTagName}
+                      onChange={e => setNewTagName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleCreateTag()}
+                      placeholder="Nome da tag..."
+                      className="mt-1 bg-secondary border-0"
+                    />
+                  </div>
+                  <div className="flex gap-1 items-center">
+                    {TAG_COLORS.map(c => (
+                      <button
+                        key={c}
+                        className={`h-6 w-6 rounded-full border-2 transition-all ${newTagColor === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }}
+                        onClick={() => setNewTagColor(c)}
+                      />
+                    ))}
+                  </div>
+                  <Button size="sm" className="gap-1 h-9" onClick={handleCreateTag} disabled={createTag.isPending}>
+                    <Plus size={14} /> Criar
+                  </Button>
+                </div>
+              )}
+
+              <Separator className="mb-4" />
+
+              {/* Tags list */}
+              {loadingTags ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : !tags?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Nenhuma tag criada ainda.</p>
+              ) : (
+                <div className="space-y-2">
+                  {tags.map(tag => (
+                    <div key={tag.id} className="flex items-center gap-3 rounded-lg bg-secondary/50 px-3 py-2">
+                      <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      {editingTag?.id === tag.id ? (
+                        <>
+                          <Input
+                            value={editingTag.name}
+                            onChange={e => setEditingTag({ ...editingTag, name: e.target.value })}
+                            className="h-7 text-sm flex-1 bg-background"
+                          />
+                          <div className="flex gap-0.5">
+                            {TAG_COLORS.map(c => (
+                              <button
+                                key={c}
+                                className={`h-5 w-5 rounded-full border-2 transition-all ${editingTag.color === c ? 'border-foreground' : 'border-transparent'}`}
+                                style={{ backgroundColor: c }}
+                                onClick={() => setEditingTag({ ...editingTag, color: c })}
+                              />
+                            ))}
+                          </div>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleSaveEditTag}>
+                            <Check size={14} />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-sm text-foreground flex-1">{tag.name}</span>
+                          {permissions.isAdmin && (
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color })}>
+                                <Pencil size={13} />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>
+                                <Trash2 size={13} />
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </TabsContent>
         </div>
       </Tabs>
@@ -306,7 +473,9 @@ export default function ConfiguracoesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
-            <Button onClick={handleInvite}>Enviar Convite</Button>
+            <Button onClick={handleInvite} disabled={inviting}>
+              {inviting ? 'Enviando...' : 'Enviar Convite'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -347,7 +516,9 @@ export default function ConfiguracoesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWhatsappOpen(false)}>Cancelar</Button>
-            <Button onClick={() => { setWhatsappConnected(true); setWhatsappOpen(false); }}>Conectar</Button>
+            <Button onClick={handleConnectWhatsApp} disabled={upsertIntegration.isPending}>
+              {upsertIntegration.isPending ? 'Conectando...' : 'Conectar'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

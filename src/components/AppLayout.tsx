@@ -155,10 +155,33 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </Button>
 
             {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell size={18} />
-              {(stats?.overdueTasks ?? 0) > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative">
+                  <Bell size={18} />
+                  {(stats?.overdueTasks ?? 0) > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuLabel className="text-xs font-semibold">Notificações</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {(stats?.overdueTasks ?? 0) > 0 ? (
+                  <DropdownMenuItem onClick={() => navigate('/tarefas')} className="flex flex-col items-start gap-0.5 py-2.5">
+                    <span className="text-sm font-medium text-destructive">🔴 {stats?.overdueTasks} tarefa(s) atrasada(s)</span>
+                    <span className="text-xs text-muted-foreground">Clique para ver suas tarefas</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {(stats?.openConversations ?? 0) > 0 ? (
+                  <DropdownMenuItem onClick={() => navigate('/inbox')} className="flex flex-col items-start gap-0.5 py-2.5">
+                    <span className="text-sm font-medium">💬 {stats?.openConversations} conversa(s) aberta(s)</span>
+                    <span className="text-xs text-muted-foreground">Clique para ver o inbox</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {(stats?.overdueTasks ?? 0) === 0 && (stats?.openConversations ?? 0) === 0 && (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">Tudo em dia! 🎉</div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* User menu */}
             <DropdownMenu>

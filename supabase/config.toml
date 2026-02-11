@@ -2,3 +2,6 @@ project_id = "loamacrszlgxhaqvnkzw"
 
 [functions.incoming-message]
 verify_jwt = false
+
+[functions.invite-user]
+verify_jwt = false
