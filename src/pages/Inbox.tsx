@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ConversationList from '@/components/inbox/ConversationList';
 import ChatPanel from '@/components/inbox/ChatPanel';
 import ContactProfilePanel from '@/components/inbox/ContactProfilePanel';
 import {
-  useConversations,
+  useInfiniteConversations,
   useConversationDetail,
   useUnreadCounts,
   useMarkConversationRead,
@@ -14,18 +14,28 @@ import type { ConversationFilters } from '@/services/api';
 export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(true);
-  const [filters, setFilters] = useState<ConversationFilters>({});
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
 
-  const { data: conversations, isLoading: listLoading } = useConversations(filters);
-  const effectiveSelectedId = selectedId ?? conversations?.[0]?.id ?? null;
+  const {
+    data: infiniteData,
+    isLoading: listLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteConversations(filters);
+
+  const conversations = useMemo(
+    () => infiniteData?.pages.flat() ?? [],
+    [infiniteData],
+  );
+
+  const effectiveSelectedId = selectedId ?? conversations[0]?.id ?? null;
   const { data: detail, isLoading: detailLoading } = useConversationDetail(effectiveSelectedId);
-  const { data: unreadCounts } = useUnreadCounts(conversations ?? []);
+  const { data: unreadCounts } = useUnreadCounts(conversations);
   const markRead = useMarkConversationRead();
 
-  // Realtime subscription
   useInboxRealtime(effectiveSelectedId);
 
-  // Mark conversation as read when selected
   useEffect(() => {
     if (effectiveSelectedId) {
       markRead.mutate(effectiveSelectedId);
@@ -39,13 +49,16 @@ export default function InboxPage() {
   return (
     <div className="flex h-[calc(100vh-7rem)] gap-0 -mt-2 rounded-xl border border-border bg-card card-shadow overflow-hidden">
       <ConversationList
-        conversations={conversations ?? []}
+        conversations={conversations}
         loading={listLoading}
         selectedId={effectiveSelectedId}
         onSelect={setSelectedId}
         filters={filters}
         onFilterChange={handleFilterChange}
         unreadCounts={unreadCounts ?? {}}
+        hasMore={!!hasNextPage}
+        onLoadMore={() => fetchNextPage()}
+        loadingMore={isFetchingNextPage}
       />
 
       <ChatPanel

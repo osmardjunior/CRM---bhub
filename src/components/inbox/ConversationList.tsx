@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, MessageSquare } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { Search, MessageSquare, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -32,6 +32,9 @@ interface Props {
   filters: ConversationFilters;
   onFilterChange: (filters: Partial<ConversationFilters>) => void;
   unreadCounts: Record<string, number>;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export default function ConversationList({
@@ -42,6 +45,9 @@ export default function ConversationList({
   filters,
   onFilterChange,
   unreadCounts,
+  hasMore,
+  onLoadMore,
+  loadingMore,
 }: Props) {
   const [search, setSearch] = useState('');
 
@@ -106,8 +112,16 @@ export default function ConversationList({
         </Select>
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex-1 overflow-y-auto"
+        onScroll={(e) => {
+          if (!hasMore || !onLoadMore || loadingMore) return;
+          const el = e.currentTarget;
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 100) {
+            onLoadMore();
+          }
+        }}
+      >
         {loading ? (
           <ListSkeleton rows={6} />
         ) : filtered.length === 0 ? (
@@ -117,48 +131,55 @@ export default function ConversationList({
             description="Não há conversas com esse filtro."
           />
         ) : (
-          filtered.map((conv) => {
-            const isSelected = conv.id === selectedId;
-            const unread = unreadCounts[conv.id] ?? 0;
-            const timeAgo = conv.last_message_at
-              ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
-              : '';
-            return (
-              <button
-                key={conv.id}
-                onClick={() => onSelect(conv.id)}
-                className={`flex w-full items-start gap-3 border-b border-border p-3 text-left transition-colors hover:bg-accent/50 ${
-                  isSelected ? 'bg-accent' : ''
-                }`}
-              >
-                <Avatar className="h-9 w-9 shrink-0 mt-0.5">
-                  <AvatarFallback className="text-xs">{conv.contact.name[0]}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className={`text-sm truncate ${unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground'}`}>
-                      {conv.contact.name}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground ml-2 shrink-0">{timeAgo}</span>
+          <>
+            {filtered.map((conv) => {
+              const isSelected = conv.id === selectedId;
+              const unread = unreadCounts[conv.id] ?? 0;
+              const timeAgo = conv.last_message_at
+                ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
+                : '';
+              return (
+                <button
+                  key={conv.id}
+                  onClick={() => onSelect(conv.id)}
+                  className={`flex w-full items-start gap-3 border-b border-border p-3 text-left transition-colors hover:bg-accent/50 ${
+                    isSelected ? 'bg-accent' : ''
+                  }`}
+                >
+                  <Avatar className="h-9 w-9 shrink-0 mt-0.5">
+                    <AvatarFallback className="text-xs">{conv.contact.name[0]}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-sm truncate ${unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground'}`}>
+                        {conv.contact.name}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground ml-2 shrink-0">{timeAgo}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                      {conv.contact.phone ?? conv.contact.email ?? ''}
+                    </p>
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      <ChannelBadge channel={conv.channel} />
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        {conv.assigned_user?.name ?? 'Não atribuído'}
+                      </span>
+                      {unread > 0 && (
+                        <Badge className="ml-auto bg-primary text-primary-foreground text-[10px] px-1.5 py-0 min-w-[18px] justify-center">
+                          {unread}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground truncate">
-                    {conv.contact.phone ?? conv.contact.email ?? ''}
-                  </p>
-                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    <ChannelBadge channel={conv.channel} />
-                    <span className="text-[10px] text-muted-foreground truncate">
-                      {conv.assigned_user?.name ?? 'Não atribuído'}
-                    </span>
-                    {unread > 0 && (
-                      <Badge className="ml-auto bg-primary text-primary-foreground text-[10px] px-1.5 py-0 min-w-[18px] justify-center">
-                        {unread}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </button>
-            );
-          })
+                </button>
+              );
+            })}
+            {loadingMore && (
+              <div className="flex justify-center py-3">
+                <Loader2 size={16} className="animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

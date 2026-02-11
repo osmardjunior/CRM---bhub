@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Users, Search, Plus } from 'lucide-react';
+import { Users, Search, Plus, Download, Upload } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,13 +11,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import EmptyState from '@/components/shared/EmptyState';
 import TagChips from '@/components/shared/TagChips';
 import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import ContactDetailPanel from '@/components/contatos/ContactDetailPanel';
 import NewContactModal from '@/components/contatos/NewContactModal';
+import ImportContactsModal from '@/components/contatos/ImportContactsModal';
 import { useContacts } from '@/hooks/useContacts';
 import { useAuth } from '@/contexts/AuthContext';
+import { generateCSV, downloadCSV } from '@/lib/csv';
 
 const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
 
@@ -27,33 +37,46 @@ export default function ContatosPage() {
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [page, setPage] = useState(0);
   const { companyId } = useAuth();
 
-  const { data: contacts, isLoading } = useContacts();
+  const filters = useMemo(() => ({
+    search: search || undefined,
+    tag: tagFilter,
+    source: sourceFilter,
+    page,
+    limit: 25,
+  }), [search, tagFilter, sourceFilter, page]);
+
+  const { data: result, isLoading } = useContacts(filters);
+
+  const contacts = result?.data ?? [];
+  const totalPages = result?.totalPages ?? 1;
 
   const allTags = useMemo(() => {
-    if (!contacts) return [];
     return Array.from(new Set(contacts.flatMap((c) => (c.tags as string[]) || [])));
   }, [contacts]);
 
-  const filtered = useMemo(() => {
-    if (!contacts) return [];
-    return contacts.filter((c) => {
-      const matchesSearch =
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        (c.phone || '').includes(search);
-      const tags = (c.tags as string[]) || [];
-      const matchesTag = tagFilter === 'all' || tags.includes(tagFilter);
-      const matchesSource = sourceFilter === 'all' || c.source === sourceFilter;
-      return matchesSearch && matchesTag && matchesSource;
-    });
-  }, [contacts, search, tagFilter, sourceFilter]);
+  const selectedContact = contacts.find((c) => c.id === selectedId) || null;
 
-  const selectedContact = contacts?.find((c) => c.id === selectedId) || null;
+  const handleExport = () => {
+    if (!contacts.length) return;
+    const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Tags', 'Último contato'];
+    const rows = contacts.map((c) => ({
+      Nome: c.name,
+      Telefone: c.phone ?? '',
+      Email: c.email ?? '',
+      Origem: c.source ?? '',
+      Tags: ((c.tags as string[]) || []).join('; '),
+      'Último contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
+    }));
+    const csv = generateCSV(headers, rows);
+    downloadCSV('contatos.csv', csv);
+  };
 
   return (
     <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
-      {/* Left: toolbar + table */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-3">
@@ -62,12 +85,12 @@ export default function ContatosPage() {
             <Input
               placeholder="Buscar por nome ou telefone..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               className="pl-9 h-9 bg-secondary border-0 text-sm"
             />
           </div>
 
-          <Select value={tagFilter} onValueChange={setTagFilter}>
+          <Select value={tagFilter} onValueChange={(v) => { setTagFilter(v); setPage(0); }}>
             <SelectTrigger className="w-[140px] h-9 text-sm bg-secondary border-0">
               <SelectValue placeholder="Tag" />
             </SelectTrigger>
@@ -79,7 +102,7 @@ export default function ContatosPage() {
             </SelectContent>
           </Select>
 
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+          <Select value={sourceFilter} onValueChange={(v) => { setSourceFilter(v); setPage(0); }}>
             <SelectTrigger className="w-[150px] h-9 text-sm bg-secondary border-0">
               <SelectValue placeholder="Origem" />
             </SelectTrigger>
@@ -91,17 +114,24 @@ export default function ContatosPage() {
             </SelectContent>
           </Select>
 
-          <Button size="sm" className="gap-1.5 ml-auto h-9" onClick={() => setModalOpen(true)}>
-            <Plus size={15} />
-            Novo contato
-          </Button>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => setImportOpen(true)}>
+              <Upload size={14} /> Importar
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleExport} disabled={contacts.length === 0}>
+              <Download size={14} /> Exportar
+            </Button>
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => setModalOpen(true)}>
+              <Plus size={15} /> Novo contato
+            </Button>
+          </div>
         </div>
 
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
             <TableSkeleton rows={6} cols={5} />
-          ) : filtered.length === 0 ? (
+          ) : contacts.length === 0 ? (
             <EmptyState
               icon={Users}
               title="Nenhum contato encontrado"
@@ -120,7 +150,7 @@ export default function ContatosPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((contact) => {
+                {contacts.map((contact) => {
                   const tags = (contact.tags as string[]) || [];
                   const responsible = (contact as any).responsible;
                   return (
@@ -164,6 +194,43 @@ export default function ContatosPage() {
             </table>
           )}
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="border-t border-border bg-card px-4 py-2">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    className={page === 0 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                  const start = Math.max(0, Math.min(page - 2, totalPages - 5));
+                  const pageNum = start + i;
+                  return (
+                    <PaginationItem key={pageNum}>
+                      <PaginationLink
+                        isActive={pageNum === page}
+                        onClick={() => setPage(pageNum)}
+                        className="cursor-pointer"
+                      >
+                        {pageNum + 1}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                })}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    className={page >= totalPages - 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
+        )}
       </div>
 
       {/* Right: Detail panel */}
@@ -177,8 +244,8 @@ export default function ContatosPage() {
         </div>
       )}
 
-      {/* New contact modal */}
       <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} companyId={companyId} />
+      <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

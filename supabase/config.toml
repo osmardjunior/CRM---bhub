@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.invite-user]
 verify_jwt = false
+
+[functions.send-whatsapp]
+verify_jwt = false
+
+[functions.send-satisfaction-survey]
+verify_jwt = false

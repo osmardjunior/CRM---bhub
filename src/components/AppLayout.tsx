@@ -22,6 +22,7 @@ import {
   LayoutDashboard,
   Wifi,
   Tag,
+  BarChart3,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +74,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { to: '/contatos', label: 'Contatos', icon: Users },
     { to: '/pipeline', label: 'Pipeline', icon: Kanban },
     { to: '/tarefas', label: 'Tarefas', icon: CheckSquare, badge: stats?.overdueTasks },
+    { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
     { to: '/integracoes', label: 'Integrações', icon: Wifi },
     { to: '/tags', label: 'Tags', icon: Tag },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
