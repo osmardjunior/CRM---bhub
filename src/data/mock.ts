@@ -1,6 +1,6 @@
 export type ConversationStatus = 'aberta' | 'pendente' | 'resolvida';
 export type ContactStatus = 'online' | 'ausente' | 'offline';
-export type PipelineStage = 'lead' | 'qualificado' | 'proposta' | 'fechado' | 'perdido';
+export type PipelineStage = 'novo_lead' | 'em_contato' | 'proposta' | 'fechamento' | 'ganho' | 'perdido';
 export type TaskPriority = 'alta' | 'media' | 'baixa';
 export type TaskStatus = 'pendente' | 'em_progresso' | 'concluida';
 export type Channel = 'whatsapp' | 'instagram' | 'webchat';
@@ -60,6 +60,8 @@ export interface PipelineDeal {
   value: number;
   stage: PipelineStage;
   probability: number;
+  assignedTo: string;
+  notes: string;
   createdAt: string;
 }
 
@@ -152,12 +154,14 @@ export const contacts: Contact[] = [
 ];
 
 export const pipelineDeals: PipelineDeal[] = [
-  { id: '1', title: 'Plano Enterprise TechBR', contactName: 'Maria Lima', value: 24000, stage: 'proposta', probability: 70, createdAt: '2024-08-01' },
-  { id: '2', title: 'Licença StartupIO', contactName: 'André Santos', value: 4800, stage: 'lead', probability: 20, createdAt: '2024-09-15' },
-  { id: '3', title: 'Projeto DesignCo', contactName: 'Carla Ribeiro', value: 12000, stage: 'fechado', probability: 100, createdAt: '2024-07-10' },
-  { id: '4', title: 'Expansão CorpBrasil', contactName: 'João Pereira', value: 48000, stage: 'qualificado', probability: 45, createdAt: '2024-10-01' },
-  { id: '5', title: 'Migração LojaOnline', contactName: 'Fernanda Martins', value: 8000, stage: 'perdido', probability: 0, createdAt: '2024-06-20' },
-  { id: '6', title: 'Integração DevSolutions', contactName: 'Lucas Borges', value: 16000, stage: 'proposta', probability: 60, createdAt: '2024-11-01' },
+  { id: '1', title: 'Plano Enterprise TechBR', contactName: 'Maria Lima', value: 24000, stage: 'proposta', probability: 70, assignedTo: 'Ana Silva', notes: 'Aguardando aprovação do financeiro.', createdAt: '2024-08-01' },
+  { id: '2', title: 'Licença StartupIO', contactName: 'André Santos', value: 4800, stage: 'novo_lead', probability: 20, assignedTo: 'Carlos Rocha', notes: 'Lead captado via Google Ads.', createdAt: '2024-09-15' },
+  { id: '3', title: 'Projeto DesignCo', contactName: 'Carla Ribeiro', value: 12000, stage: 'ganho', probability: 100, assignedTo: 'Ana Silva', notes: 'Contrato assinado em janeiro.', createdAt: '2024-07-10' },
+  { id: '4', title: 'Expansão CorpBrasil', contactName: 'João Pereira', value: 48000, stage: 'em_contato', probability: 45, assignedTo: 'Felipe Moura', notes: 'Reunião agendada para próxima semana.', createdAt: '2024-10-01' },
+  { id: '5', title: 'Migração LojaOnline', contactName: 'Fernanda Martins', value: 8000, stage: 'perdido', probability: 0, assignedTo: 'Ana Silva', notes: 'Cliente optou por concorrente.', createdAt: '2024-06-20' },
+  { id: '6', title: 'Integração DevSolutions', contactName: 'Lucas Borges', value: 16000, stage: 'proposta', probability: 60, assignedTo: 'Carlos Rocha', notes: 'Proposta enviada, aguardando retorno.', createdAt: '2024-11-01' },
+  { id: '7', title: 'Suporte Premium TechBR', contactName: 'Maria Lima', value: 6000, stage: 'fechamento', probability: 90, assignedTo: 'Ana Silva', notes: 'Negociação final de valores.', createdAt: '2025-01-05' },
+  { id: '8', title: 'Consultoria StartupIO', contactName: 'André Santos', value: 3200, stage: 'novo_lead', probability: 15, assignedTo: 'Carlos Rocha', notes: '', createdAt: '2025-01-20' },
 ];
 
 export const tasks: Task[] = [
