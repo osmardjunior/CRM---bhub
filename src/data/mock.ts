@@ -3,17 +3,38 @@ export type ContactStatus = 'online' | 'ausente' | 'offline';
 export type PipelineStage = 'lead' | 'qualificado' | 'proposta' | 'fechado' | 'perdido';
 export type TaskPriority = 'alta' | 'media' | 'baixa';
 export type TaskStatus = 'pendente' | 'em_progresso' | 'concluida';
+export type Channel = 'whatsapp' | 'instagram' | 'webchat';
 
 export interface Conversation {
   id: string;
   contactName: string;
   contactAvatar: string;
+  contactPhone: string;
+  contactEmail: string;
+  contactTags: string[];
   lastMessage: string;
   timestamp: string;
   unread: number;
   status: ConversationStatus;
-  channel: 'whatsapp' | 'email' | 'chat';
-  assignedTo: string;
+  channel: Channel;
+  assignedTo: string | null;
+}
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  content: string;
+  timestamp: string;
+  direction: 'incoming' | 'outgoing';
+  senderName: string;
+}
+
+export interface TimelineEvent {
+  id: string;
+  type: 'message' | 'note' | 'status' | 'assign' | 'tag';
+  description: string;
+  timestamp: string;
+  user?: string;
 }
 
 export interface Contact {
@@ -58,14 +79,62 @@ const avatars = [
   'https://api.dicebear.com/7.x/initials/svg?seed=LB',
 ];
 
-export const conversations: Conversation[] = [
-  { id: '1', contactName: 'Maria Lima', contactAvatar: avatars[0], lastMessage: 'Olá, preciso de ajuda com meu pedido #4521', timestamp: '2 min', unread: 3, status: 'aberta', channel: 'whatsapp', assignedTo: 'Ana Silva' },
-  { id: '2', contactName: 'André Santos', contactAvatar: avatars[1], lastMessage: 'Vocês têm plano empresarial?', timestamp: '15 min', unread: 1, status: 'aberta', channel: 'chat', assignedTo: 'Carlos Rocha' },
-  { id: '3', contactName: 'Carla Ribeiro', contactAvatar: avatars[2], lastMessage: 'Obrigada pelo suporte!', timestamp: '1h', unread: 0, status: 'resolvida', channel: 'email', assignedTo: 'Ana Silva' },
-  { id: '4', contactName: 'João Pereira', contactAvatar: avatars[3], lastMessage: 'Ainda aguardando retorno sobre a proposta', timestamp: '3h', unread: 2, status: 'pendente', channel: 'whatsapp', assignedTo: 'Felipe Moura' },
-  { id: '5', contactName: 'Fernanda Martins', contactAvatar: avatars[4], lastMessage: 'Quero cancelar minha assinatura', timestamp: '5h', unread: 0, status: 'aberta', channel: 'chat', assignedTo: 'Ana Silva' },
-  { id: '6', contactName: 'Lucas Borges', contactAvatar: avatars[5], lastMessage: 'Como faço para integrar com meu sistema?', timestamp: '1d', unread: 0, status: 'pendente', channel: 'email', assignedTo: 'Carlos Rocha' },
+export const agents = ['Ana Silva', 'Carlos Rocha', 'Felipe Moura', 'Juliana Costa'];
+
+export const quickReplies = [
+  'Olá! Como posso ajudar você hoje?',
+  'Agradecemos o seu contato! Vou verificar e retorno em instantes.',
+  'Pode me informar o número do seu pedido, por favor?',
+  'Estou transferindo você para o setor responsável.',
+  'Seu problema foi resolvido? Posso ajudar em mais alguma coisa?',
+  'Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.',
+  'Vou escalar esse caso para a equipe técnica. Em breve retornamos.',
+  'Obrigado pela preferência! Tenha um ótimo dia! 😊',
 ];
+
+export const conversations: Conversation[] = [
+  { id: '1', contactName: 'Maria Lima', contactAvatar: avatars[0], contactPhone: '(11) 99999-1234', contactEmail: 'maria@empresa.com', contactTags: ['VIP', 'Enterprise'], lastMessage: 'Olá, preciso de ajuda com meu pedido #4521', timestamp: '2 min', unread: 3, status: 'aberta', channel: 'whatsapp', assignedTo: 'Ana Silva' },
+  { id: '2', contactName: 'André Santos', contactAvatar: avatars[1], contactPhone: '(21) 98888-5678', contactEmail: 'andre@startup.io', contactTags: ['Lead'], lastMessage: 'Vocês têm plano empresarial?', timestamp: '15 min', unread: 1, status: 'aberta', channel: 'webchat', assignedTo: null },
+  { id: '3', contactName: 'Carla Ribeiro', contactAvatar: avatars[2], contactPhone: '(31) 97777-9012', contactEmail: 'carla@design.com', contactTags: ['Cliente'], lastMessage: 'Obrigada pelo suporte!', timestamp: '1h', unread: 0, status: 'resolvida', channel: 'instagram', assignedTo: 'Ana Silva' },
+  { id: '4', contactName: 'João Pereira', contactAvatar: avatars[3], contactPhone: '(41) 96666-3456', contactEmail: 'joao@corp.com.br', contactTags: ['Enterprise', 'Prioritário'], lastMessage: 'Ainda aguardando retorno sobre a proposta', timestamp: '3h', unread: 2, status: 'pendente', channel: 'whatsapp', assignedTo: 'Felipe Moura' },
+  { id: '5', contactName: 'Fernanda Martins', contactAvatar: avatars[4], contactPhone: '(51) 95555-7890', contactEmail: 'fernanda@loja.com', contactTags: ['Cliente'], lastMessage: 'Quero cancelar minha assinatura', timestamp: '5h', unread: 0, status: 'aberta', channel: 'webchat', assignedTo: 'Ana Silva' },
+  { id: '6', contactName: 'Lucas Borges', contactAvatar: avatars[5], contactPhone: '(61) 94444-2345', contactEmail: 'lucas@dev.com', contactTags: ['Lead', 'Desenvolvedor'], lastMessage: 'Como faço para integrar com meu sistema?', timestamp: '1d', unread: 0, status: 'pendente', channel: 'instagram', assignedTo: null },
+];
+
+export const messages: Message[] = [
+  { id: 'm1', conversationId: '1', content: 'Olá, preciso de ajuda com meu pedido #4521', timestamp: '10:30', direction: 'incoming', senderName: 'Maria Lima' },
+  { id: 'm2', conversationId: '1', content: 'Olá Maria! Claro, vou verificar o status do seu pedido agora mesmo.', timestamp: '10:31', direction: 'outgoing', senderName: 'Ana Silva' },
+  { id: 'm3', conversationId: '1', content: 'O pedido #4521 está em processamento e deve ser enviado até amanhã.', timestamp: '10:32', direction: 'outgoing', senderName: 'Ana Silva' },
+  { id: 'm4', conversationId: '1', content: 'Ah que bom! E vocês enviam por qual transportadora?', timestamp: '10:35', direction: 'incoming', senderName: 'Maria Lima' },
+  { id: 'm5', conversationId: '1', content: 'Normalmente usamos a Jadlog ou Correios, dependendo da região. Vou confirmar qual será usada no seu caso.', timestamp: '10:36', direction: 'outgoing', senderName: 'Ana Silva' },
+  { id: 'm6', conversationId: '1', content: 'Perfeito, obrigada! Outra dúvida: consigo alterar o endereço de entrega ainda?', timestamp: '10:40', direction: 'incoming', senderName: 'Maria Lima' },
+  { id: 'm7', conversationId: '2', content: 'Boa tarde! Vocês têm plano empresarial?', timestamp: '09:15', direction: 'incoming', senderName: 'André Santos' },
+  { id: 'm8', conversationId: '2', content: 'Estou buscando uma solução para minha equipe de 15 pessoas.', timestamp: '09:16', direction: 'incoming', senderName: 'André Santos' },
+  { id: 'm9', conversationId: '4', content: 'Bom dia, gostaria de saber se houve avanço na proposta que enviamos.', timestamp: '07:00', direction: 'incoming', senderName: 'João Pereira' },
+  { id: 'm10', conversationId: '4', content: 'Precisamos de uma resposta até sexta-feira para fecharmos com vocês.', timestamp: '07:02', direction: 'incoming', senderName: 'João Pereira' },
+  { id: 'm11', conversationId: '5', content: 'Olá, gostaria de cancelar minha assinatura do plano Pro.', timestamp: '06:00', direction: 'incoming', senderName: 'Fernanda Martins' },
+  { id: 'm12', conversationId: '5', content: 'Oi Fernanda, sentimos muito em saber disso. Posso saber o motivo?', timestamp: '06:15', direction: 'outgoing', senderName: 'Ana Silva' },
+];
+
+export const timelineEvents: Record<string, TimelineEvent[]> = {
+  '1': [
+    { id: 't1', type: 'assign', description: 'Conversa atribuída a Ana Silva', timestamp: '10:28', user: 'Sistema' },
+    { id: 't2', type: 'message', description: 'Primeira mensagem recebida via WhatsApp', timestamp: '10:30', user: 'Maria Lima' },
+    { id: 't3', type: 'tag', description: 'Tag "VIP" adicionada', timestamp: '10:31', user: 'Ana Silva' },
+    { id: 't4', type: 'note', description: 'Cliente solicitou informação sobre pedido #4521', timestamp: '10:32', user: 'Ana Silva' },
+    { id: 't5', type: 'status', description: 'Status alterado para "Aberta"', timestamp: '10:28', user: 'Sistema' },
+  ],
+  '2': [
+    { id: 't6', type: 'message', description: 'Nova conversa iniciada via Webchat', timestamp: '09:15', user: 'André Santos' },
+    { id: 't7', type: 'status', description: 'Aguardando atribuição de agente', timestamp: '09:15', user: 'Sistema' },
+  ],
+  '4': [
+    { id: 't8', type: 'assign', description: 'Conversa atribuída a Felipe Moura', timestamp: '06:50', user: 'Sistema' },
+    { id: 't9', type: 'message', description: 'Mensagem recebida via WhatsApp', timestamp: '07:00', user: 'João Pereira' },
+    { id: 't10', type: 'note', description: 'Cliente aguarda resposta sobre proposta comercial', timestamp: '07:05', user: 'Felipe Moura' },
+    { id: 't11', type: 'status', description: 'Status alterado para "Pendente"', timestamp: '07:05', user: 'Felipe Moura' },
+  ],
+};
 
 export const contacts: Contact[] = [
   { id: '1', name: 'Maria Lima', email: 'maria@empresa.com', phone: '(11) 99999-1234', company: 'TechBR Ltda', status: 'online', avatar: avatars[0], tags: ['VIP', 'Enterprise'], createdAt: '2024-01-15' },
