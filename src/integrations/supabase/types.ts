@@ -20,18 +20,21 @@ export type Database = {
           id: string
           name: string
           plan: string
+          updated_at: string
         }
         Insert: {
           created_at?: string
           id?: string
           name: string
           plan?: string
+          updated_at?: string
         }
         Update: {
           created_at?: string
           id?: string
           name?: string
           plan?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -48,6 +51,7 @@ export type Database = {
           responsible_user_id: string | null
           source: string | null
           tags: Json | null
+          updated_at: string
         }
         Insert: {
           company_id: string
@@ -61,6 +65,7 @@ export type Database = {
           responsible_user_id?: string | null
           source?: string | null
           tags?: Json | null
+          updated_at?: string
         }
         Update: {
           company_id?: string
@@ -74,6 +79,7 @@ export type Database = {
           responsible_user_id?: string | null
           source?: string | null
           tags?: Json | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -102,6 +108,7 @@ export type Database = {
           id: string
           last_message_at: string | null
           status: Database["public"]["Enums"]["conversation_status"]
+          updated_at: string
         }
         Insert: {
           assigned_user_id?: string | null
@@ -112,6 +119,7 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
+          updated_at?: string
         }
         Update: {
           assigned_user_id?: string | null
@@ -122,6 +130,7 @@ export type Database = {
           id?: string
           last_message_at?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
+          updated_at?: string
         }
         Relationships: [
           {
@@ -214,6 +223,7 @@ export type Database = {
           id: string
           name: string
           status: string
+          updated_at: string
         }
         Insert: {
           avatar_url?: string | null
@@ -223,6 +233,7 @@ export type Database = {
           id: string
           name: string
           status?: string
+          updated_at?: string
         }
         Update: {
           avatar_url?: string | null
@@ -232,6 +243,7 @@ export type Database = {
           id?: string
           name?: string
           status?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -266,6 +278,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_company_id: { Args: never; Returns: string }
       get_user_company_id: { Args: never; Returns: string }
       has_role: {
         Args: {
