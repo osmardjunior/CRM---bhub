@@ -68,11 +68,25 @@ export interface ConversationFilters {
   status?: Conversation['status'];
   channel?: Conversation['channel'];
   search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  totalPages: number;
 }
 
 export async function listConversations(
   filters?: ConversationFilters,
 ): Promise<ConversationWithRelations[]> {
+  const limit = filters?.limit ?? 20;
+  const page = filters?.page ?? 0;
+  const from = page * limit;
+  const to = from + limit - 1;
+
   let query = supabase
     .from('conversations')
     .select(`
@@ -80,7 +94,8 @@ export async function listConversations(
       contact:contacts!conversations_contact_id_fkey(*),
       assigned_user:profiles!conversations_assigned_user_id_fkey(*)
     `)
-    .order('last_message_at', { ascending: false });
+    .order('last_message_at', { ascending: false })
+    .range(from, to);
 
   if (filters?.status) {
     query = query.eq('status', filters.status);
@@ -94,7 +109,6 @@ export async function listConversations(
 
   let results = (data ?? []) as ConversationWithRelations[];
 
-  // Client-side search on contact name / phone
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     results = results.filter(
@@ -147,7 +161,6 @@ export async function sendMessage(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
 
-  // Get user's company_id
   const { data: profile } = await supabase
     .from('profiles')
     .select('company_id')
@@ -178,6 +191,24 @@ export async function sendMessage(
 
   if (convErr) console.error('Erro ao atualizar conversa:', convErr);
 
+  // Try to send via WhatsApp API (best-effort, don't block)
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ conversation_id: conversationId, body }),
+      }).catch((e) => console.error('WhatsApp send error:', e));
+    }
+  } catch (e) {
+    console.error('WhatsApp send error:', e);
+  }
+
   return msg;
 }
 
@@ -186,33 +217,37 @@ export interface ContactFilters {
   search?: string;
   tag?: string;
   source?: string;
+  page?: number;
+  limit?: number;
 }
 
 export async function listContacts(
   filters?: ContactFilters,
-): Promise<(Contact & { responsible: { id: string; name: string } | null })[]> {
+): Promise<PaginatedResult<Contact & { responsible: { id: string; name: string } | null }>> {
+  const limit = filters?.limit ?? 25;
+  const page = filters?.page ?? 0;
+  const from = page * limit;
+  const to = from + limit - 1;
+
   let query = supabase
     .from('contacts')
-    .select('*, responsible:profiles!contacts_responsible_user_id_fkey(id, name)')
+    .select('*, responsible:profiles!contacts_responsible_user_id_fkey(id, name)', { count: 'exact' })
     .order('created_at', { ascending: false });
 
   if (filters?.source && filters.source !== 'all') {
     query = query.eq('source', filters.source);
   }
 
-  const { data, error } = await query;
+  if (filters?.search) {
+    query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+  }
+
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
   if (error) handleError(error);
 
   let results = data ?? [];
-
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    results = results.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        (c.phone ?? '').includes(q),
-    );
-  }
 
   if (filters?.tag && filters.tag !== 'all') {
     results = results.filter((c) => {
@@ -221,7 +256,13 @@ export async function listContacts(
     });
   }
 
-  return results as any;
+  const total = count ?? 0;
+  return {
+    data: results as any,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
 }
 
 export async function createContact(
@@ -350,4 +391,22 @@ export async function closeConversation(
     .eq('id', conversationId);
 
   if (error) handleError(error);
+
+  // Trigger satisfaction survey (best-effort)
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-satisfaction-survey`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      }).catch((e) => console.error('Satisfaction survey error:', e));
+    }
+  } catch (e) {
+    console.error('Satisfaction survey error:', e);
+  }
 }

@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { MessageSquare, Users, Kanban, CheckSquare, DollarSign, AlertTriangle } from 'lucide-react';
+import { MessageSquare, Users, Kanban, CheckSquare, DollarSign, AlertTriangle, Star } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
+import { useNPSCard } from '@/hooks/useSatisfaction';
 const stageLabels: Record<string, string> = {
   novo_lead: 'Novo Lead',
   em_contato: 'Em Contato',
@@ -24,6 +24,7 @@ const COLORS = [
 
 export default function Dashboard() {
   const { companyId, user } = useAuth();
+  const { data: npsData } = useNPSCard();
 
   const { data: metrics } = useQuery({
     queryKey: ['dashboard-metrics', companyId],
@@ -56,12 +57,17 @@ export default function Dashboard() {
     enabled: !!companyId,
   });
 
+  const npsColor = npsData?.nps != null
+    ? npsData.nps >= 50 ? 'text-success' : npsData.nps >= 0 ? 'text-warning' : 'text-destructive'
+    : 'text-muted-foreground';
+
   const cards = [
     { label: 'Conversas Abertas', value: metrics?.openConversations ?? 0, icon: MessageSquare, color: 'text-primary' },
     { label: 'Total Contatos', value: metrics?.totalContacts ?? 0, icon: Users, color: 'text-info' },
     { label: 'Pipeline Total', value: `R$ ${(metrics?.totalPipeline ?? 0).toLocaleString('pt-BR')}`, icon: DollarSign, color: 'text-success' },
     { label: 'Tarefas Pendentes', value: metrics?.pendingTasks ?? 0, icon: CheckSquare, color: 'text-warning' },
     { label: 'Tarefas Atrasadas', value: metrics?.overdueTasks ?? 0, icon: AlertTriangle, color: 'text-destructive' },
+    { label: 'NPS (30d)', value: npsData?.nps != null ? npsData.label : '—', icon: Star, color: npsColor },
   ];
 
   return (
@@ -69,7 +75,7 @@ export default function Dashboard() {
       <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {cards.map(c => (
           <div key={c.label} className="rounded-xl border border-border bg-card card-shadow p-4">
             <div className="flex items-center gap-2 mb-2">

@@ -402,6 +402,74 @@ export type Database = {
           },
         ]
       }
+      satisfaction_surveys: {
+        Row: {
+          answered_at: string | null
+          assigned_user_id: string | null
+          comment: string | null
+          company_id: string
+          contact_id: string
+          conversation_id: string
+          created_at: string
+          id: string
+          score: number | null
+          sent_at: string
+        }
+        Insert: {
+          answered_at?: string | null
+          assigned_user_id?: string | null
+          comment?: string | null
+          company_id: string
+          contact_id: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          score?: number | null
+          sent_at?: string
+        }
+        Update: {
+          answered_at?: string | null
+          assigned_user_id?: string | null
+          comment?: string | null
+          company_id?: string
+          contact_id?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          score?: number | null
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "satisfaction_surveys_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "satisfaction_surveys_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "satisfaction_surveys_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "satisfaction_surveys_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tags: {
         Row: {
           color: string
@@ -532,6 +600,17 @@ export type Database = {
     }
     Functions: {
       current_company_id: { Args: never; Returns: string }
+      get_agent_metrics: {
+        Args: { date_from: string; date_to: string }
+        Returns: {
+          agent_id: string
+          agent_name: string
+          avg_first_response_seconds: number
+          avg_nps: number
+          avg_resolution_seconds: number
+          conversations_handled: number
+        }[]
+      }
       get_user_company_id: { Args: never; Returns: string }
       has_role: {
         Args: {

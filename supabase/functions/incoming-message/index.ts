@@ -203,6 +203,28 @@ serve(async (req) => {
       .update({ last_message_at: timestamp || new Date().toISOString() })
       .eq("id", conversation.id);
 
+    // ── Check for pending NPS survey response ──────────
+    const trimmedBody = messageBody.trim();
+    const npsScore = parseInt(trimmedBody, 10);
+    if (npsScore >= 1 && npsScore <= 5 && trimmedBody.length <= 2) {
+      const { data: pendingSurvey } = await supabase
+        .from("satisfaction_surveys")
+        .select("id")
+        .eq("contact_id", contact.id)
+        .eq("company_id", company_id)
+        .is("score", null)
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pendingSurvey) {
+        await supabase
+          .from("satisfaction_surveys")
+          .update({ score: npsScore, answered_at: new Date().toISOString() })
+          .eq("id", pendingSurvey.id);
+      }
+    }
+
     return new Response(
       JSON.stringify({ ok: true, conversation_id: conversation.id }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   listConversations,
@@ -18,6 +18,18 @@ export function useConversations(filters?: ConversationFilters) {
   });
 }
 
+export function useInfiniteConversations(filters?: Omit<ConversationFilters, 'page'>) {
+  return useInfiniteQuery({
+    queryKey: ['conversations-infinite', filters],
+    queryFn: ({ pageParam = 0 }) => listConversations({ ...filters, page: pageParam, limit: 20 }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length < 20) return undefined;
+      return allPages.length;
+    },
+  });
+}
+
 export function useConversationDetail(conversationId: string | null) {
   return useQuery({
     queryKey: ['conversation', conversationId],
@@ -34,6 +46,7 @@ export function useSendMessage() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
     },
     onError: (err: Error) => {
       toast.error(err.message);
@@ -51,7 +64,7 @@ export function useUnreadCounts(conversations: ConversationWithRelations[]) {
       const reads = await getConversationReads();
       return getUnreadCounts(conversationIds, reads);
     },
-    refetchInterval: 30_000, // fallback polling every 30s
+    refetchInterval: 30_000,
   });
 }
 

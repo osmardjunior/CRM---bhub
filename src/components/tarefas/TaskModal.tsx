@@ -205,7 +205,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>
-                  {(contacts ?? []).map((c) => (
+                  {((contacts as any)?.data ?? contacts ?? []).map((c: any) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
