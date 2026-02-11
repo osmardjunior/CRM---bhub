@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Users, Search, Plus } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,36 +11,45 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import TagChips from '@/components/shared/TagChips';
 import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import ContactDetailPanel from '@/components/contatos/ContactDetailPanel';
 import NewContactModal from '@/components/contatos/NewContactModal';
-import { contacts, origens } from '@/data/mock';
+import { useContacts } from '@/hooks/useContacts';
+import { useAuth } from '@/contexts/AuthContext';
 
-const allTags = Array.from(new Set(contacts.flatMap((c) => c.tags)));
+const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
 
 export default function ContatosPage() {
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState<string>('all');
-  const [origemFilter, setOrigemFilter] = useState<string>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [loading] = useState(false);
+  const { companyId } = useAuth();
+
+  const { data: contacts, isLoading } = useContacts();
+
+  const allTags = useMemo(() => {
+    if (!contacts) return [];
+    return Array.from(new Set(contacts.flatMap((c) => (c.tags as string[]) || [])));
+  }, [contacts]);
 
   const filtered = useMemo(() => {
+    if (!contacts) return [];
     return contacts.filter((c) => {
       const matchesSearch =
         c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.phone.includes(search);
-      const matchesTag = tagFilter === 'all' || c.tags.includes(tagFilter);
-      const matchesOrigem = origemFilter === 'all' || c.origem === origemFilter;
-      return matchesSearch && matchesTag && matchesOrigem;
+        (c.phone || '').includes(search);
+      const tags = (c.tags as string[]) || [];
+      const matchesTag = tagFilter === 'all' || tags.includes(tagFilter);
+      const matchesSource = sourceFilter === 'all' || c.source === sourceFilter;
+      return matchesSearch && matchesTag && matchesSource;
     });
-  }, [search, tagFilter, origemFilter]);
+  }, [contacts, search, tagFilter, sourceFilter]);
 
-  const selectedContact = contacts.find((c) => c.id === selectedId) || null;
+  const selectedContact = contacts?.find((c) => c.id === selectedId) || null;
 
   return (
     <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
@@ -70,13 +79,13 @@ export default function ContatosPage() {
             </SelectContent>
           </Select>
 
-          <Select value={origemFilter} onValueChange={setOrigemFilter}>
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
             <SelectTrigger className="w-[150px] h-9 text-sm bg-secondary border-0">
               <SelectValue placeholder="Origem" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas origens</SelectItem>
-              {origens.map((o) => (
+              {sourceOptions.map((o) => (
                 <SelectItem key={o} value={o}>{o}</SelectItem>
               ))}
             </SelectContent>
@@ -90,7 +99,7 @@ export default function ContatosPage() {
 
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
+          {isLoading ? (
             <TableSkeleton rows={6} cols={5} />
           ) : filtered.length === 0 ? (
             <EmptyState
@@ -111,41 +120,46 @@ export default function ContatosPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((contact) => (
-                  <tr
-                    key={contact.id}
-                    onClick={() => setSelectedId(contact.id)}
-                    className={`border-b border-border cursor-pointer transition-colors ${
-                      selectedId === contact.id
-                        ? 'bg-accent/50'
-                        : 'hover:bg-accent/30'
-                    }`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={contact.avatar} />
-                          <AvatarFallback className="text-xs">{contact.name[0]}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground text-sm truncate">{contact.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{contact.email}</p>
+                {filtered.map((contact) => {
+                  const tags = (contact.tags as string[]) || [];
+                  const responsible = (contact as any).responsible;
+                  return (
+                    <tr
+                      key={contact.id}
+                      onClick={() => setSelectedId(contact.id)}
+                      className={`border-b border-border cursor-pointer transition-colors ${
+                        selectedId === contact.id ? 'bg-accent/50' : 'hover:bg-accent/30'
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback className="text-xs">{contact.name[0]}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground text-sm truncate">{contact.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{contact.email}</p>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell text-sm">{contact.phone}</td>
-                    <td className="px-4 py-3 hidden lg:table-cell">
-                      <Badge variant="outline" className="text-xs font-normal">{contact.origem}</Badge>
-                    </td>
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <TagChips tags={contact.tags} size="sm" />
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs hidden xl:table-cell">
-                      {new Date(contact.ultimoContato).toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-sm hidden lg:table-cell">{contact.responsavel}</td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell text-sm">{contact.phone}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {contact.source && <Badge variant="outline" className="text-xs font-normal">{contact.source}</Badge>}
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <TagChips tags={tags} size="sm" />
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs hidden xl:table-cell">
+                        {contact.last_contact_at
+                          ? new Date(contact.last_contact_at).toLocaleDateString('pt-BR')
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-sm hidden lg:table-cell">
+                        {responsible?.name || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -164,7 +178,7 @@ export default function ContatosPage() {
       )}
 
       {/* New contact modal */}
-      <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} companyId={companyId} />
     </div>
   );
 }
