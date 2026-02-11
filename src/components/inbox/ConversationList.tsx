@@ -10,7 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import EmptyState from '@/components/EmptyState';
+import EmptyState from '@/components/shared/EmptyState';
+import ChannelBadge from '@/components/shared/ChannelBadge';
 import { conversations, type Conversation, type ConversationStatus, type Channel } from '@/data/mock';
 
 const tabs: { label: string; value: ConversationStatus | 'todas' }[] = [
@@ -18,18 +19,6 @@ const tabs: { label: string; value: ConversationStatus | 'todas' }[] = [
   { label: 'Pendentes', value: 'pendente' },
   { label: 'Fechadas', value: 'resolvida' },
 ];
-
-const channelLabels: Record<Channel, string> = {
-  whatsapp: 'WhatsApp',
-  instagram: 'Instagram',
-  webchat: 'Webchat',
-};
-
-const channelColors: Record<Channel, string> = {
-  whatsapp: 'bg-success/15 text-success',
-  instagram: 'bg-pink-500/15 text-pink-600',
-  webchat: 'bg-info/15 text-info',
-};
 
 interface Props {
   selectedId: string | null;
@@ -124,9 +113,7 @@ export default function ConversationList({ selectedId, onSelect }: Props) {
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground truncate">{conv.lastMessage}</p>
                   <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 border-0 ${channelColors[conv.channel]}`}>
-                      {channelLabels[conv.channel]}
-                    </Badge>
+                    <ChannelBadge channel={conv.channel} />
                     <span className="text-[10px] text-muted-foreground truncate">
                       {conv.assignedTo || 'Não atribuído'}
                     </span>

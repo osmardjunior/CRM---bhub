@@ -21,9 +21,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import StatusBadge from '@/components/StatusBadge';
-import EmptyState from '@/components/EmptyState';
-import { Skeleton } from '@/components/ui/skeleton';
+import EmptyState from '@/components/shared/EmptyState';
+import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import TaskModal from '@/components/tarefas/TaskModal';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { tasks as initialTasks, type Task } from '@/data/mock';
 
 type TabKey = 'minhas' | 'time' | 'concluidas';
@@ -38,6 +39,7 @@ export default function TarefasPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [loading] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [calMonth, setCalMonth] = useState(() => new Date(2025, 1, 1)); // Feb 2025
 
   const filtered = useMemo(() => {
@@ -162,16 +164,7 @@ export default function TarefasPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-4 space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <Skeleton className="h-5 w-5 rounded" />
-                <Skeleton className="h-4 w-40 flex-1" />
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-5 w-14" />
-              </div>
-            ))}
-          </div>
+          <TableSkeleton rows={5} cols={4} />
         ) : viewMode === 'lista' ? (
           /* LIST VIEW */
           filtered.length === 0 ? (
@@ -244,7 +237,7 @@ export default function TarefasPage() {
                               <Pencil size={14} className="mr-2" />
                               Editar
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => deleteTask(task.id)}>
+                            <DropdownMenuItem className="text-destructive" onClick={() => setDeleteId(task.id)}>
                               <Trash2 size={14} className="mr-2" />
                               Excluir
                             </DropdownMenuItem>
@@ -326,6 +319,19 @@ export default function TarefasPage() {
         onClose={() => { setModalOpen(false); setEditingTask(null); }}
         task={editingTask}
         onSave={handleSave}
+      />
+
+      {/* Confirm delete */}
+      <ConfirmDialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+        title="Excluir tarefa"
+        description="Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita."
+        confirmLabel="Excluir"
+        onConfirm={() => {
+          if (deleteId) deleteTask(deleteId);
+          setDeleteId(null);
+        }}
       />
     </div>
   );

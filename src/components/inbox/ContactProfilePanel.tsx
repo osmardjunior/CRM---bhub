@@ -64,12 +64,16 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
           </div>
 
           {/* Tags */}
-          <div className="mt-3 flex flex-wrap gap-1 w-full">
-            {conversation.contactTags.map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
-                {tag}
-              </Badge>
-            ))}
+          <div className="mt-3 w-full">
+            {conversation.contactTags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {conversation.contactTags.map((tag) => (
+                  <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

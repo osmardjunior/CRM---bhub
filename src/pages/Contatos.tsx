@@ -12,11 +12,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import StatusBadge from '@/components/StatusBadge';
-import EmptyState from '@/components/EmptyState';
+import EmptyState from '@/components/shared/EmptyState';
+import TagChips from '@/components/shared/TagChips';
+import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import ContactDetailPanel from '@/components/contatos/ContactDetailPanel';
 import NewContactModal from '@/components/contatos/NewContactModal';
 import { contacts, origens } from '@/data/mock';
-import { Skeleton } from '@/components/ui/skeleton';
 
 const allTags = Array.from(new Set(contacts.flatMap((c) => c.tags)));
 
@@ -90,19 +91,7 @@ export default function ContatosPage() {
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3">
-                  <Skeleton className="h-9 w-9 rounded-full" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-3 w-24" />
-                  </div>
-                  <Skeleton className="h-4 w-20 hidden md:block" />
-                  <Skeleton className="h-5 w-16" />
-                </div>
-              ))}
-            </div>
+            <TableSkeleton rows={6} cols={5} />
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -149,11 +138,7 @@ export default function ContatosPage() {
                       <Badge variant="outline" className="text-xs font-normal">{contact.origem}</Badge>
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
-                      <div className="flex gap-1 flex-wrap">
-                        {contact.tags.map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                        ))}
-                      </div>
+                      <TagChips tags={contact.tags} size="sm" />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs hidden xl:table-cell">
                       {new Date(contact.ultimoContato).toLocaleDateString('pt-BR')}
