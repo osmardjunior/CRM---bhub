@@ -96,7 +96,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
       status: form.status,
       due_date: form.dueDate ? format(form.dueDate, 'yyyy-MM-dd') : null,
       assigned_user_id: form.assignedUserId || null,
-      contact_id: form.contactId || null,
+      contact_id: form.contactId && form.contactId !== 'none' ? form.contactId : null,
     };
 
     if (isEdit && task) {
@@ -204,7 +204,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
               <Select value={form.contactId} onValueChange={(v) => setForm({ ...form, contactId: v })}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Nenhum</SelectItem>
+                  <SelectItem value="none">Nenhum</SelectItem>
                   {(contacts ?? []).map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
