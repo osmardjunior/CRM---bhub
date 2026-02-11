@@ -25,64 +25,52 @@ import EmptyState from '@/components/shared/EmptyState';
 import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import TaskModal from '@/components/tarefas/TaskModal';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
-import { tasks as initialTasks, type Task } from '@/data/mock';
+import { useTasks, useUpdateTask, useDeleteTask } from '@/hooks/useTasks';
+import { useAuth } from '@/contexts/AuthContext';
+import type { TaskWithRelations } from '@/services/tasks';
 
 type TabKey = 'minhas' | 'time' | 'concluidas';
 type ViewMode = 'lista' | 'calendario';
 
-const CURRENT_USER = 'Ana Silva';
-
 export default function TarefasPage() {
-  const [taskList, setTaskList] = useState<Task[]>(initialTasks);
+  const { user } = useAuth();
+  const { data: tasks, isLoading } = useTasks();
+  const updateTask = useUpdateTask();
+  const deleteTaskMut = useDeleteTask();
   const [activeTab, setActiveTab] = useState<TabKey>('minhas');
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [loading] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskWithRelations | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [calMonth, setCalMonth] = useState(() => new Date(2025, 1, 1)); // Feb 2025
+  const [calMonth, setCalMonth] = useState(() => new Date());
 
   const filtered = useMemo(() => {
+    if (!tasks) return [];
     switch (activeTab) {
       case 'minhas':
-        return taskList.filter((t) => t.assignedTo === CURRENT_USER && t.status !== 'concluida');
+        return tasks.filter((t) => t.assigned_user_id === user?.id && t.status !== 'concluida');
       case 'time':
-        return taskList.filter((t) => t.status !== 'concluida');
+        return tasks.filter((t) => t.status !== 'concluida');
       case 'concluidas':
-        return taskList.filter((t) => t.status === 'concluida');
+        return tasks.filter((t) => t.status === 'concluida');
       default:
-        return taskList;
+        return tasks;
     }
-  }, [taskList, activeTab]);
+  }, [tasks, activeTab, user?.id]);
 
-  const toggleDone = (id: string) => {
-    setTaskList((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: t.status === 'concluida' ? 'pendente' : 'concluida' }
-          : t
-      )
-    );
-  };
-
-  const deleteTask = (id: string) => {
-    setTaskList((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const handleSave = (task: Task) => {
-    setTaskList((prev) => {
-      const idx = prev.findIndex((t) => t.id === task.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = task;
-        return copy;
-      }
-      return [...prev, task];
+  const toggleDone = (id: string, currentStatus: string) => {
+    updateTask.mutate({
+      id,
+      status: currentStatus === 'concluida' ? 'pendente' : 'concluida',
     });
-    setEditingTask(null);
   };
 
-  const openEdit = (task: Task) => {
+  const handleDelete = (id: string) => {
+    deleteTaskMut.mutate(id);
+    setDeleteId(null);
+  };
+
+  const openEdit = (task: TaskWithRelations) => {
     setEditingTask(task);
     setModalOpen(true);
   };
@@ -98,7 +86,7 @@ export default function TarefasPage() {
     { key: 'concluidas', label: 'Concluídas' },
   ];
 
-  const isOverdue = (dueDate: string) => new Date(dueDate) < new Date() && true;
+  const isOverdue = (dueDate: string | null) => dueDate ? new Date(dueDate) < new Date() : false;
 
   // Calendar helpers
   const calYear = calMonth.getFullYear();
@@ -108,11 +96,11 @@ export default function TarefasPage() {
   const monthName = calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   const calendarCells = useMemo(() => {
-    const cells: { day: number | null; tasks: Task[] }[] = [];
+    const cells: { day: number | null; tasks: TaskWithRelations[] }[] = [];
     for (let i = 0; i < firstDayOfWeek; i++) cells.push({ day: null, tasks: [] });
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${calYear}-${String(calMonthIdx + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      cells.push({ day: d, tasks: filtered.filter((t) => t.dueDate === dateStr) });
+      cells.push({ day: d, tasks: filtered.filter((t) => t.due_date === dateStr) });
     }
     return cells;
   }, [filtered, calYear, calMonthIdx, daysInMonth, firstDayOfWeek]);
@@ -121,7 +109,6 @@ export default function TarefasPage() {
     <div className="flex flex-col h-[calc(100vh-7rem)] -m-4 lg:-m-6">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-3 shrink-0">
-        {/* Tabs */}
         <div className="flex gap-1">
           {tabs.map((tab) => (
             <Button
@@ -136,7 +123,6 @@ export default function TarefasPage() {
           ))}
         </div>
 
-        {/* View toggle */}
         <div className="flex gap-0.5 ml-2 rounded-lg border border-border p-0.5 bg-secondary">
           <Button
             size="sm"
@@ -163,10 +149,9 @@ export default function TarefasPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
+        {isLoading ? (
           <TableSkeleton rows={5} cols={4} />
         ) : viewMode === 'lista' ? (
-          /* LIST VIEW */
           filtered.length === 0 ? (
             <EmptyState icon={CheckSquare} title="Nenhuma tarefa" description="Não há tarefas nesta aba." />
           ) : (
@@ -186,14 +171,11 @@ export default function TarefasPage() {
                 </thead>
                 <tbody>
                   {filtered.map((task) => (
-                    <tr
-                      key={task.id}
-                      className="border-b border-border hover:bg-accent/30 transition-colors"
-                    >
+                    <tr key={task.id} className="border-b border-border hover:bg-accent/30 transition-colors">
                       <td className="px-3 py-3 text-center">
                         <Checkbox
                           checked={task.status === 'concluida'}
-                          onCheckedChange={() => toggleDone(task.id)}
+                          onCheckedChange={() => toggleDone(task.id, task.status)}
                         />
                       </td>
                       <td className="px-3 py-3">
@@ -203,16 +185,18 @@ export default function TarefasPage() {
                         <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[260px]">{task.description}</p>
                       </td>
                       <td className="px-3 py-3 hidden md:table-cell">
-                        {task.contactName ? (
-                          <Badge variant="secondary" className="text-xs">{task.contactName}</Badge>
+                        {task.contact ? (
+                          <Badge variant="secondary" className="text-xs">{task.contact.name}</Badge>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-3 text-sm text-muted-foreground hidden lg:table-cell">{task.assignedTo}</td>
+                      <td className="px-3 py-3 text-sm text-muted-foreground hidden lg:table-cell">
+                        {task.assigned_user?.name ?? '—'}
+                      </td>
                       <td className="px-3 py-3">
-                        <span className={`text-xs ${isOverdue(task.dueDate) && task.status !== 'concluida' ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
-                          {new Date(task.dueDate).toLocaleDateString('pt-BR')}
+                        <span className={`text-xs ${isOverdue(task.due_date) && task.status !== 'concluida' ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                          {task.due_date ? new Date(task.due_date).toLocaleDateString('pt-BR') : '—'}
                         </span>
                       </td>
                       <td className="px-3 py-3 hidden sm:table-cell">
@@ -229,7 +213,7 @@ export default function TarefasPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toggleDone(task.id)}>
+                            <DropdownMenuItem onClick={() => toggleDone(task.id, task.status)}>
                               <Check size={14} className="mr-2" />
                               {task.status === 'concluida' ? 'Reabrir' : 'Concluir'}
                             </DropdownMenuItem>
@@ -264,14 +248,11 @@ export default function TarefasPage() {
             </div>
 
             <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
-              {/* Day headers */}
               <div className="grid grid-cols-7 border-b border-border bg-muted/40">
                 {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d) => (
                   <div key={d} className="px-2 py-2 text-center text-xs font-medium text-muted-foreground">{d}</div>
                 ))}
               </div>
-
-              {/* Days grid */}
               <div className="grid grid-cols-7">
                 {calendarCells.map((cell, i) => (
                   <div
@@ -318,7 +299,6 @@ export default function TarefasPage() {
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditingTask(null); }}
         task={editingTask}
-        onSave={handleSave}
       />
 
       {/* Confirm delete */}
@@ -329,8 +309,7 @@ export default function TarefasPage() {
         description="Tem certeza que deseja excluir esta tarefa? Esta ação não pode ser desfeita."
         confirmLabel="Excluir"
         onConfirm={() => {
-          if (deleteId) deleteTask(deleteId);
-          setDeleteId(null);
+          if (deleteId) handleDelete(deleteId);
         }}
       />
     </div>

@@ -141,6 +141,7 @@ export type Database = {
         Row: {
           assigned_user_id: string | null
           channel: Database["public"]["Enums"]["conversation_channel"]
+          close_reason: string | null
           company_id: string
           contact_id: string
           created_at: string
@@ -152,6 +153,7 @@ export type Database = {
         Insert: {
           assigned_user_id?: string | null
           channel?: Database["public"]["Enums"]["conversation_channel"]
+          close_reason?: string | null
           company_id: string
           contact_id: string
           created_at?: string
@@ -163,6 +165,7 @@ export type Database = {
         Update: {
           assigned_user_id?: string | null
           channel?: Database["public"]["Enums"]["conversation_channel"]
+          close_reason?: string | null
           company_id?: string
           contact_id?: string
           created_at?: string
@@ -188,6 +191,70 @@ export type Database = {
           },
           {
             foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deals: {
+        Row: {
+          assigned_user_id: string | null
+          company_id: string
+          contact_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          probability: number
+          stage: Database["public"]["Enums"]["deal_stage"]
+          title: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          assigned_user_id?: string | null
+          company_id: string
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          probability?: number
+          stage?: Database["public"]["Enums"]["deal_stage"]
+          title: string
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          assigned_user_id?: string | null
+          company_id?: string
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          probability?: number
+          stage?: Database["public"]["Enums"]["deal_stage"]
+          title?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deals_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deals_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
@@ -294,6 +361,80 @@ export type Database = {
           },
         ]
       }
+      tasks: {
+        Row: {
+          assigned_user_id: string | null
+          company_id: string
+          contact_id: string | null
+          created_at: string
+          deal_id: string | null
+          description: string | null
+          due_date: string | null
+          id: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_user_id?: string | null
+          company_id: string
+          contact_id?: string | null
+          created_at?: string
+          deal_id?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
+          status?: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_user_id?: string | null
+          company_id?: string
+          contact_id?: string | null
+          created_at?: string
+          deal_id?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
+          status?: Database["public"]["Enums"]["task_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -331,7 +472,16 @@ export type Database = {
       app_role: "admin" | "supervisor" | "agent"
       conversation_channel: "whatsapp" | "instagram" | "webchat"
       conversation_status: "open" | "pending" | "closed"
+      deal_stage:
+        | "novo_lead"
+        | "em_contato"
+        | "proposta"
+        | "fechamento"
+        | "ganho"
+        | "perdido"
       message_sender_type: "user" | "agent" | "system"
+      task_priority: "alta" | "media" | "baixa"
+      task_status: "pendente" | "em_progresso" | "concluida"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -462,7 +612,17 @@ export const Constants = {
       app_role: ["admin", "supervisor", "agent"],
       conversation_channel: ["whatsapp", "instagram", "webchat"],
       conversation_status: ["open", "pending", "closed"],
+      deal_stage: [
+        "novo_lead",
+        "em_contato",
+        "proposta",
+        "fechamento",
+        "ganho",
+        "perdido",
+      ],
       message_sender_type: ["user", "agent", "system"],
+      task_priority: ["alta", "media", "baixa"],
+      task_status: ["pendente", "em_progresso", "concluida"],
     },
   },
 } as const
