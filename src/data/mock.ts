@@ -46,6 +46,10 @@ export interface Contact {
   status: ContactStatus;
   avatar: string;
   tags: string[];
+  origem: string;
+  responsavel: string;
+  observacoes: string;
+  ultimoContato: string;
   createdAt: string;
 }
 
@@ -136,13 +140,15 @@ export const timelineEvents: Record<string, TimelineEvent[]> = {
   ],
 };
 
+export const origens = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
+
 export const contacts: Contact[] = [
-  { id: '1', name: 'Maria Lima', email: 'maria@empresa.com', phone: '(11) 99999-1234', company: 'TechBR Ltda', status: 'online', avatar: avatars[0], tags: ['VIP', 'Enterprise'], createdAt: '2024-01-15' },
-  { id: '2', name: 'André Santos', email: 'andre@startup.io', phone: '(21) 98888-5678', company: 'StartupIO', status: 'ausente', avatar: avatars[1], tags: ['Lead'], createdAt: '2024-02-20' },
-  { id: '3', name: 'Carla Ribeiro', email: 'carla@design.com', phone: '(31) 97777-9012', company: 'DesignCo', status: 'offline', avatar: avatars[2], tags: ['Cliente'], createdAt: '2024-03-10' },
-  { id: '4', name: 'João Pereira', email: 'joao@corp.com.br', phone: '(41) 96666-3456', company: 'CorpBrasil', status: 'online', avatar: avatars[3], tags: ['Enterprise', 'Prioritário'], createdAt: '2024-04-05' },
-  { id: '5', name: 'Fernanda Martins', email: 'fernanda@loja.com', phone: '(51) 95555-7890', company: 'LojaOnline', status: 'offline', avatar: avatars[4], tags: ['Cliente'], createdAt: '2024-05-12' },
-  { id: '6', name: 'Lucas Borges', email: 'lucas@dev.com', phone: '(61) 94444-2345', company: 'DevSolutions', status: 'ausente', avatar: avatars[5], tags: ['Lead', 'Desenvolvedor'], createdAt: '2024-06-01' },
+  { id: '1', name: 'Maria Lima', email: 'maria@empresa.com', phone: '(11) 99999-1234', company: 'TechBR Ltda', status: 'online', avatar: avatars[0], tags: ['VIP', 'Enterprise'], origem: 'WhatsApp', responsavel: 'Ana Silva', observacoes: 'Cliente premium, atendimento prioritário.', ultimoContato: '2025-02-10', createdAt: '2024-01-15' },
+  { id: '2', name: 'André Santos', email: 'andre@startup.io', phone: '(21) 98888-5678', company: 'StartupIO', status: 'ausente', avatar: avatars[1], tags: ['Lead'], origem: 'Google Ads', responsavel: 'Carlos Rocha', observacoes: '', ultimoContato: '2025-02-08', createdAt: '2024-02-20' },
+  { id: '3', name: 'Carla Ribeiro', email: 'carla@design.com', phone: '(31) 97777-9012', company: 'DesignCo', status: 'offline', avatar: avatars[2], tags: ['Cliente'], origem: 'Indicação', responsavel: 'Ana Silva', observacoes: 'Projeto de design finalizado.', ultimoContato: '2025-01-28', createdAt: '2024-03-10' },
+  { id: '4', name: 'João Pereira', email: 'joao@corp.com.br', phone: '(41) 96666-3456', company: 'CorpBrasil', status: 'online', avatar: avatars[3], tags: ['Enterprise', 'Prioritário'], origem: 'WhatsApp', responsavel: 'Felipe Moura', observacoes: 'Aguardando proposta de expansão.', ultimoContato: '2025-02-11', createdAt: '2024-04-05' },
+  { id: '5', name: 'Fernanda Martins', email: 'fernanda@loja.com', phone: '(51) 95555-7890', company: 'LojaOnline', status: 'offline', avatar: avatars[4], tags: ['Cliente'], origem: 'Instagram', responsavel: 'Ana Silva', observacoes: 'Solicitou cancelamento de assinatura.', ultimoContato: '2025-02-05', createdAt: '2024-05-12' },
+  { id: '6', name: 'Lucas Borges', email: 'lucas@dev.com', phone: '(61) 94444-2345', company: 'DevSolutions', status: 'ausente', avatar: avatars[5], tags: ['Lead', 'Desenvolvedor'], origem: 'Webchat', responsavel: 'Carlos Rocha', observacoes: 'Interessado na integração API.', ultimoContato: '2025-02-01', createdAt: '2024-06-01' },
 ];
 
 export const pipelineDeals: PipelineDeal[] = [
