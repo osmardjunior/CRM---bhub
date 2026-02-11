@@ -31,6 +31,7 @@ interface Props {
   onSelect: (id: string) => void;
   filters: ConversationFilters;
   onFilterChange: (filters: Partial<ConversationFilters>) => void;
+  unreadCounts: Record<string, number>;
 }
 
 export default function ConversationList({
@@ -40,6 +41,7 @@ export default function ConversationList({
   onSelect,
   filters,
   onFilterChange,
+  unreadCounts,
 }: Props) {
   const [search, setSearch] = useState('');
 
@@ -117,6 +119,7 @@ export default function ConversationList({
         ) : (
           filtered.map((conv) => {
             const isSelected = conv.id === selectedId;
+            const unread = unreadCounts[conv.id] ?? 0;
             const timeAgo = conv.last_message_at
               ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
               : '';
@@ -133,7 +136,9 @@ export default function ConversationList({
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-foreground truncate">{conv.contact.name}</span>
+                    <span className={`text-sm truncate ${unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground'}`}>
+                      {conv.contact.name}
+                    </span>
                     <span className="text-[11px] text-muted-foreground ml-2 shrink-0">{timeAgo}</span>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground truncate">
@@ -144,6 +149,11 @@ export default function ConversationList({
                     <span className="text-[10px] text-muted-foreground truncate">
                       {conv.assigned_user?.name ?? 'Não atribuído'}
                     </span>
+                    {unread > 0 && (
+                      <Badge className="ml-auto bg-primary text-primary-foreground text-[10px] px-1.5 py-0 min-w-[18px] justify-center">
+                        {unread}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </button>

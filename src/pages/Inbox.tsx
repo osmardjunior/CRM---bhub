@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ConversationList from '@/components/inbox/ConversationList';
 import ChatPanel from '@/components/inbox/ChatPanel';
 import ContactProfilePanel from '@/components/inbox/ContactProfilePanel';
-import { useConversations, useConversationDetail } from '@/hooks/useConversations';
+import {
+  useConversations,
+  useConversationDetail,
+  useUnreadCounts,
+  useMarkConversationRead,
+} from '@/hooks/useConversations';
+import { useInboxRealtime } from '@/hooks/useInboxRealtime';
 import type { ConversationFilters } from '@/services/api';
-import type { Enums } from '@/integrations/supabase/types';
 
 export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -12,10 +17,20 @@ export default function InboxPage() {
   const [filters, setFilters] = useState<ConversationFilters>({});
 
   const { data: conversations, isLoading: listLoading } = useConversations(filters);
-  const { data: detail, isLoading: detailLoading } = useConversationDetail(selectedId);
-
-  // Auto-select first conversation
   const effectiveSelectedId = selectedId ?? conversations?.[0]?.id ?? null;
+  const { data: detail, isLoading: detailLoading } = useConversationDetail(effectiveSelectedId);
+  const { data: unreadCounts } = useUnreadCounts(conversations ?? []);
+  const markRead = useMarkConversationRead();
+
+  // Realtime subscription
+  useInboxRealtime(effectiveSelectedId);
+
+  // Mark conversation as read when selected
+  useEffect(() => {
+    if (effectiveSelectedId) {
+      markRead.mutate(effectiveSelectedId);
+    }
+  }, [effectiveSelectedId]);
 
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
@@ -30,6 +45,7 @@ export default function InboxPage() {
         onSelect={setSelectedId}
         filters={filters}
         onFilterChange={handleFilterChange}
+        unreadCounts={unreadCounts ?? {}}
       />
 
       <ChatPanel

@@ -263,3 +263,78 @@ export async function listTeamMembers(): Promise<Pick<Profile, 'id' | 'name' | '
   if (error) handleError(error);
   return data ?? [];
 }
+
+// ── Conversation reads (unread logic) ──────────────────
+export interface ConversationRead {
+  conversation_id: string;
+  last_read_at: string;
+}
+
+export async function getConversationReads(): Promise<ConversationRead[]> {
+  const { data, error } = await supabase
+    .from('conversation_reads')
+    .select('conversation_id, last_read_at');
+
+  if (error) handleError(error);
+  return (data ?? []) as ConversationRead[];
+}
+
+export async function markConversationRead(conversationId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('company_id')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+
+  const now = new Date().toISOString();
+
+  const { error } = await supabase
+    .from('conversation_reads')
+    .upsert(
+      [{ conversation_id: conversationId, user_id: user.id, last_read_at: now, company_id: profile.company_id }],
+      { onConflict: 'conversation_id,user_id' },
+    );
+
+  if (error) handleError(error);
+}
+
+export async function getUnreadCounts(
+  conversationIds: string[],
+  reads: ConversationRead[],
+): Promise<Record<string, number>> {
+  if (conversationIds.length === 0) return {};
+
+  const counts: Record<string, number> = {};
+
+  // Build a map of last_read_at per conversation
+  const readMap: Record<string, string> = {};
+  for (const r of reads) {
+    readMap[r.conversation_id] = r.last_read_at;
+  }
+
+  // For each conversation, count messages after last_read_at where sender_type = 'user'
+  for (const convId of conversationIds) {
+    const lastRead = readMap[convId];
+    let query = supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', convId)
+      .eq('sender_type', 'user');
+
+    if (lastRead) {
+      query = query.gt('created_at', lastRead);
+    }
+
+    const { count, error } = await query;
+    if (!error) {
+      counts[convId] = count ?? 0;
+    }
+  }
+
+  return counts;
+}
