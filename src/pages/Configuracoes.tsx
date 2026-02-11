@@ -11,12 +11,18 @@ import {
   Shield,
   Eye,
   Headphones,
+  Lock,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -33,6 +39,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import StatusBadge from '@/components/StatusBadge';
+import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 
 const mockUsers = [
   { id: '1', name: 'Davi César', email: 'davi@allinsistemas.com', role: 'Admin', status: 'online' as const },
@@ -48,6 +55,8 @@ const roleDescriptions = [
 ];
 
 export default function ConfiguracoesPage() {
+  const permissions = usePermissions();
+  const manageTooltip = getPermissionTooltip('canManageUsers', permissions);
   const [activeTab, setActiveTab] = useState('empresa');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [whatsappOpen, setWhatsappOpen] = useState(false);
@@ -160,13 +169,35 @@ export default function ConfiguracoesPage() {
 
           {/* ===== USUÁRIOS ===== */}
           <TabsContent value="usuarios" className="mt-0 space-y-6">
+            {!permissions.canManageUsers && (
+              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
+                <Lock size={14} className="text-warning shrink-0" />
+                <p className="text-xs text-warning">Você não tem permissão para gerenciar usuários. Entre em contato com um administrador.</p>
+              </div>
+            )}
             {/* Users table */}
             <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <h2 className="text-base font-semibold text-foreground">Membros da equipe</h2>
-                <Button size="sm" className="gap-1.5 h-8" onClick={() => setInviteOpen(true)}>
-                  <Plus size={14} /> Convidar
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm"
+                        className="gap-1.5 h-8"
+                        onClick={() => setInviteOpen(true)}
+                        disabled={!permissions.canManageUsers}
+                      >
+                        <Plus size={14} /> Convidar
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {manageTooltip && (
+                    <TooltipContent>
+                      <p className="text-xs">{manageTooltip}</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
               </div>
               <table className="w-full text-sm">
                 <thead>
