@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import DealDetailDrawer from '@/components/pipeline/DealDetailDrawer';
+import NewDealModal from '@/components/pipeline/NewDealModal';
 import EmptyState from '@/components/shared/EmptyState';
 import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
 import { useDeals, useUpdateDeal, useCreateDeal } from '@/hooks/useDeals';
@@ -43,6 +44,7 @@ export default function PipelinePage() {
   const [search, setSearch] = useState('');
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [showNewDeal, setShowNewDeal] = useState(false);
 
   const filtered = useMemo(() => {
     if (!deals) return [];
@@ -100,7 +102,7 @@ export default function PipelinePage() {
             ))}
           </SelectContent>
         </Select>
-        <Button size="sm" className="gap-1.5 ml-auto h-9">
+        <Button size="sm" className="gap-1.5 ml-auto h-9" onClick={() => setShowNewDeal(true)}>
           <Plus size={15} />
           Novo negócio
         </Button>
@@ -190,6 +192,8 @@ export default function PipelinePage() {
           />
         </>
       )}
+      {/* New Deal Modal */}
+      <NewDealModal open={showNewDeal} onClose={() => setShowNewDeal(false)} />
     </div>
   );
 }
