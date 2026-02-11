@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   MessageSquare,
   Users,
@@ -50,8 +51,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState(companies[0]);
   const location = useLocation();
-
-  const currentPage = navItems.find((i) => i.to === location.pathname);
+  const navigate = useNavigate();
+  const { profile, role, signOut } = useAuth();
+  const userName = profile?.name || 'Usuário';
+  const userInitials = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -129,13 +132,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <div className="border-t border-sidebar-border p-3">
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
             <Avatar className="h-8 w-8 shrink-0">
-              <AvatarImage src="https://api.dicebear.com/7.x/initials/svg?seed=DC" />
-              <AvatarFallback>DC</AvatarFallback>
+              <AvatarFallback>{userInitials}</AvatarFallback>
             </Avatar>
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-sidebar-accent-foreground truncate">Davi César</p>
-                <p className="text-xs text-sidebar-muted truncate">Admin</p>
+                <p className="text-sm font-medium text-sidebar-accent-foreground truncate">{userName}</p>
+                <p className="text-xs text-sidebar-muted truncate capitalize">{role || 'agent'}</p>
               </div>
             )}
           </div>
@@ -156,7 +158,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </Button>
 
           <h1 className="text-lg font-semibold text-foreground">
-            {currentPage?.label || 'Dashboard'}
+            {navItems.find((i) => i.to === location.pathname)?.label || 'Dashboard'}
           </h1>
 
           <div className="ml-auto flex items-center gap-3">
@@ -204,29 +206,28 @@ export default function AppLayout({ children }: AppLayoutProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
                   <Avatar className="h-7 w-7">
-                    <AvatarImage src="https://api.dicebear.com/7.x/initials/svg?seed=DC" />
-                    <AvatarFallback>DC</AvatarFallback>
+                    <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
                   </Avatar>
-                  <span className="text-sm font-medium">Davi César</span>
+                  <span className="text-sm font-medium">{userName}</span>
                   <ChevronDown size={14} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>
-                  <p className="text-sm font-medium">Davi César</p>
-                  <p className="text-xs text-muted-foreground">Admin</p>
+                  <p className="text-sm font-medium">{userName}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{role || 'agent'}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
                   <User size={14} className="mr-2" />
                   Meu Perfil
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/configuracoes')}>
                   <Settings size={14} className="mr-2" />
                   Configurações
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive">
+                <DropdownMenuItem className="text-destructive" onClick={() => signOut()}>
                   <LogOut size={14} className="mr-2" />
                   Sair
                 </DropdownMenuItem>
