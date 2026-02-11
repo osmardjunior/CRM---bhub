@@ -38,7 +38,6 @@ export default function InboxPage() {
     <div className="flex h-[calc(100vh-7rem)] gap-4 -mt-2">
       {/* Conversation list */}
       <div className="flex w-full flex-col rounded-xl border border-border bg-card card-shadow lg:w-96 lg:min-w-[360px]">
-        {/* Search + filter */}
         <div className="space-y-3 border-b border-border p-4">
           <Input
             placeholder="Buscar conversas..."
@@ -61,7 +60,6 @@ export default function InboxPage() {
           </div>
         </div>
 
-        {/* List */}
         <div className="flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
             <EmptyState
