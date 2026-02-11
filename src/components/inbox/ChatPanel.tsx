@@ -24,11 +24,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
 import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
+import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
+import { useAuth } from '@/contexts/AuthContext';
 import type { ConversationDetail, MessageWithSender } from '@/services/api';
 
 const quickReplies = [
@@ -54,6 +61,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendMessage = useSendMessage();
   const { data: teamMembers } = useTeamMembers();
+  const permissions = usePermissions();
+  const { user } = useAuth();
+
+  // Agent can only assign to self; supervisor/admin can assign to anyone
+  const canReassign = permissions.canReassignConversations;
+  const reassignTooltip = getPermissionTooltip('canReassignConversations', permissions);
+
+  const availableMembers = canReassign
+    ? (teamMembers ?? [])
+    : (teamMembers ?? []).filter((m) => m.id === user?.id);
 
   const messages = conversation?.messages ?? [];
 
@@ -113,16 +130,27 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         </div>
 
         {/* Assign dropdown */}
-        <Select value={conversation.assigned_user_id ?? ''}>
-          <SelectTrigger className="h-8 w-[150px] text-xs">
-            <SelectValue placeholder="Atribuir agente" />
-          </SelectTrigger>
-          <SelectContent>
-            {(teamMembers ?? []).map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>
+              <Select value={conversation.assigned_user_id ?? ''} disabled={!canReassign && conversation.assigned_user_id === user?.id}>
+                <SelectTrigger className={`h-8 w-[150px] text-xs ${!canReassign ? 'opacity-60' : ''}`}>
+                  <SelectValue placeholder="Atribuir agente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </TooltipTrigger>
+          {reassignTooltip && (
+            <TooltipContent side="bottom">
+              <p className="text-xs">{reassignTooltip}</p>
+            </TooltipContent>
+          )}
+        </Tooltip>
 
         <Button variant="ghost" size="icon" className="shrink-0" onClick={onToggleProfile}>
           {profileOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
