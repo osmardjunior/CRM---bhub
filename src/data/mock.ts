@@ -170,6 +170,10 @@ export const tasks: Task[] = [
   { id: '3', title: 'Onboarding DesignCo', description: 'Configurar conta e treinamento inicial', priority: 'media', status: 'concluida', dueDate: '2025-02-10', assignedTo: 'Ana Silva', contactName: 'Carla Ribeiro' },
   { id: '4', title: 'Enviar contrato CorpBrasil', description: 'Preparar e enviar contrato de expansão', priority: 'alta', status: 'pendente', dueDate: '2025-02-13', assignedTo: 'Felipe Moura', contactName: 'João Pereira' },
   { id: '5', title: 'Atualizar documentação API', description: 'Revisar docs da API v2', priority: 'baixa', status: 'pendente', dueDate: '2025-02-20', assignedTo: 'Carlos Rocha' },
+  { id: '6', title: 'Ligar para Fernanda', description: 'Entender motivo do cancelamento', priority: 'alta', status: 'pendente', dueDate: '2025-02-11', assignedTo: 'Ana Silva', contactName: 'Fernanda Martins' },
+  { id: '7', title: 'Preparar demo DevSolutions', description: 'Montar ambiente de demonstração da API', priority: 'media', status: 'em_progresso', dueDate: '2025-02-18', assignedTo: 'Carlos Rocha', contactName: 'Lucas Borges' },
+  { id: '8', title: 'Revisar proposta Enterprise', description: 'Ajustar valores conforme feedback', priority: 'alta', status: 'concluida', dueDate: '2025-02-08', assignedTo: 'Ana Silva', contactName: 'Maria Lima' },
+  { id: '9', title: 'Reunião de alinhamento', description: 'Reunião semanal da equipe comercial', priority: 'baixa', status: 'pendente', dueDate: '2025-02-15', assignedTo: 'Felipe Moura' },
 ];
 
 export const teamMembers = ['Ana Silva', 'Carlos Rocha', 'Felipe Moura'];
