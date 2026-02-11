@@ -6,13 +6,10 @@ import {
   Zap,
   PanelRightClose,
   PanelRightOpen,
-  AlertCircle,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
   SelectContent,
@@ -29,46 +26,44 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
-import { messages, agents, quickReplies, type Conversation } from '@/data/mock';
+import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
+import { useSendMessage } from '@/hooks/useConversations';
+import { useTeamMembers } from '@/hooks/useContacts';
+import type { ConversationDetail, MessageWithSender } from '@/services/api';
+
+const quickReplies = [
+  'Olá! Como posso ajudar você hoje?',
+  'Agradecemos o seu contato! Vou verificar e retorno em instantes.',
+  'Pode me informar o número do seu pedido, por favor?',
+  'Estou transferindo você para o setor responsável.',
+  'Seu problema foi resolvido? Posso ajudar em mais alguma coisa?',
+  'Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.',
+  'Obrigado pela preferência! Tenha um ótimo dia! 😊',
+];
 
 interface Props {
-  conversation: Conversation | null;
+  conversation: ConversationDetail | null;
+  loading: boolean;
   onToggleProfile: () => void;
   profileOpen: boolean;
 }
 
-export default function ChatPanel({ conversation, onToggleProfile, profileOpen }: Props) {
+export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen }: Props) {
   const [input, setInput] = useState('');
-  const [localMessages, setLocalMessages] = useState(messages);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
-  const [assignee, setAssignee] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sendMessage = useSendMessage();
+  const { data: teamMembers } = useTeamMembers();
 
-  const convMessages = conversation
-    ? localMessages.filter((m) => m.conversationId === conversation.id)
-    : [];
+  const messages = conversation?.messages ?? [];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [convMessages.length]);
-
-  useEffect(() => {
-    if (conversation) {
-      setAssignee(conversation.assignedTo || '');
-    }
-  }, [conversation?.id]);
+  }, [messages.length]);
 
   const handleSend = () => {
     if (!input.trim() || !conversation) return;
-    const newMsg = {
-      id: `m-${Date.now()}`,
-      conversationId: conversation.id,
-      content: input.trim(),
-      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      direction: 'outgoing' as const,
-      senderName: 'Davi César',
-    };
-    setLocalMessages((prev) => [...prev, newMsg]);
+    sendMessage.mutate({ conversationId: conversation.id, body: input.trim() });
     setInput('');
   };
 
@@ -76,6 +71,19 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
     setInput(text);
     setQuickReplyOpen(false);
   };
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <div className="border-b border-border px-4 py-3">
+          <ListSkeleton rows={1} />
+        </div>
+        <div className="flex-1 p-4">
+          <ListSkeleton rows={5} />
+        </div>
+      </div>
+    );
+  }
 
   if (!conversation) {
     return (
@@ -94,25 +102,24 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
         <Avatar className="h-9 w-9 shrink-0">
-          <AvatarImage src={conversation.contactAvatar} />
-          <AvatarFallback className="text-xs">{conversation.contactName[0]}</AvatarFallback>
+          <AvatarFallback className="text-xs">{conversation.contact.name[0]}</AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground truncate">{conversation.contactName}</span>
+            <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
             <StatusBadge status={conversation.status} />
           </div>
-          <p className="text-xs text-muted-foreground">{conversation.contactPhone}</p>
+          <p className="text-xs text-muted-foreground">{conversation.contact.phone}</p>
         </div>
 
         {/* Assign dropdown */}
-        <Select value={assignee} onValueChange={setAssignee}>
+        <Select value={conversation.assigned_user_id ?? ''}>
           <SelectTrigger className="h-8 w-[150px] text-xs">
             <SelectValue placeholder="Atribuir agente" />
           </SelectTrigger>
           <SelectContent>
-            {agents.map((a) => (
-              <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>
+            {(teamMembers ?? []).map((m) => (
+              <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -124,20 +131,17 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-secondary/30">
-        {convMessages.length === 0 ? (
+        {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <MessageSquare size={32} className="text-muted-foreground/40 mb-2" />
             <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
             <p className="text-xs text-muted-foreground mt-1">Envie a primeira mensagem para iniciar a conversa.</p>
           </div>
         ) : (
-          convMessages.map((msg) => {
-            const isOutgoing = msg.direction === 'outgoing';
+          messages.map((msg) => {
+            const isOutgoing = msg.sender_type === 'agent';
             return (
-              <div
-                key={msg.id}
-                className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}
-              >
+              <div key={msg.id} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
                 <div
                   className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
                     isOutgoing
@@ -146,11 +150,13 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
                   }`}
                 >
                   {!isOutgoing && (
-                    <p className="text-[10px] font-semibold mb-0.5 opacity-70">{msg.senderName}</p>
+                    <p className="text-[10px] font-semibold mb-0.5 opacity-70">
+                      {msg.sender?.name ?? conversation.contact.name}
+                    </p>
                   )}
-                  <p className="text-sm leading-relaxed">{msg.content}</p>
+                  <p className="text-sm leading-relaxed">{msg.body}</p>
                   <p className={`text-[10px] mt-1 text-right ${isOutgoing ? 'opacity-70' : 'text-muted-foreground'}`}>
-                    {msg.timestamp}
+                    {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </p>
                 </div>
               </div>
@@ -167,7 +173,6 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
             <Paperclip size={18} />
           </Button>
 
-          {/* Quick replies */}
           <Dialog open={quickReplyOpen} onOpenChange={setQuickReplyOpen}>
             <DialogTrigger asChild>
               <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
@@ -203,7 +208,7 @@ export default function ChatPanel({ conversation, onToggleProfile, profileOpen }
           <Button
             size="icon"
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || sendMessage.isPending}
             className="shrink-0"
           >
             <Send size={16} />
