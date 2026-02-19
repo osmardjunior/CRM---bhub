@@ -9,10 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useFunnels, Funnel, FunnelStage } from '@/contexts/FunnelContext';
+import { useFunnels, Funnel } from '@/contexts/FunnelContext';
 
 // ── Wave SVG ──────────────────────────────────────────────
-function FunnelWave({ stages }: { stages: FunnelStage[] }) {
+function FunnelWave({ stages }: { stages: { label: string; count: number }[] }) {
   const max = Math.max(...stages.map((s) => s.count), 1);
   const W = 1200;
   const H = 80;
@@ -77,7 +77,7 @@ function CreateFunnelModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: Omit<Funnel, 'id' | 'expanded'>) => void;
+  onCreate: (data: { name: string; stages: { label: string; count: number }[] }) => void;
 }) {
   const [name, setName] = useState('');
   const [stages, setStages] = useState<string[]>(['ENTRADA DO LEAD', '']);
