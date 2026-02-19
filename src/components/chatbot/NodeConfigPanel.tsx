@@ -7,10 +7,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Save } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Plus, Trash2, Save, Check, Users, Building2, RotateCcw } from 'lucide-react';
 import { useTags } from '@/hooks/useTags';
 import { useFunnels } from '@/contexts/FunnelContext';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { useDepartments } from '@/hooks/useDepartments';
 import type { ChatbotNode } from '@/hooks/useChatbotFlows';
 
 type NodeType = ChatbotNode['node_type'];
@@ -37,6 +39,7 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
   const { data: tags = [] } = useTags();
   const { funnels } = useFunnels();
   const { data: team = [] } = useTeamProfiles();
+  const { data: departments = [] } = useDepartments();
 
   useEffect(() => {
     setConfig({ ...node.config });
@@ -44,6 +47,171 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
 
   const handleSave = () => {
     onSave({ id: node.id, config });
+  };
+
+  const renderApplyTag = () => (
+    <div className="space-y-3">
+      <Label className="text-sm font-semibold">Tags a aplicar</Label>
+      {tags.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nenhuma tag cadastrada. Crie tags na página de Tags.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {tags.map(tag => {
+            const selected = ((config.tag_ids as string[]) || []).includes(tag.id);
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => {
+                  const ids = (config.tag_ids || []) as string[];
+                  setConfig({ ...config, tag_ids: selected ? ids.filter(id => id !== tag.id) : [...ids, tag.id] });
+                }}
+                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all border-2"
+                style={{
+                  backgroundColor: selected ? tag.color : 'transparent',
+                  borderColor: tag.color,
+                  color: selected ? '#fff' : tag.color,
+                }}
+              >
+                <div
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border"
+                  style={{
+                    borderColor: selected ? '#fff' : tag.color,
+                    backgroundColor: selected ? 'rgba(255,255,255,0.25)' : 'transparent',
+                  }}
+                >
+                  {selected && <Check size={12} style={{ color: '#fff' }} />}
+                </div>
+                <span className="truncate">{tag.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderDelegate = () => {
+    const userIds = (config.user_ids || []) as string[];
+    const departmentIds = (config.department_ids || []) as string[];
+
+    return (
+      <div className="space-y-5">
+        {/* Seção Usuários */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Users size={16} />
+            Usuários
+          </div>
+          <div className="space-y-2 pl-1">
+            {team.map(m => {
+              const checked = userIds.includes(m.id);
+              return (
+                <div key={m.id} className="flex items-center gap-2.5">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={v => {
+                      setConfig({
+                        ...config,
+                        user_ids: v ? [...userIds, m.id] : userIds.filter(id => id !== m.id),
+                      });
+                    }}
+                  />
+                  <span className="text-sm flex-1">{m.name}</span>
+                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                    {m.role}
+                  </Badge>
+                </div>
+              );
+            })}
+            {team.length === 0 && <p className="text-sm text-muted-foreground">Nenhum membro encontrado.</p>}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Checkbox
+              checked={config.remove_other_users || false}
+              onCheckedChange={v => setConfig({ ...config, remove_other_users: !!v })}
+            />
+            <Label className="text-sm font-normal text-muted-foreground">Remover outros usuários delegados</Label>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Seção Departamentos */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Building2 size={16} />
+            Departamentos
+          </div>
+          <div className="space-y-2 pl-1">
+            {departments.map(d => {
+              const checked = departmentIds.includes(d.id);
+              return (
+                <div key={d.id} className="flex items-center gap-2.5">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={v => {
+                      setConfig({
+                        ...config,
+                        department_ids: v ? [...departmentIds, d.id] : departmentIds.filter(id => id !== d.id),
+                      });
+                    }}
+                  />
+                  <span className="text-sm">{d.name}</span>
+                </div>
+              );
+            })}
+            {departments.length === 0 && <p className="text-sm text-muted-foreground">Nenhum departamento cadastrado.</p>}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Checkbox
+              checked={config.remove_other_departments || false}
+              onCheckedChange={v => setConfig({ ...config, remove_other_departments: !!v })}
+            />
+            <Label className="text-sm font-normal text-muted-foreground">Remover outros grupos delegados</Label>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Seção Rodízio */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <RotateCcw size={16} />
+            Rodízio
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={config.round_robin || false}
+              onCheckedChange={v => setConfig({ ...config, round_robin: v })}
+            />
+            <Label className="text-sm font-normal">Ativar Rodízio no Departamento</Label>
+          </div>
+          {config.round_robin && (
+            <div className="space-y-2 pl-6">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={config.round_robin_single_user || false}
+                  onCheckedChange={v => setConfig({ ...config, round_robin_single_user: !!v })}
+                />
+                <Label className="text-sm font-normal text-muted-foreground">
+                  Delegar apenas para um usuário deste departamento (não será delegado para o departamento)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={config.prefer_online || false}
+                  onCheckedChange={v => setConfig({ ...config, prefer_online: !!v })}
+                />
+                <Label className="text-sm font-normal text-muted-foreground">
+                  Dar preferência para quem estiver online
+                </Label>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const renderFields = () => {
@@ -162,31 +330,7 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
         );
 
       case 'apply_tag' as any:
-        return (
-          <div className="space-y-3">
-            <Label>Tags a aplicar</Label>
-            <div className="flex flex-wrap gap-2">
-              {tags.map(tag => {
-                const selected = ((config.tag_ids as string[]) || []).includes(tag.id);
-                return (
-                  <Badge
-                    key={tag.id}
-                    variant={selected ? 'default' : 'outline'}
-                    className="cursor-pointer transition-colors"
-                    style={selected ? { backgroundColor: tag.color, borderColor: tag.color } : { borderColor: tag.color, color: tag.color }}
-                    onClick={() => {
-                      const ids = (config.tag_ids || []) as string[];
-                      setConfig({ ...config, tag_ids: selected ? ids.filter(id => id !== tag.id) : [...ids, tag.id] });
-                    }}
-                  >
-                    {tag.name}
-                  </Badge>
-                );
-              })}
-            </div>
-            {tags.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma tag cadastrada. Crie tags na página de Tags.</p>}
-          </div>
-        );
+        return renderApplyTag();
 
       case 'move_to_funnel' as any:
         return (
@@ -217,29 +361,7 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
         );
 
       case 'delegate' as any:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Delegar para</Label>
-              <Select value={config.delegate_to || ''} onValueChange={v => setConfig({ ...config, delegate_to: v })}>
-                <SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger>
-                <SelectContent>
-                  {team.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={config.round_robin || false}
-                onCheckedChange={v => setConfig({ ...config, round_robin: v, delegate_to: v ? '' : config.delegate_to })}
-              />
-              <Label className="text-sm font-normal">Rodízio automático entre membros</Label>
-            </div>
-            {config.round_robin && (
-              <p className="text-sm text-muted-foreground">O chat será delegado automaticamente para o próximo membro disponível.</p>
-            )}
-          </div>
-        );
+        return renderDelegate();
 
       default:
         return <p className="text-sm text-muted-foreground">Tipo de etapa desconhecido.</p>;
