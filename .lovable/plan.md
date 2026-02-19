@@ -1,106 +1,157 @@
 
-# Campanhas - Sistema de Acoes em Massa
+
+# Redesign dos Relatorios - Estilo Guru
 
 ## Visao Geral
 
-Criar um modulo completo de **Campanhas** inspirado no Guru, onde o usuario pode configurar acoes automatizadas em massa sobre contatos/conversas do CRM. Cada campanha combina **filtros de contatos** + **dialogo/acao** + **agendamento**.
+Transformar a pagina de Relatorios de um dashboard fixo com graficos pre-definidos para um **sistema de relatorios personalizaveis**, onde o usuario pode criar, salvar e visualizar relatorios com filtros avancados - igual ao Guru.
 
 ## O que o usuario vai poder fazer
 
-### Lista de Campanhas
-Uma tabela com todas as campanhas criadas, mostrando:
-- Nome da campanha
-- Status (badge colorido): Rascunho, Em Progresso, Concluida, Pausada
-- Barra de progresso (% de contatos processados)
-- Quantidade de recipientes
-- Data de inicio e data de criacao
-- Acoes rapidas (editar, pausar, excluir)
-- Botao "Nova Campanha" no topo
+### Menu lateral de tipos de relatorio
+Uma sidebar dentro da pagina de relatorios com as categorias:
+- **Chats** - Lista de conversas com filtros
+- **Historico de Mensagens** - Historico detalhado por contato
+- **Relatorios de Usuarios** - Performance dos agentes/usuarios
+- **Relatorios Graficos** - Graficos e metricas visuais (o que ja existe hoje)
+- **Contatos** - Lista filtrada de contatos do CRM
 
-### Criar/Editar Campanha (formulario em 3 secoes)
+### Criar relatorio personalizado
+Formulario com filtros avancados (igual ao PDF do Guru):
 
-**1. INFORMACOES**
-- Nome da campanha
-- Descricao
-- Data/hora de envio (agendar ou enviar agora)
-- Horario para envio (janela de horario permitido)
-- Prazo para finalizar envios
-- Ignorar fins de semana (checkbox Sabado/Domingo)
+**Informacoes basicas:**
+- Nome do relatorio
 
-**2. DIALOGO**
-- Selecionar um fluxo de chatbot existente (dos `chatbot_flows`) para executar nos contatos
-- Ou selecionar uma acao direta: Disparo de mensagem, Limpar chat (arquivar conversas fechadas), Delegar lead, Aplicar tag, Mover para funil
+**Filtros por Tags:**
+- Inserir quem tem estas Tags
+- Excluir quem tem estas Tags
 
-**3. CONTATOS (Filtros)**
-Filtros avancados para segmentar quais contatos serao afetados:
-- Inserir quem tiver estas Tags / Excluir quem tiver estas Tags
-- Inserir quem tem conversa neste canal / Excluir por canal
-- Cadastrado a partir de (data) / Cadastrado ate (data)
-- Mais de X dias sem interagir / Menos de X dias sem interagir
-- Mais de X dias sem receber mensagem / Menos de X dias sem receber
-- Mais de X dias sem enviar mensagem / Menos de X dias sem enviar
-- Etapa do Funil / Status de conversa
-- Nome do responsavel
-- Grupo/Departamento
-- Delegacao: Delegar para usuario/departamento com opcoes de rodizio
-- Preview dos contatos filtrados (contador e lista)
+**Outras opcoes:**
+- Esta Arquivado (sim/nao/indiferente)
+- Possui Msg nao lida
+- Status de Atendimento (aberto/fechado/indiferente)
+
+**Filtros por delegacao:**
+- Delegado ao usuario (selecionar usuarios)
+- Delegado ao departamento (selecionar departamentos)
+
+**Filtros por canal:**
+- Aparelho/Canal (WhatsApp, Instagram, Webchat)
+
+**Status do Bot:**
+- Indiferente / Ativo / Inativo
+
+**Etapa do Funil:**
+- Selecionar funil e etapa
+
+**Filtros de interacao e cadastro:**
+- Cadastrado nos ultimos X dias
+- Cadastrado a partir de / ate
+- Interagiu nos ultimos X dias
+- Mais de X dias sem interagir
+- Dias sem receber mensagem
+- Dias sem enviar mensagem
+
+**Visualizacao:**
+- Quem pode ter acesso ao relatorio
+- Mostrar na Tela Inicial (toggle)
+
+### Tabela de resultados
+Apos aplicar os filtros, uma tabela paginada mostrando:
+- Nome do contato
+- WhatsApp/Telefone
+- Data de cadastro
+- Ultima mensagem
+- Data da ultima mensagem
+- Tags
+
+Com paginacao no rodape (igual ao Guru).
+
+### Relatorios salvos
+Lista de relatorios salvos pelo usuario para acesso rapido.
 
 ## Detalhes Tecnicos
 
-### Nova tabela: campaigns
+### Nova tabela: saved_reports
 
 ```text
-campaigns
+saved_reports
   id              UUID PK
   company_id      UUID NOT NULL
+  created_by      UUID NOT NULL (user que criou)
   name            TEXT NOT NULL
-  description     TEXT DEFAULT ''
-  status          TEXT DEFAULT 'draft' (draft, scheduled, running, paused, completed)
-  action_type     TEXT NOT NULL (send_message, archive_chats, delegate, apply_tag, move_funnel, run_flow)
-  action_config   JSONB DEFAULT '{}' (configuracao da acao: mensagem, flow_id, tag_ids, etc.)
-  filters         JSONB DEFAULT '{}' (todos os filtros de segmentacao)
-  schedule_at     TIMESTAMPTZ (quando iniciar)
-  deadline_at     TIMESTAMPTZ (prazo para finalizar)
-  skip_weekends   BOOLEAN DEFAULT false
-  send_window     JSONB DEFAULT '{}' (horario permitido: {start: "08:00", end: "18:00"})
-  total_contacts  INTEGER DEFAULT 0
-  processed       INTEGER DEFAULT 0
+  report_type     TEXT NOT NULL (chats, messages, users, charts, contacts)
+  filters         JSONB DEFAULT '{}'
+  show_on_home    BOOLEAN DEFAULT false
   created_at      TIMESTAMPTZ DEFAULT now()
   updated_at      TIMESTAMPTZ DEFAULT now()
 ```
 
-RLS: mesmas policies das demais tabelas (company_id = get_user_company_id(), admin para insert/update/delete, todos podem ver).
+RLS: usuarios da mesma empresa podem ver; apenas o criador ou admin pode editar/excluir.
 
 ### Arquivos que serao criados
 
-1. **`supabase/migrations/xxx_campaigns.sql`** - Tabela campaigns com RLS e triggers
-2. **`src/hooks/useCampaigns.ts`** - Hook com CRUD (listar, criar, atualizar, excluir, pausar/retomar)
-3. **`src/pages/Campanhas.tsx`** - Pagina principal com lista de campanhas + formulario de criacao/edicao
-4. **`src/components/campanhas/CampaignList.tsx`** - Tabela de campanhas com status, progresso e acoes
-5. **`src/components/campanhas/CampaignForm.tsx`** - Formulario em 3 secoes (Informacoes, Dialogo, Contatos)
-6. **`src/components/campanhas/CampaignFilters.tsx`** - Componente de filtros avancados de contatos
+1. **`supabase/migrations/xxx_saved_reports.sql`** - Tabela saved_reports com RLS
+2. **`src/hooks/useReportBuilder.ts`** - Hook para salvar/listar relatorios + queries dinamicas de filtros
+3. **`src/components/relatorios/ReportSidebar.tsx`** - Menu lateral com categorias de relatorio
+4. **`src/components/relatorios/ReportFilters.tsx`** - Formulario de filtros avancados (tags, datas, delegacao, etc.)
+5. **`src/components/relatorios/ReportResults.tsx`** - Tabela de resultados com paginacao
+6. **`src/components/relatorios/SavedReportsList.tsx`** - Lista de relatorios salvos
 
 ### Arquivos que serao modificados
 
-1. **`src/App.tsx`** - Adicionar rota `/campanhas`
-2. **`src/components/AppLayout.tsx`** - Ja tem o icone Megaphone importado; adicionar link na sidebar
+1. **`src/pages/Relatorios.tsx`** - Refatorado: layout 2 colunas (sidebar de tipos + area principal com filtros/resultados). Os graficos atuais serao movidos para a categoria "Relatorios Graficos"
+2. **`src/hooks/useReports.ts`** - Manter hooks existentes, usados na aba "Relatorios Graficos"
 3. **`src/integrations/supabase/types.ts`** - Atualizado automaticamente
 
-### Fluxo da interface
+### Estrutura do layout
 
-1. Usuario acessa `/campanhas` e ve a lista de todas as campanhas
-2. Clica em "Nova Campanha" e abre o formulario com 3 secoes
-3. Preenche informacoes basicas (nome, descricao, agendamento)
-4. Escolhe o tipo de acao (disparo de mensagem, limpar chat, delegar, etc.)
-5. Configura os filtros para segmentar os contatos
-6. Salva como rascunho ou agenda para execucao
-7. Na lista, pode pausar, retomar ou excluir campanhas
+```text
++------------------+----------------------------------------+
+| Sidebar          | Area Principal                         |
+|                  |                                        |
+| > Chats          | [Nome do Relatorio]                    |
+| > Historico Msgs |                                        |
+| > Rel. Usuarios  | +-- FILTROS --------------------------+|
+| > Rel. Graficos  | | Tags: [+] [-]                       ||
+| > Contatos       | | Status: [select]                    ||
+|                  | | Delegado a: [select]                ||
+| --- Salvos ---   | | Departamento: [select]              ||
+| Meu Relatorio 1  | | Canal: [select]                     ||
+| Meu Relatorio 2  | | Funil: [select]                     ||
+|                  | | Cadastro: de [date] ate [date]      ||
+|                  | | Interacao: X dias                   ||
+|                  | +------------------------------------+|
+|                  |                                        |
+|                  | [Ver Relatorio] [Salvar Relatorio]      |
+|                  |                                        |
+|                  | +-- RESULTADOS -----------------------+|
+|                  | | Nome | WhatsApp | Cadastro | ...    ||
+|                  | | ...  | ...      | ...      | ...    ||
+|                  | +------------------------------------+|
+|                  | Paginacao: < 1 2 3 4 5 >               |
++------------------+----------------------------------------+
+```
 
 ### Integracao com dados existentes
 
-- **Tags**: Usa `useTags()` para filtros de inclusao/exclusao por tag
-- **Canais**: Usa os canais de conversa existentes (whatsapp, instagram, webchat)
-- **Funis**: Usa `FunnelContext` para filtrar por etapa de funil
-- **Equipe**: Usa `useTeamProfiles()` para filtros de responsavel e delegacao
-- **Departamentos**: Usa `useDepartments()` para filtros por grupo
-- **Fluxos de chatbot**: Usa `useChatbotFlows()` para selecionar dialogo a executar
+- **Tags**: `useTags()` para filtros de inclusao/exclusao
+- **Equipe**: `useTeamProfiles()` para filtro de delegacao por usuario
+- **Departamentos**: `useDepartments()` para filtro por departamento
+- **Funis**: `FunnelContext` para filtro por etapa de funil
+- **Contatos**: Query direta na tabela `contacts` com filtros dinamicos
+- **Conversas**: Query na tabela `conversations` + `messages` para historico
+- **Graficos existentes**: Os hooks `useAgentMetrics`, `usePipelineConversion`, `useNPSSummary` continuam sendo usados na aba "Relatorios Graficos"
+
+### Queries dinamicas de filtros
+
+O hook `useReportBuilder` vai construir queries Supabase dinamicamente com base nos filtros selecionados. Exemplo para o tipo "Chats":
+
+- Base: `supabase.from('conversations').select('*, contact:contacts(*)')`
+- Filtro por tag: join com contacts.tags JSONB
+- Filtro por status: `.eq('status', 'open')`
+- Filtro por delegacao: `.eq('assigned_user_id', userId)`
+- Filtro por canal: `.eq('channel', 'whatsapp')`
+- Filtro por data: `.gte('created_at', dateFrom).lte('created_at', dateTo)`
+- Paginacao: `.range(offset, offset + pageSize - 1)`
+
