@@ -1,7 +1,9 @@
-import { useState, useRef, useCallback } from 'react';
-import { Search, MessageSquare, Loader2, SlidersHorizontal, X } from 'lucide-react';
+import { useState } from 'react';
+import {
+  Search, MessageSquare, Loader2, SlidersHorizontal, X,
+  Mail, Monitor, Wifi, Star, Clock, User,
+} from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +24,8 @@ import type { ConversationWithRelations, ConversationFilters } from '@/services/
 import type { Enums } from '@/integrations/supabase/types';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useTags } from '@/hooks/useTags';
+import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 
 const statusTabs: { label: string; value: Enums<'conversation_status'> }[] = [
   { label: 'Abertas', value: 'open' },
@@ -68,6 +72,16 @@ export default function ConversationList({
 }: Props) {
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [localName, setLocalName] = useState('');
+  const [localPhone, setLocalPhone] = useState('');
+  const [localTag, setLocalTag] = useState('');
+  const [localUser, setLocalUser] = useState('');
+  const [localStatus, setLocalStatus] = useState('');
+  const [localOrder, setLocalOrder] = useState('');
+  const [localChannel, setLocalChannel] = useState('');
+
+  const { data: tags = [] } = useTags();
+  const { data: teamMembers = [] } = useTeamProfiles();
 
   const activeStatus = filters.status ?? 'open';
 
@@ -81,6 +95,33 @@ export default function ConversationList({
     }
     return true;
   });
+
+  function handleApplyFilters() {
+    onFilterChange({
+      channel: localChannel && localChannel !== 'todos'
+        ? (localChannel as Enums<'conversation_channel'>)
+        : undefined,
+    });
+  }
+
+  function handleClearFilters() {
+    setLocalName('');
+    setLocalPhone('');
+    setLocalTag('');
+    setLocalUser('');
+    setLocalStatus('');
+    setLocalOrder('');
+    setLocalChannel('');
+    onFilterChange({ channel: undefined });
+  }
+
+  const channelIcons = [
+    { id: 'email', icon: Mail, label: 'E-mail' },
+    { id: 'webchat', icon: Monitor, label: 'Webchat' },
+    { id: 'whatsapp', icon: Wifi, label: 'WhatsApp' },
+    { id: 'star', icon: Star, label: 'Favoritos' },
+    { id: 'pending', icon: Clock, label: 'Aguardando' },
+  ];
 
   return (
     <div className="flex w-[320px] min-w-[300px] flex-col border-r border-border bg-card">
@@ -101,7 +142,7 @@ export default function ConversationList({
           )}
         </div>
         <Button
-          variant={filtersOpen ? 'secondary' : 'ghost'}
+          variant={filtersOpen ? 'default' : 'ghost'}
           size="icon"
           className="h-8 w-8 shrink-0"
           onClick={() => setFiltersOpen(!filtersOpen)}
@@ -113,25 +154,166 @@ export default function ConversationList({
       {/* Expandable filters */}
       <Collapsible open={filtersOpen}>
         <CollapsibleContent>
-          <div className="px-3 py-2.5 border-b border-border space-y-2 bg-secondary/30">
+          <div className="px-3 py-3 border-b border-border space-y-2.5 bg-secondary/20">
+
+            {/* Nome */}
             <div>
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Canal</p>
-              <Select
-                value={filters.channel ?? 'todos'}
-                onValueChange={(v) =>
-                  onFilterChange({ channel: v === 'todos' ? undefined : (v as Enums<'conversation_channel'>) })
-                }
-              >
-                <SelectTrigger className="h-7 text-xs bg-secondary border-0">
-                  <SelectValue placeholder="Canal" />
+              <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Nome:</label>
+              <Input
+                value={localName}
+                onChange={(e) => setLocalName(e.target.value)}
+                className="h-7 text-xs bg-background border border-border rounded"
+                placeholder=""
+              />
+            </div>
+
+            {/* Aparelho */}
+            <div>
+              <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Aparelho:</label>
+              <Select value={localChannel} onValueChange={setLocalChannel}>
+                <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                  <SelectValue placeholder="" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todos os canais</SelectItem>
+                  <SelectItem value="todos">Todos</SelectItem>
                   <SelectItem value="whatsapp">WhatsApp</SelectItem>
                   <SelectItem value="instagram">Instagram</SelectItem>
                   <SelectItem value="webchat">Webchat</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Número Whatsapp */}
+            <div>
+              <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Número Whatsapp:</label>
+              <Input
+                value={localPhone}
+                onChange={(e) => setLocalPhone(e.target.value)}
+                className="h-7 text-xs bg-background border border-border rounded"
+                placeholder=""
+              />
+            </div>
+
+            {/* Tags + Qualquer */}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Tags:</label>
+                <Select value={localTag} onValueChange={setLocalTag}>
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue placeholder="" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualquer">Qualquer</SelectItem>
+                    {tags.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-24 self-end">
+                <Select defaultValue="qualquer">
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualquer">Qualquer</SelectItem>
+                    <SelectItem value="todas">Todas</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Usuário/Departamento + Qualquer */}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Usuário/Departamento:</label>
+                <Select value={localUser} onValueChange={setLocalUser}>
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue placeholder="" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualquer">Qualquer</SelectItem>
+                    {teamMembers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-24 self-end">
+                <Select defaultValue="qualquer">
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualquer">Qualquer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Etapa do Funil */}
+            <div>
+              <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Etapa do Funil:</label>
+              <Input
+                className="h-7 text-xs bg-background border border-border rounded"
+                placeholder=""
+                readOnly
+              />
+            </div>
+
+            {/* Status + Ordenar Por */}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1 block">Status:</label>
+                <Select value={localStatus} onValueChange={setLocalStatus}>
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue placeholder="" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
+                    <SelectItem value="open">Aberto</SelectItem>
+                    <SelectItem value="pending">Aguardando</SelectItem>
+                    <SelectItem value="closed">Fechado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Ordenar Por</label>
+                <Select value={localOrder} onValueChange={setLocalOrder}>
+                  <SelectTrigger className="h-7 text-xs bg-background border border-border rounded">
+                    <SelectValue placeholder="" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="recent">Mais recente</SelectItem>
+                    <SelectItem value="oldest">Mais antigo</SelectItem>
+                    <SelectItem value="name">Nome A-Z</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Channel icon filters */}
+            <div className="flex items-center justify-between pt-1">
+              {channelIcons.map(({ id, icon: Icon, label }) => (
+                <label key={id} className="flex flex-col items-center gap-1 cursor-pointer group">
+                  <div className={`h-7 w-7 rounded border border-border flex items-center justify-center transition-colors group-hover:border-primary ${localChannel === id ? 'bg-primary/10 border-primary' : 'bg-background'}`}
+                    onClick={() => setLocalChannel(localChannel === id ? '' : id)}
+                  >
+                    <Icon size={13} className={localChannel === id ? 'text-primary' : 'text-muted-foreground'} />
+                  </div>
+                  <input type="checkbox" className="h-3 w-3 accent-primary" checked={localChannel === id} onChange={() => setLocalChannel(localChannel === id ? '' : id)} />
+                </label>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" className="flex-1 h-7 text-xs" onClick={handleApplyFilters}>
+                Aplicar
+              </Button>
+              <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={handleClearFilters}>
+                Limpar
+              </Button>
             </div>
           </div>
         </CollapsibleContent>
