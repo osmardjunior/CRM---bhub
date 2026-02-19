@@ -152,12 +152,14 @@ function LeadCard({ name }: { name: string }) {
 // ── Stage Column ──────────────────────────────────────────
 function StageColumn({
   funnelId,
+  stageId,
   stageIndex,
   stagesCount,
   label,
   leads,
 }: {
   funnelId: string;
+  stageId: string;
   stageIndex: number;
   stagesCount: number;
   label: string;
@@ -191,13 +193,13 @@ function StageColumn({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => moveStage(funnelId, stageIndex, 'left')}
+                onClick={() => moveStage(funnelId, stageId, 'left')}
                 disabled={stageIndex === 0}
               >
                 ← Mover para esquerda
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => moveStage(funnelId, stageIndex, 'right')}
+                onClick={() => moveStage(funnelId, stageId, 'right')}
                 disabled={stageIndex === stagesCount - 1}
               >
                 → Mover para direita
@@ -246,7 +248,7 @@ function StageColumn({
         open={renameOpen}
         currentLabel={label}
         onClose={() => setRenameOpen(false)}
-        onRename={(newLabel) => renameStage(funnelId, stageIndex, newLabel)}
+        onRename={(newLabel) => renameStage(funnelId, stageId, newLabel)}
       />
 
       {/* Delete Confirm */}
@@ -262,7 +264,7 @@ function StageColumn({
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteStage(funnelId, stageIndex)}
+              onClick={() => deleteStage(funnelId, stageId)}
             >
               Excluir
             </AlertDialogAction>
@@ -382,8 +384,9 @@ export default function FunnelKanban() {
         <div className="flex gap-3 h-full min-w-max">
           {filteredStages.map((stage, idx) => (
             <StageColumn
-              key={idx}
+              key={stage.id}
               funnelId={funnel.id}
+              stageId={stage.id}
               stageIndex={idx}
               stagesCount={funnel.stages.length}
               label={stage.label}
