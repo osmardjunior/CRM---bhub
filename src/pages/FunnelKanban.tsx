@@ -10,80 +10,39 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-// ── Mock data per funnel ─────────────────────────────────
+// ── Funnel structure (stages only, no mock leads) ────────
 const MOCK_FUNNELS: Record<string, { name: string; stages: { label: string; leads: string[]; shown: number; total: number; pct: number }[] }> = {
   '1': {
     name: '0. AÇÃO PIX',
     stages: [
-      {
-        label: 'ENTRADA DO LEAD',
-        leads: [],
-        shown: 0, total: 0, pct: 0,
-      },
-      {
-        label: 'VENDEDOR ATUANDO',
-        leads: ['Darlion', 'Deus acima de tudo.', 'Elly', 'Victor', 'Eitel Veloso 🧡', 'Rodrigho Lobo', 'Deus', 'Giselle Roberta', '6ahh土', 'Rosana', 'Alexandre Silva', 'Matheus Santos', 'Carlão', 'Hugo Leonardo', 'Wellington', 'BRUNO', 'Kauã´', 'adm...', 'Galdino 🦁'],
-        shown: 50, total: 545, pct: 73,
-      },
-      {
-        label: 'JÁ POSSUI CADASTRO',
-        leads: ['Leo 8', '_Thiago', 'Professor José Junior', 'Renato Mendes', 'Luiz Felipe', '💙🥜 Júlio Braga🤙 💙', 'Fabiano Dos Santos', '🖤', 'lucas', 'Não Disponível', 'Rayane Silva 🇿🇦', '🥤', 'Arlan Freire', 'Alan Richard Esposito', 'Anderson Silva', 'Karol Guimarães', 'Gustavo', '🥱💙⭐ Liz Feitosa 🍑🤙🦋🌟', 'Canais 30 pila'],
-        shown: 50, total: 85, pct: 11,
-      },
-      {
-        label: 'CADASTRO REALIZADO',
-        leads: ['–guilherme', 'Rita', 'Não Disponível', 'Aurélio Diniz', 'Biel'],
-        shown: 5, total: 5, pct: 1,
-      },
-      {
-        label: 'CPA REALIZADO',
-        leads: ['Heck', 'Daniela', 'guizin', 'STELORÉ', '🍑', 'Emanuel', 'Lesqueves', 'wagner wfj8001', '.', 'Gabriel Reis', 'Cleiton', 'T002', 'Tiago Rodrigues', 'Rafa', 'Diego Silva', 'Jefin', 'Alessandro 🤘 🅰', 'Aurélio Diniz', '🔵'],
-        shown: 39, total: 39, pct: 5,
-      },
-      {
-        label: 'REDEPÓSITO',
-        leads: ['Jefim', 'Rafael'],
-        shown: 2, total: 2, pct: 0,
-      },
-      {
-        label: 'VENDA REALIZADA',
-        leads: [],
-        shown: 0, total: 0, pct: 0,
-      },
-      {
-        label: 'RECUPERAÇÃO 1',
-        leads: ['Victor Spinal', 'Gustavo', 'Júlia Souza', 'Fábio', 'Erick', 'Cristian', 'José Roberto', 'Rayane Silva 🇿🇦', 'Juliano Ibrahimovic', 'luendson10', 'Não Disponível', 'Kelly', 'Jéssica Santos 🌮 🌿 ✏', 'Toninho Barros', 'Não Disponível', 'Bruno Lopes', 'Matheus Pavese', 'Luiz Sousa', 'Guilherme Batista'],
-        shown: 33, total: 33, pct: 4,
-      },
-      {
-        label: 'RECUPERAÇÃO 2',
-        leads: [],
-        shown: 0, total: 0, pct: 0,
-      },
-      {
-        label: 'SEM INTERAÇÃO',
-        leads: ['Barbosa', 'Adrian', 'Gabriel Felinto', 'Não Disponível', 'Rafael', '🧡 🟢', 'Gite', 'DG🔴', '–', 'marins', 'July', 'Teixeira', 'Jean Carlos Galvão', '–', 'Allyson', 'Jeferson Silva 🔲', 'RV', 'Antonio', 'Cristiano Quadros'],
-        shown: 42, total: 42, pct: 6,
-      },
+      { label: 'ENTRADA DO LEAD', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'VENDEDOR ATUANDO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'JÁ POSSUI CADASTRO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'CADASTRO REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'CPA REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'REDEPÓSITO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'VENDA REALIZADA', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'RECUPERAÇÃO 1', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'RECUPERAÇÃO 2', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'SEM INTERAÇÃO', leads: [], shown: 0, total: 0, pct: 0 },
     ],
   },
   '2': {
     name: '00. ROLETA',
     stages: [
       { label: 'ENTRADA DO LEAD', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'VENDEDOR ATUANDO', leads: ['Ana', 'Carlos', 'Pedro', 'Maria'], shown: 4, total: 366, pct: 60 },
-      { label: 'CADASTRO REALIZADO', leads: ['João', 'Beatriz', 'Lucas'], shown: 3, total: 7, pct: 10 },
-      { label: 'CPA REALIZADO', leads: ['Fernanda', 'Ricardo'], shown: 2, total: 21, pct: 15 },
-      { label: 'JÁ TEM CADASTRO', leads: ['Marcos', 'Juliana', 'André'], shown: 3, total: 128, pct: 10 },
-      { label: 'REDEPÓSITO', leads: ['Sofia'], shown: 1, total: 1, pct: 1 },
-      { label: 'VENDA REALIZADA', leads: ['Diego'], shown: 1, total: 1, pct: 1 },
+      { label: 'VENDEDOR ATUANDO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'CADASTRO REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'CPA REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'JÁ TEM CADASTRO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'REDEPÓSITO', leads: [], shown: 0, total: 0, pct: 0 },
+      { label: 'VENDA REALIZADA', leads: [], shown: 0, total: 0, pct: 0 },
       { label: 'RECUPERAÇÃO 1', leads: [], shown: 0, total: 0, pct: 0 },
       { label: 'RECUPERAÇÃO 2', leads: [], shown: 0, total: 0, pct: 0 },
       { label: 'SEM INTERAÇÃO', leads: [], shown: 0, total: 0, pct: 0 },
     ],
   },
 };
-
 // ── Lead Card ────────────────────────────────────────────
 function LeadCard({ name }: { name: string }) {
   return (
