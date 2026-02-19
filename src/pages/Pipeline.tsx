@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, MoreHorizontal, Pencil, Download, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Download, Trash2, X, GripVertical, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 // ── Types ─────────────────────────────────────────────────
 interface FunnelStage {
@@ -16,44 +23,6 @@ interface Funnel {
   expanded: boolean;
 }
 
-// ── Mock data matching reference image ────────────────────
-const INITIAL_FUNNELS: Funnel[] = [
-  {
-    id: '1',
-    name: '0. AÇÃO PIX',
-    expanded: true,
-    stages: [
-      { label: 'ENTRADA DO LEAD', count: 0 },
-      { label: 'VENDEDOR ATUANDO', count: 545 },
-      { label: 'JÁ POSSUI CADASTRO', count: 85 },
-      { label: 'CADASTRO REALIZADO', count: 5 },
-      { label: 'CPA REALIZADO', count: 39 },
-      { label: 'REDEPÓSITO', count: 2 },
-      { label: 'VENDA REALIZADA', count: 0 },
-      { label: 'RECUPERAÇÃO 1', count: 33 },
-      { label: 'RECUPERAÇÃO 2', count: 0 },
-      { label: 'SEM INTERAÇÃO', count: 42 },
-    ],
-  },
-  {
-    id: '2',
-    name: '00. ROLETA',
-    expanded: true,
-    stages: [
-      { label: 'ENTRADA DO LEAD', count: 0 },
-      { label: 'VENDEDOR ATUANDO', count: 366 },
-      { label: 'CADASTRO REALIZADO', count: 7 },
-      { label: 'CPA REALIZADO', count: 21 },
-      { label: 'JÁ TEM CADASTRO', count: 128 },
-      { label: 'REDEPÓSITO', count: 1 },
-      { label: 'VENDA REALIZADA', count: 1 },
-      { label: 'RECUPERAÇÃO 1', count: 0 },
-      { label: 'RECUPERAÇÃO 2', count: 0 },
-      { label: 'SEM INTERAÇÃO', count: 0 },
-    ],
-  },
-];
-
 // ── Wave SVG ──────────────────────────────────────────────
 function FunnelWave({ stages }: { stages: FunnelStage[] }) {
   const max = Math.max(...stages.map((s) => s.count), 1);
@@ -61,7 +30,6 @@ function FunnelWave({ stages }: { stages: FunnelStage[] }) {
   const H = 80;
   const segW = W / stages.length;
 
-  // Build a smooth wave path using the count as amplitude
   const topPoints: [number, number][] = stages.map((s, i) => {
     const x = i * segW + segW / 2;
     const amp = (s.count / max) * (H / 2 - 4);
@@ -92,16 +60,10 @@ function FunnelWave({ stages }: { stages: FunnelStage[] }) {
 
   const topPath = catmullRom(topPoints);
   const botPath = catmullRom([...botPoints].reverse());
-
   const closedPath = topPath + ' ' + botPath.replace('M', 'L') + ' Z';
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="w-full"
-      style={{ height: 80 }}
-    >
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height: 80 }}>
       <defs>
         <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#22c55e" stopOpacity="0.9" />
@@ -110,29 +72,135 @@ function FunnelWave({ stages }: { stages: FunnelStage[] }) {
           <stop offset="100%" stopColor="#a3e635" stopOpacity="0.6" />
         </linearGradient>
       </defs>
-      {/* Dividers */}
       {stages.map((_, i) => (
-        <line
-          key={i}
-          x1={i * segW}
-          y1={0}
-          x2={i * segW}
-          y2={H}
-          stroke="#6366f1"
-          strokeWidth="0.5"
-          opacity="0.4"
-        />
+        <line key={i} x1={i * segW} y1={0} x2={i * segW} y2={H} stroke="#6366f1" strokeWidth="0.5" opacity="0.4" />
       ))}
-      {/* Wave shape */}
       <path d={closedPath} fill="url(#waveGrad)" />
-      {/* Baseline */}
       <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#a3e635" strokeWidth="1" opacity="0.5" />
     </svg>
   );
 }
 
+// ── Create Funnel Modal ────────────────────────────────────
+function CreateFunnelModal({
+  open,
+  onClose,
+  onCreate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreate: (funnel: Omit<Funnel, 'id' | 'expanded'>) => void;
+}) {
+  const [name, setName] = useState('');
+  const [stages, setStages] = useState<string[]>(['ENTRADA DO LEAD', '']);
+
+  const addStage = () => setStages((s) => [...s, '']);
+
+  const removeStage = (idx: number) =>
+    setStages((s) => s.filter((_, i) => i !== idx));
+
+  const updateStage = (idx: number, val: string) =>
+    setStages((s) => s.map((v, i) => (i === idx ? val : v)));
+
+  const handleSubmit = () => {
+    const validStages = stages.filter((s) => s.trim() !== '');
+    if (!name.trim() || validStages.length === 0) return;
+    onCreate({
+      name: name.trim(),
+      stages: validStages.map((label) => ({ label: label.trim(), count: 0 })),
+    });
+    setName('');
+    setStages(['ENTRADA DO LEAD', '']);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Criar novo funil</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-1">
+          {/* Funnel name */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
+              Nome do funil
+            </label>
+            <Input
+              placeholder="Ex: Funil de Vendas"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+
+          {/* Stages */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
+              Etapas do funil
+            </label>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {stages.map((stage, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <GripVertical size={14} className="text-muted-foreground shrink-0 cursor-grab" />
+                  <Input
+                    placeholder={`Etapa ${idx + 1}`}
+                    value={stage}
+                    onChange={(e) => updateStage(idx, e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
+                  {stages.length > 1 && (
+                    <button
+                      onClick={() => removeStage(idx)}
+                      className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 w-full gap-1.5 text-xs border-dashed"
+              onClick={addStage}
+            >
+              <Plus size={13} />
+              Adicionar etapa
+            </Button>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-success hover:bg-success/90 text-success-foreground"
+              onClick={handleSubmit}
+              disabled={!name.trim() || stages.filter((s) => s.trim()).length === 0}
+            >
+              Criar funil
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Funnel Card ───────────────────────────────────────────
-function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (id: string) => void; onOpen: (id: string) => void }) {
+function FunnelCard({
+  funnel,
+  onDelete,
+  onOpen,
+}: {
+  funnel: Funnel;
+  onDelete: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [visibilityRestrict, setVisibilityRestrict] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('mine');
@@ -182,7 +250,6 @@ function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (i
       {moreOpen && (
         <div className="bg-card border-t border-border px-4 py-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-4">
-            {/* Left: restrict visibility */}
             <div className="flex-1 space-y-2">
               <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                 <input
@@ -200,40 +267,18 @@ function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (i
               )}
             </div>
 
-            {/* Right: view mode */}
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="radio"
-                  name={`view-${funnel.id}`}
-                  checked={viewMode === 'all'}
-                  onChange={() => setViewMode('all')}
-                  className="accent-primary"
-                />
-                <span>
-                  Pode <span className="text-primary font-medium">visualizar todos os chats do funil</span>
-                </span>
+                <input type="radio" name={`view-${funnel.id}`} checked={viewMode === 'all'} onChange={() => setViewMode('all')} className="accent-primary" />
+                <span>Pode <span className="text-primary font-medium">visualizar todos os chats do funil</span></span>
               </label>
               <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                <input
-                  type="radio"
-                  name={`view-${funnel.id}`}
-                  checked={viewMode === 'mine'}
-                  onChange={() => setViewMode('mine')}
-                  className="accent-primary"
-                />
-                <span>
-                  Ver apenas os{' '}
-                  <span className="text-primary font-medium">
-                    chats delegados a si ou aos departamentos que faz parte
-                  </span>
-                  .
-                </span>
+                <input type="radio" name={`view-${funnel.id}`} checked={viewMode === 'mine'} onChange={() => setViewMode('mine')} className="accent-primary" />
+                <span>Ver apenas os <span className="text-primary font-medium">chats delegados a si ou aos departamentos que faz parte</span>.</span>
               </label>
             </div>
           </div>
 
-          {/* Action buttons */}
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-2">
               <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary text-primary hover:bg-primary hover:text-primary-foreground">
@@ -245,12 +290,7 @@ function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (i
                 Exportar em CSV
               </Button>
             </div>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-7 text-xs gap-1.5"
-              onClick={() => onDelete(funnel.id)}
-            >
+            <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5" onClick={() => onDelete(funnel.id)}>
               <Trash2 size={11} />
               Apagar Funil
             </Button>
@@ -261,10 +301,39 @@ function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (i
   );
 }
 
+// ── Empty State ───────────────────────────────────────────
+function FunnelEmptyState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
+        <Filter size={28} className="text-muted-foreground" />
+      </div>
+      <h3 className="text-base font-semibold text-foreground mb-1">Nenhum funil criado ainda</h3>
+      <p className="text-sm text-muted-foreground max-w-xs mb-6">
+        Crie seu primeiro funil, defina as etapas e comece a acompanhar seus leads em cada fase do atendimento.
+      </p>
+      <Button className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={onCreate}>
+        <Plus size={14} />
+        Criar primeiro funil
+      </Button>
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────
 export default function PipelinePage() {
   const navigate = useNavigate();
-  const [funnels, setFunnels] = useState<Funnel[]>(INITIAL_FUNNELS);
+  const [funnels, setFunnels] = useState<Funnel[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const handleCreate = (data: Omit<Funnel, 'id' | 'expanded'>) => {
+    const newFunnel: Funnel = {
+      id: String(Date.now()),
+      expanded: true,
+      ...data,
+    };
+    setFunnels((prev) => [...prev, newFunnel]);
+  };
 
   const handleDelete = (id: string) => {
     setFunnels((prev) => prev.filter((f) => f.id !== id));
@@ -272,26 +341,6 @@ export default function PipelinePage() {
 
   const handleOpen = (id: string) => {
     navigate(`/pipeline/${id}`);
-  };
-
-  const handleCreate = () => {
-    const name = `Novo Funil ${funnels.length + 1}`;
-    setFunnels((prev) => [
-      ...prev,
-      {
-        id: String(Date.now()),
-        name,
-        expanded: true,
-        stages: [
-          { label: 'ENTRADA DO LEAD', count: 0 },
-          { label: 'EM ATENDIMENTO', count: 0 },
-          { label: 'PROPOSTA', count: 0 },
-          { label: 'FECHAMENTO', count: 0 },
-          { label: 'GANHO', count: 0 },
-          { label: 'PERDIDO', count: 0 },
-        ],
-      },
-    ]);
   };
 
   return (
@@ -304,28 +353,33 @@ export default function PipelinePage() {
             Nesta área estão listados todos os funis criados na sua conta.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={handleCreate}>
+        <Button
+          size="sm"
+          className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground"
+          onClick={() => setShowCreate(true)}
+        >
           <Plus size={14} />
           Criar novo funil
         </Button>
       </div>
 
-      {/* Funnel list */}
-      <div>
-        {funnels.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <p className="text-sm">Nenhum funil criado ainda.</p>
-            <Button size="sm" className="mt-4 gap-1.5" onClick={handleCreate}>
-              <Plus size={14} />
-              Criar primeiro funil
-            </Button>
-          </div>
-        ) : (
-          funnels.map((f) => (
+      {/* Funnel list or empty state */}
+      {funnels.length === 0 ? (
+        <FunnelEmptyState onCreate={() => setShowCreate(true)} />
+      ) : (
+        <div>
+          {funnels.map((f) => (
             <FunnelCard key={f.id} funnel={f} onDelete={handleDelete} onOpen={handleOpen} />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create modal */}
+      <CreateFunnelModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreate={handleCreate}
+      />
     </div>
   );
 }
