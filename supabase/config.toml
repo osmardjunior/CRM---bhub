@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.send-satisfaction-survey]
 verify_jwt = false
+
+[functions.chatbot-process]
+verify_jwt = false

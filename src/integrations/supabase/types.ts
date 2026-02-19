@@ -14,6 +14,98 @@ export type Database = {
   }
   public: {
     Tables: {
+      chatbot_flows: {
+        Row: {
+          ai_instructions: string
+          business_hours: Json
+          company_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          offline_message: string
+          timeout_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          ai_instructions?: string
+          business_hours?: Json
+          company_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          offline_message?: string
+          timeout_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          ai_instructions?: string
+          business_hours?: Json
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          offline_message?: string
+          timeout_minutes?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flows_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_nodes: {
+        Row: {
+          company_id: string
+          config: Json
+          created_at: string
+          flow_id: string
+          id: string
+          node_type: Database["public"]["Enums"]["chatbot_node_type"]
+          position: number
+        }
+        Insert: {
+          company_id: string
+          config?: Json
+          created_at?: string
+          flow_id: string
+          id?: string
+          node_type?: Database["public"]["Enums"]["chatbot_node_type"]
+          position?: number
+        }
+        Update: {
+          company_id?: string
+          config?: Json
+          created_at?: string
+          flow_id?: string
+          id?: string
+          node_type?: Database["public"]["Enums"]["chatbot_node_type"]
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_nodes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_nodes_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           created_at: string
@@ -141,6 +233,8 @@ export type Database = {
         Row: {
           assigned_user_id: string | null
           channel: Database["public"]["Enums"]["conversation_channel"]
+          chatbot_active: boolean
+          chatbot_current_node: string | null
           close_reason: string | null
           company_id: string
           contact_id: string
@@ -153,6 +247,8 @@ export type Database = {
         Insert: {
           assigned_user_id?: string | null
           channel?: Database["public"]["Enums"]["conversation_channel"]
+          chatbot_active?: boolean
+          chatbot_current_node?: string | null
           close_reason?: string | null
           company_id: string
           contact_id: string
@@ -165,6 +261,8 @@ export type Database = {
         Update: {
           assigned_user_id?: string | null
           channel?: Database["public"]["Enums"]["conversation_channel"]
+          chatbot_active?: boolean
+          chatbot_current_node?: string | null
           close_reason?: string | null
           company_id?: string
           contact_id?: string
@@ -180,6 +278,13 @@ export type Database = {
             columns: ["assigned_user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_chatbot_current_node_fkey"
+            columns: ["chatbot_current_node"]
+            isOneToOne: false
+            referencedRelation: "chatbot_nodes"
             referencedColumns: ["id"]
           },
           {
@@ -726,6 +831,13 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "supervisor" | "agent"
+      chatbot_node_type:
+        | "message"
+        | "menu"
+        | "collect_data"
+        | "ai_response"
+        | "transfer"
+        | "condition"
       conversation_channel: "whatsapp" | "instagram" | "webchat"
       conversation_status: "open" | "pending" | "closed"
       deal_stage:
@@ -866,6 +978,14 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "supervisor", "agent"],
+      chatbot_node_type: [
+        "message",
+        "menu",
+        "collect_data",
+        "ai_response",
+        "transfer",
+        "condition",
+      ],
       conversation_channel: ["whatsapp", "instagram", "webchat"],
       conversation_status: ["open", "pending", "closed"],
       deal_stage: [

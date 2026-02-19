@@ -22,6 +22,7 @@ import MeuPerfil from "./pages/MeuPerfil";
 import NotFound from "./pages/NotFound";
 import Relatorios from "./pages/Relatorios";
 import RespostasRapidas from "./pages/RespostasRapidas";
+import Chatbot from "./pages/Chatbot";
 
 const queryClient = new QueryClient();
 
@@ -48,6 +49,7 @@ const App = () => (
               <Route path="/relatorios" element={<ProtectedRoute><AppLayout><Relatorios /></AppLayout></ProtectedRoute>} />
               <Route path="/respostas-rapidas" element={<ProtectedRoute><AppLayout><RespostasRapidas /></AppLayout></ProtectedRoute>} />
               <Route path="/configuracoes" element={<ProtectedRoute><AppLayout><Configuracoes /></AppLayout></ProtectedRoute>} />
+              <Route path="/chatbot" element={<ProtectedRoute><AppLayout><Chatbot /></AppLayout></ProtectedRoute>} />
               <Route path="/perfil" element={<ProtectedRoute><AppLayout><MeuPerfil /></AppLayout></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
