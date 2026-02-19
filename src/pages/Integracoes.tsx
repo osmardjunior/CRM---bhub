@@ -1,15 +1,13 @@
 import { useState } from 'react';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2 } from 'lucide-react';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
-import { useIntegrations, useAddDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
+import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
 import { toast } from 'sonner';
 import PageHeader from '@/components/shared/PageHeader';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
@@ -78,44 +76,66 @@ function ProviderFields({ provider, config, onChange }: {
 }
 
 // ── Device Card ──────────────────────────────────────
-function DeviceCard({ device, isAdmin, onDisconnect, onDelete }: {
+function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit }: {
   device: Integration;
   isAdmin: boolean;
   onDisconnect: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit: (device: Integration) => void;
 }) {
   const connected = device.status === 'connected';
 
   return (
-    <div className="rounded-xl border border-border bg-card card-shadow p-5 space-y-3">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
-            <Smartphone size={18} className="text-success" />
+    <div className="group rounded-xl border border-border bg-card card-shadow p-5 space-y-4 transition-shadow hover:shadow-md">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`flex h-11 w-11 items-center justify-center rounded-xl shrink-0 ${connected ? 'bg-success/10' : 'bg-muted'}`}>
+            <Smartphone size={20} className={connected ? 'text-success' : 'text-muted-foreground'} />
           </div>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">{device.device_name || 'Aparelho sem nome'}</h3>
-            <p className="text-xs text-muted-foreground">{formatPhone(device.phone_number)}</p>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground truncate">{device.device_name || 'Aparelho sem nome'}</h3>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Phone size={10} />
+              <span>{formatPhone(device.phone_number)}</span>
+            </div>
           </div>
         </div>
-        <Badge variant="outline" className={`text-xs shrink-0 ${connected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
+        <Badge variant="outline" className={`text-[11px] shrink-0 ${connected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
           {connected ? <><Wifi size={10} className="mr-1" /> Conectado</> : <><WifiOff size={10} className="mr-1" /> Desconectado</>}
         </Badge>
       </div>
 
-      <div className="rounded-lg bg-secondary/50 p-3 space-y-1">
-        <p className="text-xs text-muted-foreground">Provedor</p>
-        <p className="text-sm font-medium text-foreground">{providerLabel(device.provider)}</p>
+      {/* Info rows */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Server size={12} />
+            <span>Provedor</span>
+          </div>
+          <span className="text-xs font-medium text-foreground">{providerLabel(device.provider)}</span>
+        </div>
+        <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Shield size={12} />
+            <span>Credenciais</span>
+          </div>
+          <code className="text-[11px] text-muted-foreground">{maskSecret(JSON.stringify(device.config))}</code>
+        </div>
       </div>
 
+      {/* Actions */}
       {isAdmin && (
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1 border-t border-border">
+          <Button variant="outline" size="sm" className="text-xs gap-1.5 flex-1" onClick={() => onEdit(device)}>
+            <Pencil size={12} /> Editar
+          </Button>
           {connected && (
             <Button variant="outline" size="sm" className="text-xs text-destructive hover:text-destructive" onClick={() => onDisconnect(device.id)}>
               Desativar
             </Button>
           )}
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => onDelete(device.id)}>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0" onClick={() => onDelete(device.id)}>
             <Trash2 size={14} />
           </Button>
         </div>
@@ -129,10 +149,12 @@ export default function IntegracoesPage() {
   const permissions = usePermissions();
   const { data: integrations, isLoading } = useIntegrations();
   const addDevice = useAddDevice();
+  const updateDevice = useUpdateDevice();
   const disconnectDevice = useDisconnectDevice();
   const deleteDevice = useDeleteDevice();
 
   const [addOpen, setAddOpen] = useState(false);
+  const [editDevice, setEditDevice] = useState<Integration | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -144,6 +166,11 @@ export default function IntegracoesPage() {
   const [provider, setProvider] = useState('');
   const [config, setConfig] = useState<Record<string, string>>({});
 
+  // edit form state
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editConfig, setEditConfig] = useState<Record<string, string>>({});
+
   const whatsappDevices = integrations?.filter(i => i.channel === 'whatsapp') ?? [];
 
   const resetForm = () => {
@@ -151,6 +178,13 @@ export default function IntegracoesPage() {
     setPhoneNumber('');
     setProvider('');
     setConfig({});
+  };
+
+  const openEdit = (device: Integration) => {
+    setEditDevice(device);
+    setEditName(device.device_name || '');
+    setEditPhone(device.phone_number || '');
+    setEditConfig(device.config as Record<string, string> ?? {});
   };
 
   const handleAdd = () => {
@@ -169,6 +203,24 @@ export default function IntegracoesPage() {
         setAddOpen(false);
         resetForm();
       },
+    });
+  };
+
+  const handleEdit = () => {
+    if (!editDevice) return;
+    if (!editName.trim() || !editPhone.trim()) {
+      toast.error('Preencha nome e número');
+      return;
+    }
+    updateDevice.mutate({
+      id: editDevice.id,
+      updates: {
+        device_name: editName,
+        phone_number: editPhone,
+        config: editConfig,
+      },
+    }, {
+      onSuccess: () => setEditDevice(null),
     });
   };
 
@@ -195,7 +247,7 @@ export default function IntegracoesPage() {
       {/* ── Device Grid ─────────────────────────────── */}
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => <Skeleton key={i} className="h-44 rounded-xl" />)}
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-52 rounded-xl" />)}
         </div>
       ) : whatsappDevices.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card/50 p-10 text-center">
@@ -216,6 +268,7 @@ export default function IntegracoesPage() {
               isAdmin={permissions.isAdmin}
               onDisconnect={id => setConfirmId(id)}
               onDelete={id => setDeleteId(id)}
+              onEdit={openEdit}
             />
           ))}
         </div>
@@ -310,7 +363,7 @@ export default function IntegracoesPage() {
                       key={p.value}
                       type="button"
                       onClick={() => { setProvider(p.value); setConfig({}); }}
-                      className={`rounded-lg border p-3 text-left text-sm font-medium transition-all hover:border-primary/50 ${provider === p.value ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card text-foreground'}`}
+                      className={`rounded-lg border p-3 text-left text-xs font-medium transition-all hover:border-primary/50 truncate ${provider === p.value ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card text-foreground'}`}
                     >
                       {p.label}
                     </button>
@@ -376,6 +429,44 @@ export default function IntegracoesPage() {
                 {addDevice.isPending ? 'Salvando...' : 'Salvar aparelho'}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Device Modal ───────────────────────── */}
+      <Dialog open={!!editDevice} onOpenChange={v => { if (!v) setEditDevice(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar Aparelho</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">Altere o nome, número ou credenciais deste aparelho</p>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs">Nome do aparelho</Label>
+              <Input className="mt-1" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Ex: Vendas - Principal" />
+            </div>
+            <div>
+              <Label className="text-xs">Número de telefone</Label>
+              <Input className="mt-1" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+5511999999999" />
+            </div>
+
+            {editDevice && (
+              <>
+                <div className="rounded-lg bg-secondary/50 p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Provedor</p>
+                  <p className="text-sm font-semibold text-foreground">{providerLabel(editDevice.provider)}</p>
+                </div>
+                <ProviderFields provider={editDevice.provider} config={editConfig} onChange={setEditConfig} />
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDevice(null)}>Cancelar</Button>
+            <Button onClick={handleEdit} disabled={updateDevice.isPending}>
+              {updateDevice.isPending ? 'Salvando...' : 'Salvar alterações'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
