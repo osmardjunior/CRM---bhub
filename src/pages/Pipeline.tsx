@@ -1,199 +1,320 @@
-import { useState, useMemo } from 'react';
-import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import { Search, Plus, User } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { useState } from 'react';
+import { Plus, MoreHorizontal, Pencil, Download, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import DealDetailDrawer from '@/components/pipeline/DealDetailDrawer';
-import NewDealModal from '@/components/pipeline/NewDealModal';
-import EmptyState from '@/components/shared/EmptyState';
-import { TableSkeleton } from '@/components/shared/LoadingSkeletons';
-import { useDeals, useUpdateDeal, useCreateDeal } from '@/hooks/useDeals';
-import { useTeamMembers } from '@/hooks/useContacts';
-import type { DealStage, DealWithRelations } from '@/services/deals';
-import { Briefcase } from 'lucide-react';
 
-const stages: { key: DealStage; label: string; color: string }[] = [
-  { key: 'novo_lead', label: 'Novo Lead', color: 'bg-muted-foreground' },
-  { key: 'em_contato', label: 'Em Contato', color: 'bg-info' },
-  { key: 'proposta', label: 'Proposta', color: 'bg-warning' },
-  { key: 'fechamento', label: 'Fechamento', color: 'bg-primary' },
-  { key: 'ganho', label: 'Ganho', color: 'bg-success' },
-  { key: 'perdido', label: 'Perdido', color: 'bg-destructive' },
-];
-
-const formatCurrency = (v: number) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-
-function getDaysAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
+// ── Types ─────────────────────────────────────────────────
+interface FunnelStage {
+  label: string;
+  count: number;
 }
 
-export default function PipelinePage() {
-  const { data: deals, isLoading } = useDeals();
-  const { data: teamMembers } = useTeamMembers();
-  const updateDeal = useUpdateDeal();
-  const [search, setSearch] = useState('');
-  const [agentFilter, setAgentFilter] = useState<string>('all');
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
-  const [showNewDeal, setShowNewDeal] = useState(false);
+interface Funnel {
+  id: string;
+  name: string;
+  stages: FunnelStage[];
+  expanded: boolean;
+}
 
-  const filtered = useMemo(() => {
-    if (!deals) return [];
-    return deals.filter((d) => {
-      const matchSearch =
-        d.title.toLowerCase().includes(search.toLowerCase()) ||
-        (d.contact?.name ?? '').toLowerCase().includes(search.toLowerCase());
-      const matchAgent = agentFilter === 'all' || d.assigned_user_id === agentFilter;
-      return matchSearch && matchAgent;
-    });
-  }, [deals, search, agentFilter]);
+// ── Mock data matching reference image ────────────────────
+const INITIAL_FUNNELS: Funnel[] = [
+  {
+    id: '1',
+    name: '0. AÇÃO PIX',
+    expanded: true,
+    stages: [
+      { label: 'ENTRADA DO LEAD', count: 0 },
+      { label: 'VENDEDOR ATUANDO', count: 545 },
+      { label: 'JÁ POSSUI CADASTRO', count: 85 },
+      { label: 'CADASTRO REALIZADO', count: 5 },
+      { label: 'CPA REALIZADO', count: 39 },
+      { label: 'REDEPÓSITO', count: 2 },
+      { label: 'VENDA REALIZADA', count: 0 },
+      { label: 'RECUPERAÇÃO 1', count: 33 },
+      { label: 'RECUPERAÇÃO 2', count: 0 },
+      { label: 'SEM INTERAÇÃO', count: 42 },
+    ],
+  },
+  {
+    id: '2',
+    name: '00. ROLETA',
+    expanded: true,
+    stages: [
+      { label: 'ENTRADA DO LEAD', count: 0 },
+      { label: 'VENDEDOR ATUANDO', count: 366 },
+      { label: 'CADASTRO REALIZADO', count: 7 },
+      { label: 'CPA REALIZADO', count: 21 },
+      { label: 'JÁ TEM CADASTRO', count: 128 },
+      { label: 'REDEPÓSITO', count: 1 },
+      { label: 'VENDA REALIZADA', count: 1 },
+      { label: 'RECUPERAÇÃO 1', count: 0 },
+      { label: 'RECUPERAÇÃO 2', count: 0 },
+      { label: 'SEM INTERAÇÃO', count: 0 },
+    ],
+  },
+];
 
-  const selectedDeal = deals?.find((d) => d.id === selectedDealId) || null;
+// ── Wave SVG ──────────────────────────────────────────────
+function FunnelWave({ stages }: { stages: FunnelStage[] }) {
+  const max = Math.max(...stages.map((s) => s.count), 1);
+  const W = 1200;
+  const H = 80;
+  const segW = W / stages.length;
 
-  const onDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-    const newStage = result.destination.droppableId as DealStage;
-    updateDeal.mutate({ id: result.draggableId, stage: newStage });
-  };
+  // Build a smooth wave path using the count as amplitude
+  const topPoints: [number, number][] = stages.map((s, i) => {
+    const x = i * segW + segW / 2;
+    const amp = (s.count / max) * (H / 2 - 4);
+    return [x, H / 2 - amp];
+  });
+  const botPoints: [number, number][] = stages.map((s, i) => {
+    const x = i * segW + segW / 2;
+    const amp = (s.count / max) * (H / 2 - 4);
+    return [x, H / 2 + amp];
+  });
 
-  const handleDealUpdate = (id: string, updates: Record<string, any>) => {
-    updateDeal.mutate({ id, ...updates });
-    setSelectedDealId(null);
-  };
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col h-[calc(100vh-7rem)] -m-4 lg:-m-6">
-        <div className="p-4 lg:p-6"><TableSkeleton rows={5} cols={4} /></div>
-      </div>
-    );
+  function catmullRom(pts: [number, number][]): string {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0][0]},${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(i - 1, 0)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(i + 2, pts.length - 1)];
+      const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+      const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+      const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+    }
+    return d;
   }
 
+  const topPath = catmullRom(topPoints);
+  const botPath = catmullRom([...botPoints].reverse());
+
+  const closedPath = topPath + ' ' + botPath.replace('M', 'L') + ' Z';
+
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] -m-4 lg:-m-6">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-3 shrink-0">
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar negócios..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-9 bg-secondary border-0 text-sm"
-          />
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="w-full"
+      style={{ height: 80 }}
+    >
+      <defs>
+        <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#22c55e" stopOpacity="0.9" />
+          <stop offset="40%" stopColor="#16a34a" stopOpacity="1" />
+          <stop offset="70%" stopColor="#84cc16" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#a3e635" stopOpacity="0.6" />
+        </linearGradient>
+      </defs>
+      {/* Dividers */}
+      {stages.map((_, i) => (
+        <line
+          key={i}
+          x1={i * segW}
+          y1={0}
+          x2={i * segW}
+          y2={H}
+          stroke="#6366f1"
+          strokeWidth="0.5"
+          opacity="0.4"
+        />
+      ))}
+      {/* Wave shape */}
+      <path d={closedPath} fill="url(#waveGrad)" />
+      {/* Baseline */}
+      <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#a3e635" strokeWidth="1" opacity="0.5" />
+    </svg>
+  );
+}
+
+// ── Funnel Card ───────────────────────────────────────────
+function FunnelCard({ funnel, onDelete }: { funnel: Funnel; onDelete: (id: string) => void }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [visibilityRestrict, setVisibilityRestrict] = useState(false);
+  const [viewMode, setViewMode] = useState<'all' | 'mine'>('mine');
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden mb-4">
+      {/* Card header */}
+      <div className="flex items-center justify-between bg-muted/40 px-4 py-3 border-b border-border">
+        <span className="text-sm font-semibold text-foreground">{funnel.name}</span>
+        <button
+          onClick={() => setMoreOpen((o) => !o)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
+        >
+          <Plus size={12} />
+          Mais Opções
+        </button>
+      </div>
+
+      {/* Stages bar */}
+      <div className="bg-funnel-dark overflow-x-auto">
+        <div className="flex min-w-max">
+          {funnel.stages.map((stage, idx) => (
+            <div
+              key={idx}
+              className="flex-1 min-w-[110px] border-r border-funnel-dark last:border-r-0 px-3 py-3"
+            >
+              <div className="text-2xl font-bold text-white leading-none">{stage.count}</div>
+              <div className="text-[10px] font-semibold text-success uppercase tracking-wide mt-1">
+                {stage.label}
+              </div>
+            </div>
+          ))}
         </div>
-        <Select value={agentFilter} onValueChange={setAgentFilter}>
-          <SelectTrigger className="w-[160px] h-9 text-sm bg-secondary border-0">
-            <SelectValue placeholder="Responsável" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {(teamMembers ?? []).map((m) => (
-              <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button size="sm" className="gap-1.5 ml-auto h-9" onClick={() => setShowNewDeal(true)}>
-          <Plus size={15} />
-          Novo negócio
+
+        {/* Wave visualization */}
+        <div className="bg-funnel-darker px-0 pb-0">
+          <FunnelWave stages={funnel.stages} />
+        </div>
+      </div>
+
+      {/* Expanded options */}
+      {moreOpen && (
+        <div className="bg-card border-t border-border px-4 py-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-4">
+            {/* Left: restrict visibility */}
+            <div className="flex-1 space-y-2">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={visibilityRestrict}
+                  onChange={(e) => setVisibilityRestrict(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                Restringir Usuários e Deptos que podem visualizar:
+              </label>
+              {visibilityRestrict && (
+                <div className="border border-border rounded px-3 py-2 text-xs text-muted-foreground bg-secondary/30">
+                  Nenhum Selecionado →
+                </div>
+              )}
+            </div>
+
+            {/* Right: view mode */}
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="radio"
+                  name={`view-${funnel.id}`}
+                  checked={viewMode === 'all'}
+                  onChange={() => setViewMode('all')}
+                  className="accent-primary"
+                />
+                <span>
+                  Pode <span className="text-primary font-medium">visualizar todos os chats do funil</span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="radio"
+                  name={`view-${funnel.id}`}
+                  checked={viewMode === 'mine'}
+                  onChange={() => setViewMode('mine')}
+                  className="accent-primary"
+                />
+                <span>
+                  Ver apenas os{' '}
+                  <span className="text-primary font-medium">
+                    chats delegados a si ou aos departamentos que faz parte
+                  </span>
+                  .
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary text-primary hover:bg-primary hover:text-primary-foreground">
+                <Pencil size={11} />
+                Alterar Nome
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-info text-info hover:bg-info hover:text-white">
+                <Download size={11} />
+                Exportar em CSV
+              </Button>
+            </div>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => onDelete(funnel.id)}
+            >
+              <Trash2 size={11} />
+              Apagar Funil
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────
+export default function PipelinePage() {
+  const [funnels, setFunnels] = useState<Funnel[]>(INITIAL_FUNNELS);
+
+  const handleDelete = (id: string) => {
+    setFunnels((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleCreate = () => {
+    const name = `Novo Funil ${funnels.length + 1}`;
+    setFunnels((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        name,
+        expanded: true,
+        stages: [
+          { label: 'ENTRADA DO LEAD', count: 0 },
+          { label: 'EM ATENDIMENTO', count: 0 },
+          { label: 'PROPOSTA', count: 0 },
+          { label: 'FECHAMENTO', count: 0 },
+          { label: 'GANHO', count: 0 },
+          { label: 'PERDIDO', count: 0 },
+        ],
+      },
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-0">
+      {/* Page header */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Funil</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Nesta área estão listados todos os funis criados na sua conta.
+          </p>
+        </div>
+        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-white" onClick={handleCreate}>
+          <Plus size={14} />
+          Criar novo funil
         </Button>
       </div>
 
-      {/* Kanban */}
-      <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex flex-1 gap-3 overflow-x-auto p-4 lg:p-6">
-          {stages.map((stage) => {
-            const stageDeals = filtered.filter((d) => d.stage === stage.key);
-            const total = stageDeals.reduce((s, d) => s + Number(d.value), 0);
-
-            return (
-              <Droppable key={stage.key} droppableId={stage.key}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={`flex min-w-[250px] w-[250px] flex-col rounded-xl border border-border bg-card card-shadow shrink-0 transition-colors ${
-                      snapshot.isDraggingOver ? 'border-primary/40 bg-accent/30' : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between border-b border-border px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2.5 w-2.5 rounded-full ${stage.color}`} />
-                        <h3 className="text-sm font-semibold text-foreground">{stage.label}</h3>
-                        <Badge variant="secondary" className="text-xs">{stageDeals.length}</Badge>
-                      </div>
-                      <span className="text-[11px] text-muted-foreground font-medium">{formatCurrency(total)}</span>
-                    </div>
-
-                    <div className="flex-1 space-y-2 overflow-y-auto p-2">
-                      {stageDeals.length === 0 ? (
-                        <div className="py-10 text-center text-xs text-muted-foreground">
-                          Nenhum negócio
-                        </div>
-                      ) : (
-                        stageDeals.map((deal, index) => (
-                          <Draggable key={deal.id} draggableId={deal.id} index={index}>
-                            {(dragProvided, dragSnapshot) => (
-                              <div
-                                ref={dragProvided.innerRef}
-                                {...dragProvided.draggableProps}
-                                {...dragProvided.dragHandleProps}
-                                onClick={() => setSelectedDealId(deal.id)}
-                                className={`rounded-lg border border-border bg-background p-3 cursor-pointer transition-shadow ${
-                                  dragSnapshot.isDragging ? 'shadow-lg ring-1 ring-primary/30' : 'card-shadow hover:card-shadow-md'
-                                }`}
-                              >
-                                <p className="text-sm font-medium text-foreground leading-snug">{deal.title}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">{deal.contact?.name ?? '—'}</p>
-                                <div className="mt-2.5 flex items-center justify-between">
-                                  <span className="text-sm font-semibold text-foreground">{formatCurrency(Number(deal.value))}</span>
-                                  <span className="text-[11px] text-muted-foreground">{getDaysAgo(deal.created_at)}d</span>
-                                </div>
-                                <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-                                  <User size={12} />
-                                  <span className="truncate">{deal.assigned_user?.name ?? '—'}</span>
-                                </div>
-                              </div>
-                            )}
-                          </Draggable>
-                        ))
-                      )}
-                      {provided.placeholder}
-                    </div>
-                  </div>
-                )}
-              </Droppable>
-            );
-          })}
-        </div>
-      </DragDropContext>
-
-      {/* Backdrop + Drawer */}
-      {selectedDeal && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm"
-            onClick={() => setSelectedDealId(null)}
-          />
-          <DealDetailDrawer
-            deal={selectedDeal}
-            stages={stages}
-            onClose={() => setSelectedDealId(null)}
-            onUpdate={handleDealUpdate}
-          />
-        </>
-      )}
-      {/* New Deal Modal */}
-      <NewDealModal open={showNewDeal} onClose={() => setShowNewDeal(false)} />
+      {/* Funnel list */}
+      <div>
+        {funnels.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+            <p className="text-sm">Nenhum funil criado ainda.</p>
+            <Button size="sm" className="mt-4 gap-1.5" onClick={handleCreate}>
+              <Plus size={14} />
+              Criar primeiro funil
+            </Button>
+          </div>
+        ) : (
+          funnels.map((f) => (
+            <FunnelCard key={f.id} funnel={f} onDelete={handleDelete} />
+          ))
+        )}
+      </div>
     </div>
   );
 }
