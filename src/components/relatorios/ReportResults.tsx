@@ -1,0 +1,160 @@
+import { format } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationNext, PaginationPrevious,
+} from '@/components/ui/pagination';
+import { Skeleton } from '@/components/ui/skeleton';
+import type { ReportType } from '@/hooks/useReportBuilder';
+
+interface Props {
+  reportType: ReportType;
+  rows: any[];
+  total: number;
+  page: number;
+  onPageChange: (p: number) => void;
+  isLoading: boolean;
+}
+
+const PAGE_SIZE = 25;
+
+export default function ReportResults({ reportType, rows, total, page, onPageChange, isLoading }: Props) {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border border-border bg-card card-shadow p-5 space-y-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card card-shadow p-10 text-center text-sm text-muted-foreground">
+        Nenhum resultado encontrado. Ajuste os filtros e tente novamente.
+      </div>
+    );
+  }
+
+  const isChat = reportType === 'chats';
+
+  return (
+    <div className="rounded-xl border border-border bg-card card-shadow">
+      <div className="p-4 border-b border-border">
+        <span className="text-sm text-muted-foreground">
+          {total} resultado{total !== 1 ? 's' : ''} encontrado{total !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Nome</TableHead>
+            <TableHead>Telefone</TableHead>
+            <TableHead>Cadastro</TableHead>
+            {isChat && <TableHead>Canal</TableHead>}
+            {isChat && <TableHead>Status</TableHead>}
+            <TableHead>Última interação</TableHead>
+            <TableHead>Tags</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const contact = isChat ? row.contact : row;
+            const tags: string[] = Array.isArray(contact?.tags) ? contact.tags : [];
+
+            return (
+              <TableRow key={row.id}>
+                <TableCell className="font-medium">{contact?.name ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground">{contact?.phone ?? '—'}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {contact?.created_at ? format(new Date(contact.created_at), 'dd/MM/yyyy') : '—'}
+                </TableCell>
+                {isChat && (
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs capitalize">{row.channel}</Badge>
+                  </TableCell>
+                )}
+                {isChat && (
+                  <TableCell>
+                    <Badge
+                      variant={row.status === 'open' ? 'default' : 'secondary'}
+                      className="text-xs capitalize"
+                    >
+                      {row.status === 'open' ? 'Aberto' : row.status === 'closed' ? 'Fechado' : 'Pendente'}
+                    </Badge>
+                  </TableCell>
+                )}
+                <TableCell className="text-muted-foreground">
+                  {(isChat ? row.last_message_at : contact?.last_contact_at)
+                    ? format(new Date(isChat ? row.last_message_at : contact.last_contact_at), 'dd/MM/yyyy HH:mm')
+                    : '—'}
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {tags.slice(0, 3).map((t: string) => (
+                      <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
+                    ))}
+                    {tags.length > 3 && (
+                      <Badge variant="outline" className="text-xs">+{tags.length - 3}</Badge>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+
+      {totalPages > 1 && (
+        <div className="p-4 border-t border-border">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => page > 1 && onPageChange(page - 1)}
+                  className={page <= 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                />
+              </PaginationItem>
+              {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+                let pageNum: number;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (page <= 3) {
+                  pageNum = i + 1;
+                } else if (page >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = page - 2 + i;
+                }
+                return (
+                  <PaginationItem key={pageNum}>
+                    <PaginationLink
+                      isActive={pageNum === page}
+                      onClick={() => onPageChange(pageNum)}
+                      className="cursor-pointer"
+                    >
+                      {pageNum}
+                    </PaginationLink>
+                  </PaginationItem>
+                );
+              })}
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => page < totalPages && onPageChange(page + 1)}
+                  className={page >= totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
+    </div>
+  );
+}
