@@ -136,6 +136,7 @@ export default function IntegracoesPage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [step, setStep] = useState(1);
 
   // form state
   const [deviceName, setDeviceName] = useState('');
@@ -267,43 +268,114 @@ export default function IntegracoesPage() {
       </div>
 
       {/* ── Add Device Modal ────────────────────────── */}
-      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) resetForm(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Adicionar Aparelho</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-xs">Nome do aparelho</Label>
-              <Input className="mt-1" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="Ex: Vendas - Principal" />
-            </div>
-            <div>
-              <Label className="text-xs">Número de telefone</Label>
-              <Input className="mt-1" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999999999" />
-            </div>
-            <div>
-              <Label className="text-xs">Provedor</Label>
-              <Select value={provider} onValueChange={v => { setProvider(v); setConfig({}); }}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Selecionar provedor" /></SelectTrigger>
-                <SelectContent>
-                  {PROVIDERS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {provider && <ProviderFields provider={provider} config={config} onChange={setConfig} />}
-            <div className="rounded-lg bg-secondary/50 p-3">
-              <p className="text-xs text-muted-foreground mb-1">Webhook URL (copie para o painel do provedor)</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs text-foreground bg-muted rounded px-2 py-1.5 truncate">{WEBHOOK_URL}</code>
-                <Button variant="outline" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopy(WEBHOOK_URL)}>
-                  {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-                </Button>
+      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { resetForm(); setStep(1); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Adicionar Aparelho</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">Siga os passos abaixo para conectar um número de WhatsApp</p>
+          </DialogHeader>
+
+          {/* Stepper */}
+          <div className="flex items-center gap-2 py-2">
+            {[1, 2, 3].map(s => (
+              <div key={s} className="flex items-center gap-2 flex-1">
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold shrink-0 transition-colors ${step >= s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                  {step > s ? <Check size={14} /> : s}
+                </div>
+                <span className={`text-xs hidden sm:inline ${step >= s ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                  {s === 1 ? 'Provedor' : s === 2 ? 'Dados' : 'Credenciais'}
+                </span>
+                {s < 3 && <div className={`h-px flex-1 ${step > s ? 'bg-primary' : 'bg-border'}`} />}
+              </div>
+            ))}
+          </div>
+
+          {/* Step 1 - Provider */}
+          {step === 1 && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-secondary/50 p-3 space-y-2">
+                <p className="text-xs font-semibold text-foreground">📋 Como obter as credenciais?</p>
+                <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+                  <li>Escolha um provedor parceiro da Meta (recomendamos <strong>Meta Cloud API</strong> ou <strong>Gupshup</strong>)</li>
+                  <li>Crie uma conta no painel do provedor e registre seu número de telefone</li>
+                  <li>Obtenha as credenciais de API (token, chave, etc.)</li>
+                  <li>Cole as credenciais aqui no passo 3</li>
+                </ol>
+              </div>
+              <div>
+                <Label className="text-xs">Selecione o provedor</Label>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {PROVIDERS.map(p => (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => { setProvider(p.value); setConfig({}); }}
+                      className={`rounded-lg border p-3 text-left text-sm font-medium transition-all hover:border-primary/50 ${provider === p.value ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card text-foreground'}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setAddOpen(false); resetForm(); }}>Cancelar</Button>
-            <Button onClick={handleAdd} disabled={addDevice.isPending}>
-              {addDevice.isPending ? 'Salvando...' : 'Salvar'}
-            </Button>
+          )}
+
+          {/* Step 2 - Basic info */}
+          {step === 2 && (
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-xs">Nome do aparelho</Label>
+                <Input className="mt-1" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="Ex: Vendas - Principal" />
+                <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na sua equipe</p>
+              </div>
+              <div>
+                <Label className="text-xs">Número de telefone</Label>
+                <Input className="mt-1" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999999999" />
+                <p className="text-[11px] text-muted-foreground mt-1">Número com código do país (ex: +55 para Brasil)</p>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 - Credentials */}
+          {step === 3 && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg bg-secondary/50 p-3">
+                <p className="text-xs text-muted-foreground mb-1">Provedor selecionado</p>
+                <p className="text-sm font-semibold text-foreground">{providerLabel(provider)}</p>
+              </div>
+              <ProviderFields provider={provider} config={config} onChange={setConfig} />
+              <div className="rounded-lg bg-secondary/50 p-3">
+                <p className="text-xs text-muted-foreground mb-1">Webhook URL (copie para o painel do provedor)</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs text-foreground bg-muted rounded px-2 py-1.5 truncate">{WEBHOOK_URL}</code>
+                  <Button variant="outline" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopy(WEBHOOK_URL)}>
+                    {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1.5">Cole esta URL no campo de webhook do painel do seu provedor para receber mensagens</p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            {step > 1 && (
+              <Button variant="outline" onClick={() => setStep(s => s - 1)}>Voltar</Button>
+            )}
+            {step < 3 ? (
+              <Button
+                onClick={() => {
+                  if (step === 1 && !provider) { toast.error('Selecione um provedor'); return; }
+                  if (step === 2 && (!deviceName.trim() || !phoneNumber.trim())) { toast.error('Preencha nome e número'); return; }
+                  setStep(s => s + 1);
+                }}
+              >
+                Próximo
+              </Button>
+            ) : (
+              <Button onClick={handleAdd} disabled={addDevice.isPending}>
+                {addDevice.isPending ? 'Salvando...' : 'Salvar aparelho'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
