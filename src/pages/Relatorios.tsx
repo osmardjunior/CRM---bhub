@@ -1,179 +1,121 @@
-import { useState, useMemo } from 'react';
-import { BarChart3, Clock, MessageSquare, Star, TrendingUp, Users } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Button } from '@/components/ui/button';
+import { useState, useCallback } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import ReportSidebar from '@/components/relatorios/ReportSidebar';
+import ReportFiltersPanel from '@/components/relatorios/ReportFilters';
+import ReportResults from '@/components/relatorios/ReportResults';
+import ChartsPanel from '@/components/relatorios/ChartsPanel';
+import UsersReportPanel from '@/components/relatorios/UsersReportPanel';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { useAgentMetrics, usePipelineConversion, useNPSSummary } from '@/hooks/useReports';
+  useSavedReports,
+  useSaveReport,
+  useDeleteReport,
+  useReportQuery,
+  type ReportType,
+  type ReportFilters,
+  type SavedReport,
+} from '@/hooks/useReportBuilder';
+import { toast } from 'sonner';
 
-const COLORS = [
-  'hsl(168, 60%, 48%)',
-  'hsl(210, 80%, 52%)',
-  'hsl(38, 92%, 50%)',
-  'hsl(280, 60%, 50%)',
-  'hsl(142, 60%, 40%)',
-  'hsl(0, 72%, 51%)',
-];
-
-const periodOptions = [
-  { label: '7 dias', value: '7' },
-  { label: '30 dias', value: '30' },
-  { label: '90 dias', value: '90' },
-];
-
-function formatSeconds(seconds: number | null): string {
-  if (seconds == null || isNaN(seconds)) return '—';
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}min`;
-  return `${(seconds / 3600).toFixed(1)}h`;
-}
+const emptyFilters: ReportFilters = {};
 
 export default function RelatoriosPage() {
-  const [period, setPeriod] = useState('30');
+  const [activeType, setActiveType] = useState<ReportType>('chats');
+  const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
+  const [reportName, setReportName] = useState('');
+  const [showOnHome, setShowOnHome] = useState(false);
+  const [page, setPage] = useState(1);
+  const [queryEnabled, setQueryEnabled] = useState(false);
 
-  const dateTo = useMemo(() => new Date().toISOString(), []);
-  const dateFrom = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - parseInt(period));
-    return d.toISOString();
-  }, [period]);
+  const { data: savedReports } = useSavedReports();
+  const saveReport = useSaveReport();
+  const deleteReport = useDeleteReport();
 
-  const { data: agents, isLoading: agentsLoading } = useAgentMetrics(dateFrom, dateTo);
-  const { data: pipeline } = usePipelineConversion(dateFrom, dateTo);
-  const { data: nps } = useNPSSummary(dateFrom, dateTo);
+  const { data: results, isLoading } = useReportQuery(activeType, filters, page, queryEnabled);
 
-  const agentChartData = (agents ?? []).map((a) => ({
-    name: a.agent_name.split(' ')[0],
-    conversas: Number(a.conversations_handled),
-  }));
+  const handleSelectType = useCallback((type: ReportType) => {
+    setActiveType(type);
+    setFilters(emptyFilters);
+    setPage(1);
+    setQueryEnabled(false);
+    setReportName('');
+  }, []);
 
-  const npsColor = nps?.nps != null
-    ? nps.nps >= 50 ? 'text-success' : nps.nps >= 0 ? 'text-warning' : 'text-destructive'
-    : 'text-muted-foreground';
+  const handleRun = useCallback(() => {
+    setPage(1);
+    setQueryEnabled(true);
+  }, []);
 
-  const summaryCards = [
-    {
-      label: 'NPS (30d)',
-      value: nps?.nps != null ? `${nps.nps > 0 ? '+' : ''}${nps.nps}` : '—',
-      icon: Star,
-      color: npsColor,
-      sub: nps?.total ? `${nps.total} respostas` : 'Sem dados',
-    },
-    {
-      label: 'Taxa de Conversão',
-      value: pipeline ? `${pipeline.conversionRate}%` : '—',
-      icon: TrendingUp,
-      color: 'text-success',
-      sub: pipeline ? `${pipeline.won} ganhos de ${pipeline.total}` : '',
-    },
-    {
-      label: 'Total Conversas',
-      value: (agents ?? []).reduce((s, a) => s + Number(a.conversations_handled), 0),
-      icon: MessageSquare,
-      color: 'text-primary',
-      sub: `${(agents ?? []).length} agentes`,
-    },
-  ];
+  const handleSave = useCallback(() => {
+    if (!reportName.trim()) {
+      toast.error('Dê um nome ao relatório');
+      return;
+    }
+    saveReport.mutate({
+      name: reportName,
+      report_type: activeType,
+      filters,
+      show_on_home: showOnHome,
+    });
+  }, [reportName, activeType, filters, showOnHome, saveReport]);
+
+  const handleLoadReport = useCallback((r: SavedReport) => {
+    setActiveType(r.report_type as ReportType);
+    setFilters(r.filters);
+    setReportName(r.name);
+    setShowOnHome(r.show_on_home);
+    setPage(1);
+    setQueryEnabled(true);
+  }, []);
+
+  const showFilters = activeType !== 'charts' && activeType !== 'users';
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-foreground">Relatórios</h1>
-        <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-[120px] h-9 text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {periodOptions.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="flex h-[calc(100vh-4rem)] -m-6">
+      <ReportSidebar
+        activeType={activeType}
+        onSelectType={handleSelectType}
+        savedReports={savedReports ?? []}
+        onLoadReport={handleLoadReport}
+        onDeleteReport={(id) => deleteReport.mutate(id)}
+      />
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {summaryCards.map((c) => (
-          <div key={c.label} className="rounded-xl border border-border bg-card card-shadow p-5">
-            <div className="flex items-center gap-2 mb-2">
-              <c.icon size={16} className={c.color} />
-              <span className="text-xs text-muted-foreground">{c.label}</span>
-            </div>
-            <p className="text-2xl font-bold text-foreground">{c.value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{c.sub}</p>
+      <main className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="p-6 space-y-6">
+            <h1 className="text-lg font-semibold text-foreground">Relatórios</h1>
+
+            {activeType === 'charts' && <ChartsPanel />}
+            {activeType === 'users' && <UsersReportPanel />}
+
+            {showFilters && (
+              <>
+                <ReportFiltersPanel
+                  reportType={activeType}
+                  filters={filters}
+                  onChange={setFilters}
+                  onRun={handleRun}
+                  onSave={handleSave}
+                  reportName={reportName}
+                  onNameChange={setReportName}
+                  showOnHome={showOnHome}
+                  onShowOnHomeChange={setShowOnHome}
+                />
+
+                {queryEnabled && (
+                  <ReportResults
+                    reportType={activeType}
+                    rows={results?.rows ?? []}
+                    total={results?.total ?? 0}
+                    page={page}
+                    onPageChange={setPage}
+                    isLoading={isLoading}
+                  />
+                )}
+              </>
+            )}
           </div>
-        ))}
-      </div>
-
-      {/* Charts */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Conversations per agent */}
-        <div className="rounded-xl border border-border bg-card card-shadow p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Users size={15} /> Conversas por Agente
-          </h3>
-          {agentChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={agentChartData}>
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="conversas" fill="hsl(168, 60%, 48%)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[250px] text-sm text-muted-foreground">
-              Sem dados para o período selecionado
-            </div>
-          )}
-        </div>
-
-        {/* Agent performance table */}
-        <div className="rounded-xl border border-border bg-card card-shadow p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Clock size={15} /> Performance por Agente
-          </h3>
-          {(agents ?? []).length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-2 text-xs text-muted-foreground font-medium">Agente</th>
-                    <th className="text-right py-2 text-xs text-muted-foreground font-medium">1ª Resposta</th>
-                    <th className="text-right py-2 text-xs text-muted-foreground font-medium">Resolução</th>
-                    <th className="text-right py-2 text-xs text-muted-foreground font-medium">NPS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(agents ?? []).map((a) => (
-                    <tr key={a.agent_id} className="border-b">
-                      <td className="py-2 font-medium">{a.agent_name}</td>
-                      <td className="py-2 text-right text-muted-foreground">
-                        {formatSeconds(a.avg_first_response_seconds)}
-                      </td>
-                      <td className="py-2 text-right text-muted-foreground">
-                        {formatSeconds(a.avg_resolution_seconds)}
-                      </td>
-                      <td className="py-2 text-right text-muted-foreground">
-                        {a.avg_nps != null ? Number(a.avg_nps).toFixed(1) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-[250px] text-sm text-muted-foreground">
-              Sem dados para o período selecionado
-            </div>
-          )}
-        </div>
-      </div>
+        </ScrollArea>
+      </main>
     </div>
   );
 }

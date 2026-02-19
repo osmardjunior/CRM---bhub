@@ -776,6 +776,42 @@ export type Database = {
           },
         ]
       }
+      saved_reports: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string
+          filters: Json
+          id: string
+          name: string
+          report_type: string
+          show_on_home: boolean
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by: string
+          filters?: Json
+          id?: string
+          name: string
+          report_type?: string
+          show_on_home?: boolean
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          filters?: Json
+          id?: string
+          name?: string
+          report_type?: string
+          show_on_home?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tags: {
         Row: {
           color: string
