@@ -26,7 +26,6 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Verify user token
     const supabaseUser = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -49,7 +48,6 @@ serve(async (req) => {
       );
     }
 
-    // Get conversation with contact info
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
       .select("*, contact:contacts!conversations_contact_id_fkey(phone)")
@@ -71,17 +69,23 @@ serve(async (req) => {
       );
     }
 
-    // Get active integration for this channel
-    const { data: integration } = await supabase
+    // Get active integration — try matching by phone_number first, fallback to first available
+    const { data: integrations } = await supabase
       .from("integrations")
       .select("*")
       .eq("company_id", conv.company_id)
       .eq("channel", conv.channel)
-      .eq("status", "connected")
-      .maybeSingle();
+      .eq("status", "connected");
+
+    let integration = null;
+    if (integrations && integrations.length > 0) {
+      const normalizedPhone = phone.replace(/\D/g, "");
+      integration = integrations.find((i: any) =>
+        i.phone_number && i.phone_number.replace(/\D/g, "") === normalizedPhone
+      ) || integrations[0];
+    }
 
     if (!integration) {
-      // No integration configured — message saved to DB but not delivered externally
       return new Response(
         JSON.stringify({ ok: true, delivered: false, reason: "No active integration found" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -95,7 +99,6 @@ serve(async (req) => {
 
     try {
       if (provider === "meta" || provider === "Meta Cloud API") {
-        // Meta Cloud API
         const accessToken = config.access_token || config.token;
         const phoneNumberId = config.phone_number_id;
         if (!accessToken || !phoneNumberId) throw new Error("Meta config missing access_token or phone_number_id");
@@ -167,6 +170,32 @@ serve(async (req) => {
         if (!res.ok) {
           const err = await res.text();
           throw new Error(`360dialog API error: ${err}`);
+        }
+        delivered = true;
+      } else if (provider === "gupshup" || provider === "Gupshup") {
+        const apiKey = config.api_key;
+        const appName = config.app_name;
+        const fromNumber = (integration as any).phone_number || config.from_number;
+        if (!apiKey) throw new Error("Gupshup config missing api_key");
+
+        const params = new URLSearchParams();
+        params.append("channel", "whatsapp");
+        params.append("source", (fromNumber || "").replace(/\D/g, ""));
+        params.append("destination", phone.replace(/\D/g, ""));
+        params.append("message", JSON.stringify({ type: "text", text: messageBody }));
+        if (appName) params.append("src.name", appName);
+
+        const res = await fetch("https://api.gupshup.io/wa/api/v1/msg", {
+          method: "POST",
+          headers: {
+            apikey: apiKey,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(`Gupshup API error: ${err}`);
         }
         delivered = true;
       } else {
