@@ -9,40 +9,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useFunnels } from '@/contexts/FunnelContext';
 
-// ── Funnel structure (stages only, no mock leads) ────────
-const MOCK_FUNNELS: Record<string, { name: string; stages: { label: string; leads: string[]; shown: number; total: number; pct: number }[] }> = {
-  '1': {
-    name: '0. AÇÃO PIX',
-    stages: [
-      { label: 'ENTRADA DO LEAD', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'VENDEDOR ATUANDO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'JÁ POSSUI CADASTRO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'CADASTRO REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'CPA REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'REDEPÓSITO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'VENDA REALIZADA', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'RECUPERAÇÃO 1', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'RECUPERAÇÃO 2', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'SEM INTERAÇÃO', leads: [], shown: 0, total: 0, pct: 0 },
-    ],
-  },
-  '2': {
-    name: '00. ROLETA',
-    stages: [
-      { label: 'ENTRADA DO LEAD', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'VENDEDOR ATUANDO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'CADASTRO REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'CPA REALIZADO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'JÁ TEM CADASTRO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'REDEPÓSITO', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'VENDA REALIZADA', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'RECUPERAÇÃO 1', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'RECUPERAÇÃO 2', leads: [], shown: 0, total: 0, pct: 0 },
-      { label: 'SEM INTERAÇÃO', leads: [], shown: 0, total: 0, pct: 0 },
-    ],
-  },
-};
 // ── Lead Card ────────────────────────────────────────────
 function LeadCard({ name }: { name: string }) {
   return (
@@ -53,19 +21,7 @@ function LeadCard({ name }: { name: string }) {
 }
 
 // ── Stage Column ─────────────────────────────────────────
-function StageColumn({
-  label,
-  leads,
-  shown,
-  total,
-  pct,
-}: {
-  label: string;
-  leads: string[];
-  shown: number;
-  total: number;
-  pct: number;
-}) {
+function StageColumn({ label, leads }: { label: string; leads: string[] }) {
   return (
     <div className="flex flex-col w-[200px] min-w-[200px] bg-amber-200 rounded-lg overflow-hidden border border-amber-300 shrink-0">
       {/* Column header */}
@@ -74,7 +30,7 @@ function StageColumn({
           <p className="text-[10px] font-bold text-sidebar-foreground uppercase tracking-wide leading-none">
             {label}
           </p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">{total}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{leads.length}</p>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -94,9 +50,9 @@ function StageColumn({
       {/* Leads list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-[400px] max-h-[calc(100vh-220px)]">
         {leads.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-6 text-center">
-            <p className="text-xs text-amber-700 font-medium">{shown}/{total}</p>
-            <p className="text-[10px] text-amber-600">({pct}%)</p>
+          <div className="flex flex-col items-center justify-center h-full py-6 text-center">
+            <p className="text-xs text-amber-700 font-medium">0/0</p>
+            <p className="text-[10px] text-amber-600">(0%)</p>
           </div>
         ) : (
           leads.map((name, i) => <LeadCard key={i} name={name} />)
@@ -107,8 +63,8 @@ function StageColumn({
       <div className="bg-amber-100 border-t border-amber-300 px-2 py-2">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[10px] text-amber-800 font-semibold">
-            {shown}/{total}{' '}
-            <span className="font-normal text-amber-700">({pct}%)</span>
+            {leads.length}/0{' '}
+            <span className="font-normal text-amber-700">(0%)</span>
           </span>
         </div>
         <button className="w-full flex items-center justify-center gap-1 bg-white/80 hover:bg-white text-amber-800 text-[10px] font-semibold py-1 rounded border border-amber-300 transition-colors">
@@ -120,27 +76,53 @@ function StageColumn({
   );
 }
 
+// ── Not Found ─────────────────────────────────────────────
+function FunnelNotFound({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-center py-24">
+      <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
+        <Filter size={28} className="text-muted-foreground" />
+      </div>
+      <h3 className="text-base font-semibold text-foreground mb-1">Funil não encontrado</h3>
+      <p className="text-sm text-muted-foreground max-w-xs mb-6">
+        Este funil não existe ou foi removido.
+      </p>
+      <Button variant="outline" onClick={onBack}>
+        Voltar para Funis
+      </Button>
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────
 export default function FunnelKanban() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { getFunnel } = useFunnels();
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const funnel = MOCK_FUNNELS[id ?? '1'] ?? MOCK_FUNNELS['1'];
+  const funnel = getFunnel(id ?? '');
+
+  if (!funnel) {
+    return (
+      <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden items-center justify-center">
+        <FunnelNotFound onBack={() => navigate('/pipeline')} />
+      </div>
+    );
+  }
 
   const filteredStages = funnel.stages.map((stage) => ({
     ...stage,
     leads: search
-      ? stage.leads.filter((l) => l.toLowerCase().includes(search.toLowerCase()))
-      : stage.leads,
+      ? ([] as string[]).filter((l) => l.toLowerCase().includes(search.toLowerCase()))
+      : [],
   }));
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden">
       {/* Top toolbar */}
       <div className="flex items-center gap-2 bg-sidebar px-4 py-2.5 shrink-0">
-        {/* Back + funnel name */}
         <button
           onClick={() => navigate('/pipeline')}
           className="flex items-center gap-1.5 text-sidebar-foreground hover:text-sidebar-accent-foreground text-sm font-medium transition-colors mr-1"
@@ -151,7 +133,6 @@ export default function FunnelKanban() {
 
         <span className="text-sidebar-muted hidden sm:inline">|</span>
 
-        {/* Search */}
         <div className="relative flex-1 max-w-xs">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sidebar-muted" />
           <Input
@@ -162,7 +143,6 @@ export default function FunnelKanban() {
           />
         </div>
 
-        {/* Filter button */}
         <button
           onClick={() => setFiltersOpen(!filtersOpen)}
           className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded transition-colors ${filtersOpen ? 'bg-primary text-primary-foreground' : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/60'}`}
@@ -174,7 +154,6 @@ export default function FunnelKanban() {
 
         <div className="flex-1" />
 
-        {/* Nova Etapa */}
         <Button
           size="sm"
           className="h-7 text-xs gap-1 bg-success hover:bg-success/90 text-success-foreground"
@@ -185,7 +164,7 @@ export default function FunnelKanban() {
         </Button>
       </div>
 
-      {/* Filter bar (expandable) */}
+      {/* Filter bar */}
       {filtersOpen && (
         <div className="flex items-center gap-3 bg-sidebar px-4 py-2 border-t border-sidebar-border shrink-0">
           <span className="text-xs text-sidebar-muted">Filtrar por:</span>
@@ -204,7 +183,7 @@ export default function FunnelKanban() {
       <div className="flex-1 overflow-x-auto overflow-y-hidden bg-amber-100 p-3">
         <div className="flex gap-3 h-full min-w-max">
           {filteredStages.map((stage, idx) => (
-            <StageColumn key={idx} {...stage} />
+            <StageColumn key={idx} label={stage.label} leads={stage.leads} />
           ))}
 
           {/* Add stage button */}

@@ -9,19 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-
-// ── Types ─────────────────────────────────────────────────
-interface FunnelStage {
-  label: string;
-  count: number;
-}
-
-interface Funnel {
-  id: string;
-  name: string;
-  stages: FunnelStage[];
-  expanded: boolean;
-}
+import { useFunnels, Funnel, FunnelStage } from '@/contexts/FunnelContext';
 
 // ── Wave SVG ──────────────────────────────────────────────
 function FunnelWave({ stages }: { stages: FunnelStage[] }) {
@@ -89,16 +77,13 @@ function CreateFunnelModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (funnel: Omit<Funnel, 'id' | 'expanded'>) => void;
+  onCreate: (data: Omit<Funnel, 'id' | 'expanded'>) => void;
 }) {
   const [name, setName] = useState('');
   const [stages, setStages] = useState<string[]>(['ENTRADA DO LEAD', '']);
 
   const addStage = () => setStages((s) => [...s, '']);
-
-  const removeStage = (idx: number) =>
-    setStages((s) => s.filter((_, i) => i !== idx));
-
+  const removeStage = (idx: number) => setStages((s) => s.filter((_, i) => i !== idx));
   const updateStage = (idx: number, val: string) =>
     setStages((s) => s.map((v, i) => (i === idx ? val : v)));
 
@@ -122,7 +107,6 @@ function CreateFunnelModal({
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Funnel name */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
               Nome do funil
@@ -134,7 +118,6 @@ function CreateFunnelModal({
             />
           </div>
 
-          {/* Stages */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
               Etapas do funil
@@ -172,7 +155,6 @@ function CreateFunnelModal({
             </Button>
           </div>
 
-          {/* Actions */}
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={onClose}>
               Cancelar
@@ -207,7 +189,6 @@ function FunnelCard({
 
   return (
     <div className="rounded-lg border border-border overflow-hidden mb-4">
-      {/* Card header */}
       <div className="flex items-center justify-between bg-muted/40 px-4 py-3 border-b border-border">
         <button
           onClick={() => onOpen(funnel.id)}
@@ -224,7 +205,6 @@ function FunnelCard({
         </button>
       </div>
 
-      {/* Stages bar */}
       <div className="bg-funnel-dark overflow-x-auto">
         <div className="flex min-w-max">
           {funnel.stages.map((stage, idx) => (
@@ -240,13 +220,11 @@ function FunnelCard({
           ))}
         </div>
 
-        {/* Wave visualization */}
         <div className="bg-funnel-darker px-0 pb-0">
           <FunnelWave stages={funnel.stages} />
         </div>
       </div>
 
-      {/* Expanded options */}
       {moreOpen && (
         <div className="bg-card border-t border-border px-4 py-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-4">
@@ -323,29 +301,11 @@ function FunnelEmptyState({ onCreate }: { onCreate: () => void }) {
 // ── Page ─────────────────────────────────────────────────
 export default function PipelinePage() {
   const navigate = useNavigate();
-  const [funnels, setFunnels] = useState<Funnel[]>([]);
+  const { funnels, addFunnel, deleteFunnel } = useFunnels();
   const [showCreate, setShowCreate] = useState(false);
-
-  const handleCreate = (data: Omit<Funnel, 'id' | 'expanded'>) => {
-    const newFunnel: Funnel = {
-      id: String(Date.now()),
-      expanded: true,
-      ...data,
-    };
-    setFunnels((prev) => [...prev, newFunnel]);
-  };
-
-  const handleDelete = (id: string) => {
-    setFunnels((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const handleOpen = (id: string) => {
-    navigate(`/pipeline/${id}`);
-  };
 
   return (
     <div className="flex flex-col gap-0">
-      {/* Page header */}
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-foreground">Funil</h1>
@@ -363,22 +323,25 @@ export default function PipelinePage() {
         </Button>
       </div>
 
-      {/* Funnel list or empty state */}
       {funnels.length === 0 ? (
         <FunnelEmptyState onCreate={() => setShowCreate(true)} />
       ) : (
         <div>
           {funnels.map((f) => (
-            <FunnelCard key={f.id} funnel={f} onDelete={handleDelete} onOpen={handleOpen} />
+            <FunnelCard
+              key={f.id}
+              funnel={f}
+              onDelete={deleteFunnel}
+              onOpen={(id) => navigate(`/pipeline/${id}`)}
+            />
           ))}
         </div>
       )}
 
-      {/* Create modal */}
       <CreateFunnelModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreate={handleCreate}
+        onCreate={addFunnel}
       />
     </div>
   );
