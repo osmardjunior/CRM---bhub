@@ -402,6 +402,36 @@ export type Database = {
           },
         ]
       }
+      quick_replies: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          message: string
+          shortcut: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          message: string
+          shortcut: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          message?: string
+          shortcut?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       satisfaction_surveys: {
         Row: {
           answered_at: string | null
