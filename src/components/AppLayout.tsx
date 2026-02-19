@@ -23,6 +23,15 @@ import {
   Wifi,
   Tag,
   BarChart3,
+  Filter,
+  Zap,
+  Bot,
+  Megaphone,
+  Smartphone,
+  Star,
+  Archive,
+  Puzzle,
+  Headphones,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -69,15 +78,20 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, []);
 
   const navItems = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
-    { to: '/contatos', label: 'Contatos', icon: Users },
-    { to: '/pipeline', label: 'Pipeline', icon: Kanban },
-    { to: '/tarefas', label: 'Tarefas', icon: CheckSquare, badge: stats?.overdueTasks },
+    { to: '/inbox', label: 'Chats', icon: MessageSquare, badge: stats?.openConversations },
+    { to: '/pipeline', label: 'Funil', icon: Filter },
+    { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
+    { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot },
+    { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
     { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
-    { to: '/integracoes', label: 'Integrações', icon: Wifi },
+    { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone },
     { to: '/tags', label: 'Tags', icon: Tag },
+    { to: '/nps', label: 'NPS', icon: Star },
+    { to: '/contatos', label: 'Usuários', icon: Users },
+    { to: '/arquivos', label: 'Arquivos', icon: Archive },
+    { to: '/modulos', label: 'Módulos', icon: Puzzle },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
+    { to: '/suporte', label: 'Suporte', icon: Headphones },
   ];
 
   return (
