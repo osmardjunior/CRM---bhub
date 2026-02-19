@@ -70,6 +70,8 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
           muted: "hsl(var(--sidebar-muted))",
         },
+        'funnel-dark': "hsl(240 40% 10%)",
+        'funnel-darker': "hsl(240 45% 7%)",
       },
       borderRadius: {
         lg: "var(--radius)",
