@@ -6,10 +6,14 @@ import {
   Zap,
   PanelRightClose,
   PanelRightOpen,
+  Smile,
+  Mic,
+  ChevronDown,
+  CheckCheck,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -25,6 +29,12 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -36,7 +46,10 @@ import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
-import type { ConversationDetail, MessageWithSender } from '@/services/api';
+import { closeConversation } from '@/services/api';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import type { ConversationDetail } from '@/services/api';
 
 const quickReplies = [
   'Olá! Como posso ajudar você hoje?',
@@ -47,6 +60,22 @@ const quickReplies = [
   'Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.',
   'Obrigado pela preferência! Tenha um ótimo dia! 😊',
 ];
+
+function groupMessagesByDate(messages: any[]) {
+  const groups: { date: string; messages: any[] }[] = [];
+  let current: { date: string; messages: any[] } | null = null;
+
+  for (const msg of messages) {
+    const d = new Date(msg.created_at);
+    const label = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    if (!current || current.date !== label) {
+      current = { date: label, messages: [] };
+      groups.push(current);
+    }
+    current.messages.push(msg);
+  }
+  return groups;
+}
 
 interface Props {
   conversation: ConversationDetail | null;
@@ -63,8 +92,9 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const { data: teamMembers } = useTeamMembers();
   const permissions = usePermissions();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [closing, setClosing] = useState(false);
 
-  // Agent can only assign to self; supervisor/admin can assign to anyone
   const canReassign = permissions.canReassignConversations;
   const reassignTooltip = getPermissionTooltip('canReassignConversations', permissions);
 
@@ -73,6 +103,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     : (teamMembers ?? []).filter((m) => m.id === user?.id);
 
   const messages = conversation?.messages ?? [];
+  const grouped = groupMessagesByDate(messages);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -87,6 +118,21 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const handleQuickReply = (text: string) => {
     setInput(text);
     setQuickReplyOpen(false);
+  };
+
+  const handleClose = async () => {
+    if (!conversation) return;
+    setClosing(true);
+    try {
+      await closeConversation(conversation.id, 'resolvido');
+      toast.success('Conversa fechada!');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao fechar conversa');
+    } finally {
+      setClosing(false);
+    }
   };
 
   if (loading) {
@@ -104,7 +150,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
   if (!conversation) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center bg-secondary/20">
         <EmptyState
           icon={MessageSquare}
           title="Selecione uma conversa"
@@ -114,27 +160,63 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     );
   }
 
+  const statusLabel: Record<string, string> = {
+    open: 'Em Atendimento',
+    pending: 'Pendente',
+    closed: 'Fechado',
+  };
+
   return (
     <div className="flex flex-1 flex-col min-w-0">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 bg-card">
         <Avatar className="h-9 w-9 shrink-0">
-          <AvatarFallback className="text-xs">{conversation.contact.name[0]}</AvatarFallback>
+          <AvatarFallback className="text-sm font-semibold bg-primary/10 text-primary">
+            {conversation.contact.name[0]}
+          </AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
-            <StatusBadge status={conversation.status} />
-          </div>
+          <span className="text-sm font-semibold text-foreground">{conversation.contact.name}</span>
           <p className="text-xs text-muted-foreground">{conversation.contact.phone}</p>
         </div>
+
+        {/* Status + Close button */}
+        {conversation.status !== 'closed' && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs font-semibold bg-success hover:bg-success/90 text-success-foreground rounded-full px-3"
+              >
+                {statusLabel[conversation.status]}
+                <ChevronDown size={12} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive text-xs"
+                onClick={handleClose}
+                disabled={closing}
+              >
+                Fechar conversa
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {conversation.status === 'closed' && (
+          <StatusBadge status={conversation.status} />
+        )}
 
         {/* Assign dropdown */}
         <Tooltip>
           <TooltipTrigger asChild>
             <div>
-              <Select value={conversation.assigned_user_id ?? ''} disabled={!canReassign && conversation.assigned_user_id === user?.id}>
-                <SelectTrigger className={`h-8 w-[150px] text-xs ${!canReassign ? 'opacity-60' : ''}`}>
+              <Select
+                value={conversation.assigned_user_id ?? ''}
+                disabled={!canReassign && conversation.assigned_user_id === user?.id}
+              >
+                <SelectTrigger className={`h-8 w-[140px] text-xs ${!canReassign ? 'opacity-60' : ''}`}>
                   <SelectValue placeholder="Atribuir agente" />
                 </SelectTrigger>
                 <SelectContent>
@@ -152,13 +234,19 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           )}
         </Tooltip>
 
-        <Button variant="ghost" size="icon" className="shrink-0" onClick={onToggleProfile}>
-          {profileOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+        <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={onToggleProfile}>
+          {profileOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </Button>
       </div>
 
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-secondary/30">
+      {/* Messages area — WhatsApp-like background */}
+      <div
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+        style={{
+          background: 'hsl(var(--secondary) / 0.5)',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+        }}
+      >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <MessageSquare size={32} className="text-muted-foreground/40 mb-2" />
@@ -166,81 +254,113 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <p className="text-xs text-muted-foreground mt-1">Envie a primeira mensagem para iniciar a conversa.</p>
           </div>
         ) : (
-          messages.map((msg) => {
-            const isOutgoing = msg.sender_type === 'agent';
-            return (
-              <div key={msg.id} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                    isOutgoing
-                      ? 'bg-primary text-primary-foreground rounded-br-md'
-                      : 'bg-card border border-border text-foreground rounded-bl-md'
-                  }`}
-                >
-                  {!isOutgoing && (
-                    <p className="text-[10px] font-semibold mb-0.5 opacity-70">
-                      {msg.sender?.name ?? conversation.contact.name}
-                    </p>
-                  )}
-                  <p className="text-sm leading-relaxed">{msg.body}</p>
-                  <p className={`text-[10px] mt-1 text-right ${isOutgoing ? 'opacity-70' : 'text-muted-foreground'}`}>
-                    {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
+          grouped.map((group) => (
+            <div key={group.date}>
+              {/* Date separator */}
+              <div className="flex items-center justify-center my-3">
+                <span className="text-[11px] text-muted-foreground bg-card/80 backdrop-blur-sm px-3 py-1 rounded-full border border-border/50 shadow-sm">
+                  {group.date}
+                </span>
               </div>
-            );
-          })
+              {group.messages.map((msg) => {
+                const isOutgoing = msg.sender_type === 'agent';
+                return (
+                  <div key={msg.id} className={`flex mb-1.5 ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                    {!isOutgoing && (
+                      <Avatar className="h-7 w-7 shrink-0 mr-1.5 mt-0.5 self-end">
+                        <AvatarFallback className="text-[10px] bg-muted">
+                          {conversation.contact.name[0]}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                    <div
+                      className={`max-w-[65%] rounded-2xl px-3.5 py-2 shadow-sm relative ${
+                        isOutgoing
+                          ? 'bg-[hsl(142,60%,88%)] text-foreground rounded-br-sm dark:bg-[hsl(142,40%,25%)]'
+                          : 'bg-card text-foreground rounded-bl-sm border border-border/50'
+                      }`}
+                    >
+                      {!isOutgoing && (
+                        <p className="text-[10px] font-semibold mb-0.5 text-primary">
+                          {msg.sender?.name ?? conversation.contact.name}
+                        </p>
+                      )}
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.body}</p>
+                      <div className={`flex items-center justify-end gap-1 mt-0.5`}>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        {isOutgoing && <CheckCheck size={12} className="text-primary shrink-0" />}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}
-      <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
-            <Paperclip size={18} />
-          </Button>
+      <div className="border-t border-border bg-card p-2.5">
+        <div className="flex items-end gap-1.5">
+          <div className="flex items-center gap-0.5">
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Paperclip size={17} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Smile size={17} />
+            </Button>
+            <Dialog open={quickReplyOpen} onOpenChange={setQuickReplyOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Zap size={17} />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Respostas Rápidas</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {quickReplies.map((qr, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleQuickReply(qr)}
+                      className="w-full text-left rounded-lg px-3 py-2.5 text-sm hover:bg-accent transition-colors border border-border"
+                    >
+                      {qr}
+                    </button>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
 
-          <Dialog open={quickReplyOpen} onOpenChange={setQuickReplyOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground">
-                <Zap size={18} />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Respostas Rápidas</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-1.5 max-h-80 overflow-y-auto">
-                {quickReplies.map((qr, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleQuickReply(qr)}
-                    className="w-full text-left rounded-lg px-3 py-2.5 text-sm hover:bg-accent transition-colors border border-border"
-                  >
-                    {qr}
-                  </button>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <Input
-            placeholder="Digite sua mensagem..."
+          <Textarea
+            placeholder="Digite uma mensagem..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            className="flex-1 bg-secondary border-0"
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+            className="flex-1 min-h-[38px] max-h-[120px] resize-none bg-secondary border-0 text-sm py-2 leading-relaxed"
+            rows={1}
           />
 
-          <Button
-            size="icon"
-            onClick={handleSend}
-            disabled={!input.trim() || sendMessage.isPending}
-            className="shrink-0"
-          >
-            <Send size={16} />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            {!input.trim() ? (
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                <Mic size={17} />
+              </Button>
+            ) : null}
+            <Button
+              size="icon"
+              onClick={handleSend}
+              disabled={!input.trim() || sendMessage.isPending}
+              className="h-8 w-8 rounded-full shrink-0"
+            >
+              <Send size={15} />
+            </Button>
+          </div>
         </div>
       </div>
     </div>
