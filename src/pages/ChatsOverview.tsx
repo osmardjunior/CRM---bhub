@@ -1,10 +1,20 @@
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MessageSquare } from 'lucide-react';
+import { Users } from 'lucide-react';
+import ConversationList from '@/components/inbox/ConversationList';
+import {
+  useInfiniteConversations,
+  useUnreadCounts,
+  useMarkConversationRead,
+} from '@/hooks/useConversations';
+import { useInboxRealtime } from '@/hooks/useInboxRealtime';
+import type { ConversationFilters } from '@/services/api';
 
+// ── Types ────────────────────────────────────────────────
 interface AgentChatSummary {
   id: string | null;
   name: string;
@@ -15,6 +25,7 @@ interface AgentChatSummary {
   total: number;
 }
 
+// ── Hook ─────────────────────────────────────────────────
 function useChatsOverview() {
   const { companyId } = useAuth();
 
@@ -22,7 +33,6 @@ function useChatsOverview() {
     queryKey: ['chats-overview', companyId],
     enabled: !!companyId,
     queryFn: async () => {
-      // Fetch all open/pending conversations with assigned user
       const { data: conversations, error } = await supabase
         .from('conversations')
         .select('id, status, assigned_user_id, profiles:assigned_user_id(id, name, email)')
@@ -31,18 +41,8 @@ function useChatsOverview() {
 
       if (error) throw error;
 
-      // Group by agent
-      const agentMap: Record<string, AgentChatSummary> = {};
-
-      // "Ninguém Delegado" bucket
-      agentMap['__unassigned__'] = {
-        id: null,
-        name: 'Ninguém Delegado',
-        email: null,
-        open: 0,
-        inProgress: 0,
-        waiting: 0,
-        total: 0,
+      const agentMap: Record<string, AgentChatSummary> = {
+        __unassigned__: { id: null, name: 'Ninguém Delegado', email: null, open: 0, inProgress: 0, waiting: 0, total: 0 },
       };
 
       for (const conv of conversations ?? []) {
@@ -54,35 +54,22 @@ function useChatsOverview() {
             id: profile?.id ?? null,
             name: profile?.name ?? 'Desconhecido',
             email: profile?.email ?? null,
-            open: 0,
-            inProgress: 0,
-            waiting: 0,
-            total: 0,
+            open: 0, inProgress: 0, waiting: 0, total: 0,
           };
         }
 
-        // open = aberto (sem agente ou recém criado)
-        // pending = aguardando resposta do cliente
         if (conv.status === 'open') {
-          if (conv.assigned_user_id) {
-            agentMap[userId].inProgress += 1;
-          } else {
-            agentMap['__unassigned__'].open += 1;
-          }
+          if (conv.assigned_user_id) agentMap[userId].inProgress += 1;
+          else agentMap['__unassigned__'].open += 1;
         } else if (conv.status === 'pending') {
           agentMap[userId].waiting += 1;
         }
-
         agentMap[userId].total += 1;
       }
 
       const rows = Object.values(agentMap);
-
-      // Totals
       const totals: AgentChatSummary = {
-        id: '__total__',
-        name: 'TOTAL',
-        email: null,
+        id: '__total__', name: 'TOTAL', email: null,
         open: rows.reduce((s, r) => s + r.open, 0),
         inProgress: rows.reduce((s, r) => s + r.inProgress, 0),
         waiting: rows.reduce((s, r) => s + r.waiting, 0),
@@ -95,93 +82,79 @@ function useChatsOverview() {
   });
 }
 
-export default function ChatsOverview() {
+// ── Overview table ───────────────────────────────────────
+function OverviewTable() {
   const { data, isLoading } = useChatsOverview();
-
   const totals = data?.totals;
   const rows = data?.rows ?? [];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-          <MessageSquare size={22} className="text-primary" />
-          Chats não resolvidos/fechados
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
+      <div className="px-5 py-4 border-b border-border shrink-0">
+        <h2 className="text-base font-bold text-foreground">Chats não resolvidos/fechados</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
           Visualize todos os chats que ainda não tiveram o atendimento concluído.
         </p>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[35%]">
-                  Departamento ou Usuário
-                </th>
-                <th className="px-4 py-3.5 text-center min-w-[140px]">
-                  <div className="flex items-center justify-center gap-2 bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-lg px-3 py-1.5 font-semibold text-xs uppercase tracking-wide mx-auto w-fit">
-                    Aberto{totals ? ` (${totals.open})` : ''}
-                  </div>
-                </th>
-                <th className="px-4 py-3.5 text-center min-w-[180px]">
-                  <div className="flex items-center justify-center gap-2 bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded-lg px-3 py-1.5 font-semibold text-xs uppercase tracking-wide mx-auto w-fit">
-                    Em Atendimento{totals ? ` (${totals.inProgress})` : ''}
-                  </div>
-                </th>
-                <th className="px-4 py-3.5 text-center min-w-[160px]">
-                  <div className="flex items-center justify-center gap-2 bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-1.5 font-semibold text-xs uppercase tracking-wide mx-auto w-fit">
-                    Aguardando{totals ? ` (${totals.waiting})` : ''}
-                  </div>
-                </th>
-                <th className="px-5 py-3.5 text-center min-w-[90px]">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total</span>
-                </th>
-              </tr>
-            </thead>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead className="sticky top-0 bg-card z-10">
+            <tr className="border-b border-border">
+              <th className="px-5 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Departamento ou Usuário
+              </th>
+              <th className="px-4 py-3 text-center min-w-[160px]">
+                <span className="inline-flex items-center justify-center gap-1 bg-destructive/15 text-destructive rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
+                  Aberto{totals ? ` (${totals.open})` : ''}
+                </span>
+              </th>
+              <th className="px-4 py-3 text-center min-w-[200px]">
+                <span className="inline-flex items-center justify-center gap-1 bg-info/15 text-info rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
+                  Em Atendimento{totals ? ` (${totals.inProgress})` : ''}
+                </span>
+              </th>
+              <th className="px-4 py-3 text-center min-w-[170px]">
+                <span className="inline-flex items-center justify-center gap-1 bg-warning/15 text-warning rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
+                  Aguardando{totals ? ` (${totals.waiting})` : ''}
+                </span>
+              </th>
+              <th className="px-5 py-3 text-center min-w-[90px]">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Total</span>
+              </th>
+            </tr>
+          </thead>
 
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border/50">
+          <tbody>
+            {isLoading
+              ? Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="border-b border-border/40">
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
                         <Skeleton className="h-8 w-8 rounded-full" />
-                        <div className="space-y-1">
+                        <div className="space-y-1.5">
                           <Skeleton className="h-3.5 w-28" />
-                          <Skeleton className="h-3 w-36" />
+                          <Skeleton className="h-3 w-40" />
                         </div>
                       </div>
                     </td>
                     {[...Array(4)].map((_, j) => (
                       <td key={j} className="px-4 py-3.5 text-center">
-                        <Skeleton className="h-8 w-12 mx-auto rounded-lg" />
+                        <Skeleton className="h-8 w-14 mx-auto rounded-md" />
                       </td>
                     ))}
                   </tr>
                 ))
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-muted-foreground text-sm">
-                    Nenhum chat aberto no momento 🎉
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row, idx) => (
-                  <tr
-                    key={row.id ?? idx}
-                    className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
-                  >
-                    {/* Agent info */}
+              : rows.map((row, idx) => (
+                  <tr key={row.id ?? idx} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
+                    {/* Agent */}
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         {row.id === null ? (
                           <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                            <MessageSquare size={14} className="text-muted-foreground" />
+                            <Users size={14} className="text-muted-foreground" />
                           </div>
                         ) : (
                           <Avatar className="h-8 w-8 shrink-0">
@@ -192,9 +165,7 @@ export default function ChatsOverview() {
                         )}
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-foreground truncate">{row.name}</p>
-                          {row.email && (
-                            <p className="text-xs text-muted-foreground truncate">{row.email}</p>
-                          )}
+                          {row.email && <p className="text-xs text-muted-foreground truncate">{row.email}</p>}
                         </div>
                       </div>
                     </td>
@@ -202,7 +173,7 @@ export default function ChatsOverview() {
                     {/* Aberto */}
                     <td className="px-4 py-3 text-center">
                       {row.open > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[56px] bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400 rounded-lg px-3 py-1.5 text-sm font-semibold">
+                        <div className="inline-flex items-center justify-center min-w-[52px] bg-destructive/10 text-destructive rounded-md px-3 py-1.5 text-sm font-semibold">
                           {row.open}
                         </div>
                       ) : (
@@ -213,7 +184,7 @@ export default function ChatsOverview() {
                     {/* Em Atendimento */}
                     <td className="px-4 py-3 text-center">
                       {row.inProgress > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[56px] bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 rounded-lg px-3 py-1.5 text-sm font-semibold">
+                        <div className="inline-flex items-center justify-center min-w-[52px] bg-info/10 text-info rounded-md px-3 py-1.5 text-sm font-semibold">
                           {row.inProgress}
                         </div>
                       ) : (
@@ -224,7 +195,7 @@ export default function ChatsOverview() {
                     {/* Aguardando */}
                     <td className="px-4 py-3 text-center">
                       {row.waiting > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[56px] bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded-lg px-3 py-1.5 text-sm font-semibold">
+                        <div className="inline-flex items-center justify-center min-w-[52px] bg-warning/10 text-warning rounded-md px-3 py-1.5 text-sm font-semibold">
                           {row.waiting}
                         </div>
                       ) : (
@@ -237,11 +208,62 @@ export default function ChatsOverview() {
                       <span className="text-sm font-semibold text-foreground">{row.total}</span>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────
+export default function ChatsOverview() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
+
+  const {
+    data: infiniteData,
+    isLoading: listLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteConversations(filters);
+
+  const conversations = useMemo(() => infiniteData?.pages.flat() ?? [], [infiniteData]);
+  const { data: unreadCounts } = useUnreadCounts(conversations);
+  const markRead = useMarkConversationRead();
+
+  const effectiveSelectedId = selectedId ?? conversations[0]?.id ?? null;
+  useInboxRealtime(effectiveSelectedId);
+
+  const handleSelect = (id: string) => {
+    setSelectedId(id);
+    markRead.mutate(id);
+  };
+
+  const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
+    setFilters((prev) => ({ ...prev, ...newFilters }));
+  };
+
+  return (
+    <div className="flex h-[calc(100vh-7rem)] -mt-2 gap-0 rounded-xl border border-border bg-card card-shadow overflow-hidden">
+      {/* Left: Conversation List */}
+      <ConversationList
+        conversations={conversations}
+        loading={listLoading}
+        selectedId={effectiveSelectedId}
+        onSelect={handleSelect}
+        filters={filters}
+        onFilterChange={handleFilterChange}
+        unreadCounts={unreadCounts ?? {}}
+        hasMore={!!hasNextPage}
+        onLoadMore={() => fetchNextPage()}
+        loadingMore={isFetchingNextPage}
+      />
+
+      {/* Right: Overview table */}
+      <div className="flex-1 overflow-hidden">
+        <OverviewTable />
       </div>
     </div>
   );
