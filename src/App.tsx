@@ -9,6 +9,7 @@ import AppLayout from "./components/AppLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Inbox from "./pages/Inbox";
+import ChatsOverview from "./pages/ChatsOverview";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
 import Tarefas from "./pages/Tarefas";
@@ -29,8 +30,9 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<Navigate to="/chats" replace />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/chats" element={<ProtectedRoute><AppLayout><ChatsOverview /></AppLayout></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
             <Route path="/inbox" element={<ProtectedRoute><AppLayout><Inbox /></AppLayout></ProtectedRoute>} />
             <Route path="/contatos" element={<ProtectedRoute><AppLayout><Contatos /></AppLayout></ProtectedRoute>} />

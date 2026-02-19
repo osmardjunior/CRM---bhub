@@ -78,7 +78,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, []);
 
   const navItems = [
-    { to: '/inbox', label: 'Chats', icon: MessageSquare, badge: stats?.openConversations },
+    { to: '/chats', label: 'Chats', icon: MessageSquare, badge: stats?.openConversations },
     { to: '/pipeline', label: 'Funil', icon: Filter },
     { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
     { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot },
