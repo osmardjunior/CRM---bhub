@@ -14,6 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
+      campaigns: {
+        Row: {
+          action_config: Json
+          action_type: string
+          company_id: string
+          created_at: string
+          deadline_at: string | null
+          description: string | null
+          filters: Json
+          id: string
+          name: string
+          processed: number
+          schedule_at: string | null
+          send_window: Json
+          skip_weekends: boolean
+          status: string
+          total_contacts: number
+          updated_at: string
+        }
+        Insert: {
+          action_config?: Json
+          action_type?: string
+          company_id: string
+          created_at?: string
+          deadline_at?: string | null
+          description?: string | null
+          filters?: Json
+          id?: string
+          name: string
+          processed?: number
+          schedule_at?: string | null
+          send_window?: Json
+          skip_weekends?: boolean
+          status?: string
+          total_contacts?: number
+          updated_at?: string
+        }
+        Update: {
+          action_config?: Json
+          action_type?: string
+          company_id?: string
+          created_at?: string
+          deadline_at?: string | null
+          description?: string | null
+          filters?: Json
+          id?: string
+          name?: string
+          processed?: number
+          schedule_at?: string | null
+          send_window?: Json
+          skip_weekends?: boolean
+          status?: string
+          total_contacts?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chatbot_flows: {
         Row: {
           ai_instructions: string
