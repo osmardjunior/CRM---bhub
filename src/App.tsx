@@ -12,6 +12,7 @@ import Inbox from "./pages/Inbox";
 import ChatsOverview from "./pages/ChatsOverview";
 import Contatos from "./pages/Contatos";
 import Pipeline from "./pages/Pipeline";
+import FunnelKanban from "./pages/FunnelKanban";
 import Tarefas from "./pages/Tarefas";
 import Configuracoes from "./pages/Configuracoes";
 import Integracoes from "./pages/Integracoes";
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/inbox" element={<ProtectedRoute><AppLayout><Inbox /></AppLayout></ProtectedRoute>} />
             <Route path="/contatos" element={<ProtectedRoute><AppLayout><Contatos /></AppLayout></ProtectedRoute>} />
             <Route path="/pipeline" element={<ProtectedRoute><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
+            <Route path="/pipeline/:id" element={<ProtectedRoute><AppLayout><FunnelKanban /></AppLayout></ProtectedRoute>} />
             <Route path="/tarefas" element={<ProtectedRoute><AppLayout><Tarefas /></AppLayout></ProtectedRoute>} />
             <Route path="/integracoes" element={<ProtectedRoute><AppLayout><Integracoes /></AppLayout></ProtectedRoute>} />
             <Route path="/tags" element={<ProtectedRoute><AppLayout><Tags /></AppLayout></ProtectedRoute>} />

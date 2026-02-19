@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, MoreHorizontal, Pencil, Download, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -131,7 +132,7 @@ function FunnelWave({ stages }: { stages: FunnelStage[] }) {
 }
 
 // ── Funnel Card ───────────────────────────────────────────
-function FunnelCard({ funnel, onDelete }: { funnel: Funnel; onDelete: (id: string) => void }) {
+function FunnelCard({ funnel, onDelete, onOpen }: { funnel: Funnel; onDelete: (id: string) => void; onOpen: (id: string) => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [visibilityRestrict, setVisibilityRestrict] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('mine');
@@ -140,7 +141,12 @@ function FunnelCard({ funnel, onDelete }: { funnel: Funnel; onDelete: (id: strin
     <div className="rounded-lg border border-border overflow-hidden mb-4">
       {/* Card header */}
       <div className="flex items-center justify-between bg-muted/40 px-4 py-3 border-b border-border">
-        <span className="text-sm font-semibold text-foreground">{funnel.name}</span>
+        <button
+          onClick={() => onOpen(funnel.id)}
+          className="text-sm font-semibold text-foreground hover:text-primary transition-colors text-left"
+        >
+          {funnel.name}
+        </button>
         <button
           onClick={() => setMoreOpen((o) => !o)}
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
@@ -257,10 +263,15 @@ function FunnelCard({ funnel, onDelete }: { funnel: Funnel; onDelete: (id: strin
 
 // ── Page ─────────────────────────────────────────────────
 export default function PipelinePage() {
+  const navigate = useNavigate();
   const [funnels, setFunnels] = useState<Funnel[]>(INITIAL_FUNNELS);
 
   const handleDelete = (id: string) => {
     setFunnels((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleOpen = (id: string) => {
+    navigate(`/pipeline/${id}`);
   };
 
   const handleCreate = () => {
@@ -293,7 +304,7 @@ export default function PipelinePage() {
             Nesta área estão listados todos os funis criados na sua conta.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-white" onClick={handleCreate}>
+        <Button size="sm" className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground" onClick={handleCreate}>
           <Plus size={14} />
           Criar novo funil
         </Button>
@@ -311,7 +322,7 @@ export default function PipelinePage() {
           </div>
         ) : (
           funnels.map((f) => (
-            <FunnelCard key={f.id} funnel={f} onDelete={handleDelete} />
+            <FunnelCard key={f.id} funnel={f} onDelete={handleDelete} onOpen={handleOpen} />
           ))
         )}
       </div>
