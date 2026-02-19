@@ -26,6 +26,9 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   ai_response: 'Resposta IA',
   transfer: 'Encaminhar para Atendente',
   condition: 'Condição de Horário',
+  apply_tag: 'Aplicar Tag',
+  move_to_funnel: 'Mover para Funil',
+  delegate: 'Delegar Chat',
 };
 
 export default function NodeEditModal({ open, onOpenChange, node, onSave, isNew }: NodeEditModalProps) {

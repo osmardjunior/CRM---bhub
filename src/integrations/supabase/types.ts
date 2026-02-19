@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           ai_instructions: string
           business_hours: Json
+          channels: Json | null
           company_id: string
           created_at: string
           id: string
@@ -30,6 +31,7 @@ export type Database = {
         Insert: {
           ai_instructions?: string
           business_hours?: Json
+          channels?: Json | null
           company_id: string
           created_at?: string
           id?: string
@@ -42,6 +44,7 @@ export type Database = {
         Update: {
           ai_instructions?: string
           business_hours?: Json
+          channels?: Json | null
           company_id?: string
           created_at?: string
           id?: string
@@ -838,6 +841,9 @@ export type Database = {
         | "ai_response"
         | "transfer"
         | "condition"
+        | "apply_tag"
+        | "move_to_funnel"
+        | "delegate"
       conversation_channel: "whatsapp" | "instagram" | "webchat"
       conversation_status: "open" | "pending" | "closed"
       deal_stage:
@@ -985,6 +991,9 @@ export const Constants = {
         "ai_response",
         "transfer",
         "condition",
+        "apply_tag",
+        "move_to_funnel",
+        "delegate",
       ],
       conversation_channel: ["whatsapp", "instagram", "webchat"],
       conversation_status: ["open", "pending", "closed"],

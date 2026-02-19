@@ -1,11 +1,26 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowLeft, Play, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import NodeCard from './NodeCard';
-import NodeEditModal from './NodeEditModal';
+import NodeConfigPanel from './NodeConfigPanel';
+import ChannelPanel from './ChannelPanel';
 import FlowSimulator from './FlowSimulator';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import type { ChatbotFlow, ChatbotNode } from '@/hooks/useChatbotFlows';
+
+const NODE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'message', label: 'Mensagem' },
+  { value: 'menu', label: 'Menu de Opções' },
+  { value: 'collect_data', label: 'Coleta de Dados' },
+  { value: 'ai_response', label: 'Resposta IA' },
+  { value: 'transfer', label: 'Encaminhar' },
+  { value: 'condition', label: 'Condição de Horário' },
+  { value: 'apply_tag', label: 'Aplicar Tag' },
+  { value: 'move_to_funnel', label: 'Mover para Funil' },
+  { value: 'delegate', label: 'Delegar Chat' },
+];
 
 interface FlowEditorProps {
   flow: ChatbotFlow;
@@ -15,88 +30,116 @@ interface FlowEditorProps {
   onAddNode: (data: { flow_id: string; position: number; node_type: ChatbotNode['node_type']; config: Record<string, any> }) => void;
   onUpdateNode: (data: { id: string; node_type?: ChatbotNode['node_type']; config?: Record<string, any> }) => void;
   onDeleteNode: (id: string) => void;
+  onUpdateFlow?: (data: { id: string; channels?: Record<string, any> }) => void;
 }
 
-export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, onUpdateNode, onDeleteNode }: FlowEditorProps) {
-  const [editNode, setEditNode] = useState<ChatbotNode | null>(null);
-  const [showNew, setShowNew] = useState(false);
-  const [insertPosition, setInsertPosition] = useState(0);
+export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, onUpdateNode, onDeleteNode, onUpdateFlow }: FlowEditorProps) {
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showSimulator, setShowSimulator] = useState(false);
+  const [addType, setAddType] = useState<string>('');
+  const [channels, setChannels] = useState<Record<string, any>>({});
 
-  const handleAdd = (position: number) => {
-    setInsertPosition(position);
-    setShowNew(true);
+  useEffect(() => {
+    setChannels((flow as any).channels || {});
+  }, [flow]);
+
+  const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
+
+  const handleAddNode = () => {
+    if (!addType) return;
+    const position = nodes.length;
+    onAddNode({ flow_id: flow.id, position, node_type: addType as ChatbotNode['node_type'], config: {} });
+    setAddType('');
   };
 
-  const handleSaveNew = (data: { node_type: ChatbotNode['node_type']; config: Record<string, any> }) => {
-    onAddNode({ flow_id: flow.id, position: insertPosition, ...data });
-    setShowNew(false);
-  };
-
-  const handleSaveEdit = (data: { node_type: ChatbotNode['node_type']; config: Record<string, any> }) => {
-    if (editNode) {
-      onUpdateNode({ id: editNode.id, ...data });
-      setEditNode(null);
-    }
+  const handleChannelsChange = (newChannels: Record<string, any>) => {
+    setChannels(newChannels);
+    onUpdateFlow?.({ id: flow.id, channels: newChannels });
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={onBack}><ArrowLeft size={18} /></Button>
         <div className="flex-1">
           <h2 className="text-lg font-semibold text-foreground">{flow.name}</h2>
-          <p className="text-xs text-muted-foreground">Editor de etapas</p>
+          <p className="text-xs text-muted-foreground">Editor de fluxo</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowSimulator(true)} disabled={nodes.length === 0}>
-          <Play size={14} className="mr-2" /> Simular fluxo
+          <Play size={14} className="mr-2" /> Simular
         </Button>
       </div>
 
-      {/* Add at beginning */}
-      <div className="flex justify-center">
-        <Button variant="outline" size="sm" className="text-xs" onClick={() => handleAdd(0)}>
-          <Plus size={14} className="mr-1" /> Adicionar primeira etapa
-        </Button>
-      </div>
-
-      {isLoading ? (
-        <p className="text-center text-sm text-muted-foreground py-8">Carregando etapas...</p>
-      ) : (
-        <div className="space-y-2">
-          {nodes.map((node, i) => (
-            <div key={node.id}>
-              <NodeCard
-                node={node}
-                index={i}
-                onEdit={() => setEditNode(node)}
-                onDelete={() => setDeleteId(node.id)}
-              />
-              <div className="flex justify-center py-1">
-                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7" onClick={() => handleAdd(node.position + 1)}>
-                  <Plus size={12} className="mr-1" /> Etapa
-                </Button>
-              </div>
+      {/* 3-column layout */}
+      <div className="grid grid-cols-[280px_1fr_240px] gap-3 min-h-[520px]">
+        {/* LEFT - Node list */}
+        <div className="rounded-lg border border-border bg-card flex flex-col">
+          <div className="px-3 py-2.5 border-b border-border">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ações do Fluxo</h3>
+          </div>
+          <ScrollArea className="flex-1">
+            <div className="p-2 space-y-0.5 group">
+              {isLoading ? (
+                <p className="text-center text-xs text-muted-foreground py-6">Carregando...</p>
+              ) : nodes.length === 0 ? (
+                <p className="text-center text-xs text-muted-foreground py-6">Nenhuma ação ainda</p>
+              ) : (
+                nodes.map((node, i) => (
+                  <NodeCard
+                    key={node.id}
+                    node={node}
+                    index={i}
+                    selected={selectedNodeId === node.id}
+                    onSelect={() => setSelectedNodeId(node.id)}
+                    onDelete={() => setDeleteId(node.id)}
+                  />
+                ))
+              )}
             </div>
-          ))}
+          </ScrollArea>
+          {/* Add action */}
+          <div className="px-2 py-2 border-t border-border flex gap-1.5">
+            <Select value={addType} onValueChange={setAddType}>
+              <SelectTrigger className="h-8 text-xs flex-1">
+                <SelectValue placeholder="Tipo..." />
+              </SelectTrigger>
+              <SelectContent>
+                {NODE_TYPE_OPTIONS.map(o => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" className="h-8 px-2" onClick={handleAddNode} disabled={!addType}>
+              <Plus size={14} />
+            </Button>
+          </div>
         </div>
-      )}
 
-      {nodes.length === 0 && !isLoading && (
-        <p className="text-center text-sm text-muted-foreground py-6">
-          Nenhuma etapa ainda. Clique em "Adicionar primeira etapa" para começar.
-        </p>
-      )}
+        {/* CENTER - Config panel */}
+        <div className="rounded-lg border border-border bg-card">
+          {selectedNode ? (
+            <NodeConfigPanel node={selectedNode} onSave={onUpdateNode} />
+          ) : (
+            <div className="h-full flex items-center justify-center">
+              <p className="text-sm text-muted-foreground">Selecione uma ação à esquerda para configurar</p>
+            </div>
+          )}
+        </div>
 
-      <NodeEditModal open={showNew} onOpenChange={setShowNew} onSave={handleSaveNew} isNew />
-      <NodeEditModal open={!!editNode} onOpenChange={open => !open && setEditNode(null)} node={editNode} onSave={handleSaveEdit} />
+        {/* RIGHT - Channel panel */}
+        <div className="rounded-lg border border-border bg-card">
+          <ChannelPanel channels={channels} onChange={handleChannelsChange} />
+        </div>
+      </div>
+
       <ConfirmDialog
         open={!!deleteId}
         onOpenChange={() => setDeleteId(null)}
         title="Excluir etapa"
         description="Tem certeza que deseja excluir esta etapa?"
-        onConfirm={() => { if (deleteId) { onDeleteNode(deleteId); setDeleteId(null); } }}
+        onConfirm={() => { if (deleteId) { onDeleteNode(deleteId); setDeleteId(null); if (selectedNodeId === deleteId) setSelectedNodeId(null); } }}
       />
       <FlowSimulator flow={flow} nodes={nodes} open={showSimulator} onClose={() => setShowSimulator(false)} />
     </div>

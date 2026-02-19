@@ -51,6 +51,7 @@ export default function Chatbot() {
               onAddNode={data => addNode.mutate(data)}
               onUpdateNode={data => updateNode.mutate(data)}
               onDeleteNode={id => deleteNode.mutate(id)}
+              onUpdateFlow={data => updateFlow.mutate(data)}
             />
           )}
         </TabsContent>

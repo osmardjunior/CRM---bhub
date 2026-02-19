@@ -21,7 +21,7 @@ export interface ChatbotNode {
   flow_id: string;
   company_id: string;
   position: number;
-  node_type: 'message' | 'menu' | 'collect_data' | 'ai_response' | 'transfer' | 'condition';
+  node_type: 'message' | 'menu' | 'collect_data' | 'ai_response' | 'transfer' | 'condition' | 'apply_tag' | 'move_to_funnel' | 'delegate';
   config: Record<string, any>;
   created_at: string;
 }
