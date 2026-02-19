@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Play, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NodeCard from './NodeCard';
 import NodeEditModal from './NodeEditModal';
+import FlowSimulator from './FlowSimulator';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import type { ChatbotFlow, ChatbotNode } from '@/hooks/useChatbotFlows';
 
@@ -21,6 +22,7 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
   const [showNew, setShowNew] = useState(false);
   const [insertPosition, setInsertPosition] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showSimulator, setShowSimulator] = useState(false);
 
   const handleAdd = (position: number) => {
     setInsertPosition(position);
@@ -43,10 +45,13 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={onBack}><ArrowLeft size={18} /></Button>
-        <div>
+        <div className="flex-1">
           <h2 className="text-lg font-semibold text-foreground">{flow.name}</h2>
           <p className="text-xs text-muted-foreground">Editor de etapas</p>
         </div>
+        <Button variant="outline" size="sm" onClick={() => setShowSimulator(true)} disabled={nodes.length === 0}>
+          <Play size={14} className="mr-2" /> Simular fluxo
+        </Button>
       </div>
 
       {/* Add at beginning */}
@@ -93,6 +98,7 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
         description="Tem certeza que deseja excluir esta etapa?"
         onConfirm={() => { if (deleteId) { onDeleteNode(deleteId); setDeleteId(null); } }}
       />
+      <FlowSimulator flow={flow} nodes={nodes} open={showSimulator} onClose={() => setShowSimulator(false)} />
     </div>
   );
 }
