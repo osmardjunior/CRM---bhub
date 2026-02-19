@@ -1,63 +1,70 @@
 
+# Melhorias nas Acoes de Tag e Delegar - Estilo Guru
 
-# Redesign do Chatbot - Estilo Guru
+## O que sera feito
 
-## O que muda
+### 1. Acao "Aplicar Tag" - Melhorias visuais
+A secao de tags ja funciona, mas vamos melhorar o visual para ficar mais proximo do Guru:
+- Tags exibidas como blocos coloridos maiores (nao apenas badges pequenos), ocupando a largura total em grid de 3 colunas
+- Checkbox visivel em cada tag para indicar selecao
+- Cores de fundo fortes nas tags (como no Guru) em vez de apenas bordas coloridas
 
-A tela do chatbot vai ganhar um layout mais completo e visual, inspirado na interface do Guru que voce mostrou. As principais mudancas sao:
+### 2. Acao "Delegar Chat" - Funcionalidades novas
+Adicionar funcionalidades que existem no Guru mas faltam no sistema atual:
 
-### Layout em 3 colunas
-- **Coluna esquerda**: Lista de acoes/etapas do fluxo com badges coloridas por tipo
-- **Coluna central**: Area de configuracao da etapa selecionada, com secoes organizadas (Funil, Tags, Delegar, etc.)
-- **Coluna direita**: Painel de canais (WhatsApp, etc.) com toggles Liga/Desliga e modo Manual/Automatico
+**Secao de Usuarios:**
+- Lista de usuarios do time com checkbox para selecionar multiplos (nao apenas um select dropdown)
+- Exibir role ao lado do nome (ADMIN, NORMAL)
+- Opcao "Remover outros usuarios delegados" (checkbox)
 
-### Novos tipos de etapa (acoes)
-Alem dos tipos existentes (mensagem, menu, coleta de dados, IA, transferir, condicao de horario), vamos adicionar:
-- **Aplicar Tag**: Seleciona tags existentes para aplicar automaticamente ao contato
-- **Mover para Funil**: Move o contato para uma etapa especifica de um funil
-- **Delegar Chat**: Delega a conversa para um usuario ou departamento especifico, com opcao de rodizio
+**Secao de Departamentos:**
+- Novo conceito de "departamentos" - como nao existe tabela de departamentos no banco, vamos criar uma
+- Select/lista para escolher departamentos
+- Opcao "Remover outros grupos delegados" (checkbox)
 
-### Editor visual inline (sem modal)
-Em vez de abrir um modal para editar cada etapa, a configuracao aparece diretamente na coluna central quando voce clica em uma acao na lista da esquerda - igual ao Guru.
-
-### Painel de canais
-Na coluna direita, cada canal conectado (ex: WhatsApp) mostra:
-- Toggle Ligado/Desligado
-- Modo: Manual ou Automatico
+**Secao de Rodizio:**
+- "Ativar Rodizio no Departamento" (toggle)
+- Sub-opcao "Delegar apenas para um usuario deste departamento (nao sera delegado para o departamento)"
+- Sub-opcao "Dar preferencia para quem estiver online"
 
 ## Detalhes Tecnicos
 
-### Novas colunas no banco
-- Tabela `chatbot_nodes`: Os novos tipos de no (`apply_tag`, `move_to_funnel`, `delegate`) serao tratados pelo campo `config` JSONB, sem precisar alterar o enum. Vamos usar os valores existentes do `node_type` como TEXT, adicionando os novos tipos.
-- Tabela `chatbot_flows`: Adicionar coluna `channels` (JSONB) para guardar configuracao de canais (ligado/desligado, manual/automatico).
-
-### Migracao SQL
+### Nova tabela: departments
 ```sql
--- Adicionar coluna de canais ao fluxo
-ALTER TABLE chatbot_flows ADD COLUMN IF NOT EXISTS channels jsonb DEFAULT '{}';
-
--- Permitir novos node_types (apply_tag, move_to_funnel, delegate)
--- Como node_type e text sem constraint, basta usar os novos valores
+CREATE TABLE departments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- RLS policies similares as demais tabelas da empresa
 ```
 
-### Componentes alterados
-1. **`FlowEditor.tsx`**: Refatorado para layout 3 colunas (lista | config | canais)
-2. **`NodeCard.tsx`**: Simplificado para item de lista com badge colorida e nome
-3. **`NodeEditModal.tsx`**: Substituido por um painel inline (`NodeConfigPanel.tsx`) que renderiza na coluna central
-4. **Novo `ChannelPanel.tsx`**: Coluna direita com toggles por canal
-5. **`NodeConfigPanel.tsx`**: Novo componente que mostra a configuracao da etapa selecionada inline, com secoes para Tag, Funil, Delegacao conforme o tipo
+### Alteracoes no NodeConfigPanel.tsx
+- **apply_tag**: Redesenhar para grid de tags coloridas com checkboxes, visual mais parecido com Guru
+- **delegate**: Expandir para 3 secoes (Usuarios, Departamentos, Rodizio) com checkboxes multiplos e opcoes adicionais
 
-### Cores dos badges por tipo
-- Encerramento: vermelho
-- Campanha: cinza
-- Indicacao: azul
-- Acao Comercial: preto
-- Tag: multicolorido
-- Funil: verde
-- Delegar: amarelo
+### Config JSONB atualizado para delegate
+```json
+{
+  "user_ids": ["uuid1", "uuid2"],
+  "remove_other_users": true,
+  "department_ids": ["uuid1"],
+  "remove_other_departments": true,
+  "round_robin": true,
+  "round_robin_single_user": true,
+  "prefer_online": true
+}
+```
 
-### Integracao com dados existentes
-- Tags: Usa o hook `useTags()` para listar tags disponiveis
-- Funis: Usa o `FunnelContext` para listar funis e etapas
-- Usuarios/Departamentos: Usa `useTeamProfiles()` para listar membros do time
+### Novo hook: useDepartments.ts
+- CRUD para departamentos
+- Usado no NodeConfigPanel e futuramente em outras partes do sistema
 
+### Arquivos que serao criados
+- `supabase/migrations/xxx_departments.sql` - Tabela de departamentos
+- `src/hooks/useDepartments.ts` - Hook para CRUD de departamentos
+
+### Arquivos que serao modificados
+- `src/components/chatbot/NodeConfigPanel.tsx` - Redesign das secoes apply_tag e delegate
+- `src/integrations/supabase/types.ts` - Atualizado automaticamente
