@@ -544,8 +544,11 @@ export type Database = {
           company_id: string
           config: Json
           created_at: string
+          device_name: string | null
           id: string
+          phone_number: string | null
           provider: string
+          restrict_users: string[] | null
           status: string
           updated_at: string
         }
@@ -554,8 +557,11 @@ export type Database = {
           company_id: string
           config?: Json
           created_at?: string
+          device_name?: string | null
           id?: string
+          phone_number?: string | null
           provider?: string
+          restrict_users?: string[] | null
           status?: string
           updated_at?: string
         }
@@ -564,8 +570,11 @@ export type Database = {
           company_id?: string
           config?: Json
           created_at?: string
+          device_name?: string | null
           id?: string
+          phone_number?: string | null
           provider?: string
+          restrict_users?: string[] | null
           status?: string
           updated_at?: string
         }

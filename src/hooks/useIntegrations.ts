@@ -9,6 +9,9 @@ export interface Integration {
   provider: string;
   config: Record<string, string>;
   status: string;
+  phone_number: string | null;
+  device_name: string;
+  restrict_users: string[];
   created_at: string;
   updated_at: string;
 }
@@ -27,66 +30,95 @@ export function useIntegrations() {
   });
 }
 
-export function useUpsertIntegration() {
+export function useAddDevice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: {
       channel: string;
       provider: string;
       config: Record<string, string>;
-      status: string;
+      phone_number: string;
+      device_name: string;
     }) => {
-      // Try to find existing
-      const { data: existing } = await supabase
+      const { error } = await supabase
         .from('integrations')
-        .select('id')
-        .eq('channel', payload.channel)
-        .maybeSingle();
-
-      if (existing) {
-        const { error } = await supabase
-          .from('integrations')
-          .update({
-            provider: payload.provider,
-            config: payload.config as any,
-            status: payload.status,
-          })
-          .eq('id', existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('integrations')
-          .insert({
-            channel: payload.channel,
-            provider: payload.provider,
-            config: payload.config as any,
-            status: payload.status,
-          } as any);
-        if (error) throw error;
-      }
+        .insert({
+          channel: payload.channel,
+          provider: payload.provider,
+          config: payload.config as any,
+          phone_number: payload.phone_number,
+          device_name: payload.device_name,
+          status: 'connected',
+        } as any);
+      if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['integrations'] });
-      toast.success('Integração salva!');
+      toast.success('Aparelho adicionado!');
     },
     onError: (err: Error) => toast.error(err.message),
   });
 }
 
-export function useDisconnectIntegration() {
+export function useUpdateDevice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (channel: string) => {
+    mutationFn: async (payload: { id: string; updates: Record<string, any> }) => {
       const { error } = await supabase
         .from('integrations')
-        .update({ status: 'disconnected', config: {} as any })
-        .eq('channel', channel);
+        .update(payload.updates)
+        .eq('id', payload.id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['integrations'] });
-      toast.success('Integração desconectada.');
+      toast.success('Aparelho atualizado!');
     },
     onError: (err: Error) => toast.error(err.message),
   });
+}
+
+export function useDisconnectDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('integrations')
+        .update({ status: 'disconnected', config: {} as any })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integrations'] });
+      toast.success('Aparelho desativado.');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useDeleteDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('integrations')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integrations'] });
+      toast.success('Aparelho removido.');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+// Keep backward compat
+export function useUpsertIntegration() {
+  return useAddDevice();
+}
+
+export function useDisconnectIntegration() {
+  return useDisconnectDevice();
 }
