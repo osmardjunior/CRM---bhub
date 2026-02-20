@@ -396,7 +396,12 @@ export async function closeConversation(
 // ── Group detection helper ────────────────────────────
 export function isGroupChat(phone: string | null | undefined): boolean {
   if (!phone) return false;
+  // WhatsApp group JIDs end with @g.us or contain @g.us
+  if (phone.includes('@g.us')) return true;
+  // Also check for group JID prefix pattern (120363...)
   const digits = phone.replace(/\D/g, '');
-  // WhatsApp group JIDs typically start with 120363
-  return digits.startsWith('120363');
+  if (digits.startsWith('120363')) return true;
+  // Check if the number is too long to be a regular phone (groups have 18+ digit IDs)
+  if (digits.length >= 18) return true;
+  return false;
 }
