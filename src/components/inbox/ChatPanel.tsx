@@ -13,6 +13,7 @@ import {
   StickyNote,
   X,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -56,6 +57,9 @@ import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail, Annotation } from '@/services/api';
 import { listAnnotations } from '@/services/api';
+import AIChatAssistDrawer from '@/components/ai/AIChatAssistDrawer';
+import AIAnnotationHelper from '@/components/ai/AIAnnotationHelper';
+import { useChatStore } from '@/store/chatStore';
 
 function groupMessagesByDate(items: any[]) {
   const groups: { date: string; messages: any[] }[] = [];
@@ -95,6 +99,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const { user, companyId } = useAuth();
   const queryClient = useQueryClient();
   const [closing, setClosing] = useState(false);
+  const { setAIDrawerOpen } = useChatStore();
 
   const canReassign = permissions.canReassignConversations;
   const reassignTooltip = getPermissionTooltip('canReassignConversations', permissions);
@@ -460,10 +465,22 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           )}
         </Tooltip>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-primary" onClick={() => setAIDrawerOpen(true)}>
+              <Sparkles size={16} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom"><p className="text-xs">Assistente IA</p></TooltipContent>
+        </Tooltip>
+
         <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={onToggleProfile}>
           {profileOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </Button>
       </div>
+
+      {/* AI Chat Assist Drawer */}
+      <AIChatAssistDrawer conversation={conversation} />
 
       {/* Messages area */}
       <div
@@ -591,6 +608,9 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                 <p className="text-xs">{isAnnotationMode ? 'Voltar para mensagem' : 'Anotação interna'}</p>
               </TooltipContent>
             </Tooltip>
+            {isAnnotationMode && conversation && (
+              <AIAnnotationHelper conversation={conversation} onInsert={(text) => setInput(text)} />
+            )}
             <Popover open={quickReplyOpen && !input.startsWith('/')} onOpenChange={(open) => { setQuickReplyOpen(open); if (!open) setQuickReplyFilter(''); }}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">

@@ -17,3 +17,12 @@ verify_jwt = false
 
 [functions.evolution-api]
 verify_jwt = false
+
+[functions.ai-chat-assist]
+verify_jwt = false
+
+[functions.ai-report-gen]
+verify_jwt = false
+
+[functions.ai-annotation]
+verify_jwt = false

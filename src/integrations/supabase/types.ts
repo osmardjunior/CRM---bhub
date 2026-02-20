@@ -14,6 +14,141 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_automation_suggestions: {
+        Row: {
+          company_id: string
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string | null
+          id: string
+          status: string | null
+          suggestion_json: Json
+        }
+        Insert: {
+          company_id: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          status?: string | null
+          suggestion_json?: Json
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          status?: string | null
+          suggestion_json?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_automation_suggestions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_automation_suggestions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_interactions: {
+        Row: {
+          company_id: string
+          completion_tokens: number | null
+          contact_id: string | null
+          conversation_id: string | null
+          cost_usd: number | null
+          created_at: string | null
+          id: string
+          interaction_type: string
+          model_used: string | null
+          prompt_tokens: number | null
+          user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          completion_tokens?: number | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          cost_usd?: number | null
+          created_at?: string | null
+          id?: string
+          interaction_type: string
+          model_used?: string | null
+          prompt_tokens?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          completion_tokens?: number | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          cost_usd?: number | null
+          created_at?: string | null
+          id?: string
+          interaction_type?: string
+          model_used?: string | null
+          prompt_tokens?: number | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_interactions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_interactions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_reports: {
+        Row: {
+          company_id: string
+          content_md: string
+          created_at: string | null
+          id: string
+          metadata: Json | null
+          period_end: string
+          period_start: string
+          user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          content_md: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          period_end: string
+          period_start: string
+          user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          content_md?: string
+          created_at?: string | null
+          id?: string
+          metadata?: Json | null
+          period_end?: string
+          period_start?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       annotations: {
         Row: {
           author_id: string
@@ -56,6 +191,57 @@ export type Database = {
           },
           {
             foreignKeyName: "annotations_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attendance_history: {
+        Row: {
+          changed_by_user_id: string | null
+          company_id: string
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string | null
+          duration_seconds: number | null
+          from_status: string | null
+          id: string
+          to_status: string | null
+        }
+        Insert: {
+          changed_by_user_id?: string | null
+          company_id: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          from_status?: string | null
+          id?: string
+          to_status?: string | null
+        }
+        Update: {
+          changed_by_user_id?: string | null
+          company_id?: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          from_status?: string | null
+          id?: string
+          to_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_history_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_history_conversation_id_fkey"
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
@@ -247,16 +433,137 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_assignees: {
+        Row: {
+          assigned_at: string | null
+          company_id: string
+          contact_id: string
+          user_id: string
+        }
+        Insert: {
+          assigned_at?: string | null
+          company_id: string
+          contact_id: string
+          user_id: string
+        }
+        Update: {
+          assigned_at?: string | null
+          company_id?: string
+          contact_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_assignees_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_funnel_stages: {
+        Row: {
+          company_id: string
+          contact_id: string
+          funnel_id: string
+          id: string
+          stage_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          contact_id: string
+          funnel_id: string
+          id?: string
+          stage_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string
+          funnel_id?: string
+          id?: string
+          stage_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_funnel_stages_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_funnel_stages_funnel_id_fkey"
+            columns: ["funnel_id"]
+            isOneToOne: false
+            referencedRelation: "funnels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_funnel_stages_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "funnel_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_tags: {
+        Row: {
+          company_id: string
+          contact_id: string
+          created_at: string | null
+          tag_id: string
+        }
+        Insert: {
+          company_id: string
+          contact_id: string
+          created_at?: string | null
+          tag_id: string
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string
+          created_at?: string | null
+          tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_tags_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
+          attendance_status: string | null
           avatar_url: string | null
+          chatbot_enabled: boolean | null
           company_id: string
           created_at: string
           email: string | null
+          has_unread: boolean | null
           id: string
+          is_archived: boolean | null
+          is_favorite: boolean | null
+          is_group: boolean | null
           last_contact_at: string | null
           name: string
           notes: string | null
+          origin_device_id: string | null
           phone: string | null
           responsible_user_id: string | null
           source: string | null
@@ -264,14 +571,21 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attendance_status?: string | null
           avatar_url?: string | null
+          chatbot_enabled?: boolean | null
           company_id: string
           created_at?: string
           email?: string | null
+          has_unread?: boolean | null
           id?: string
+          is_archived?: boolean | null
+          is_favorite?: boolean | null
+          is_group?: boolean | null
           last_contact_at?: string | null
           name: string
           notes?: string | null
+          origin_device_id?: string | null
           phone?: string | null
           responsible_user_id?: string | null
           source?: string | null
@@ -279,14 +593,21 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attendance_status?: string | null
           avatar_url?: string | null
+          chatbot_enabled?: boolean | null
           company_id?: string
           created_at?: string
           email?: string | null
+          has_unread?: boolean | null
           id?: string
+          is_archived?: boolean | null
+          is_favorite?: boolean | null
+          is_group?: boolean | null
           last_contact_at?: string | null
           name?: string
           notes?: string | null
+          origin_device_id?: string | null
           phone?: string | null
           responsible_user_id?: string | null
           source?: string | null
@@ -423,6 +744,78 @@ export type Database = {
           },
         ]
       }
+      custom_field_definitions: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          field_type: string
+          id: string
+          name: string
+          position: number | null
+          slug: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          field_type?: string
+          id?: string
+          name: string
+          position?: number | null
+          slug: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          field_type?: string
+          id?: string
+          name?: string
+          position?: number | null
+          slug?: string
+        }
+        Relationships: []
+      }
+      custom_field_values: {
+        Row: {
+          company_id: string
+          contact_id: string
+          field_definition_id: string
+          id: string
+          updated_at: string | null
+          value: string | null
+        }
+        Insert: {
+          company_id: string
+          contact_id: string
+          field_definition_id: string
+          id?: string
+          updated_at?: string | null
+          value?: string | null
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string
+          field_definition_id?: string
+          id?: string
+          updated_at?: string | null
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_field_values_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custom_field_values_field_definition_id_fkey"
+            columns: ["field_definition_id"]
+            isOneToOne: false
+            referencedRelation: "custom_field_definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deals: {
         Row: {
           assigned_user_id: string | null
@@ -483,6 +876,57 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delegation_history: {
+        Row: {
+          action: string
+          actor_id: string | null
+          company_id: string
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string | null
+          id: string
+          is_automatic: boolean | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          company_id: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          is_automatic?: boolean | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          company_id?: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          is_automatic?: boolean | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delegation_history_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delegation_history_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -640,39 +1084,107 @@ export type Database = {
           },
         ]
       }
+      message_reactions: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          emoji: string
+          id: string
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          emoji: string
+          id?: string
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          emoji?: string
+          id?: string
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           body: string
+          client_timestamp: string | null
           company_id: string
           conversation_id: string
           created_at: string
+          delivery_status: string | null
+          direction: string | null
           external_message_id: string | null
           id: string
+          is_annotation: boolean | null
+          media_file_id: string | null
           media_url: string | null
+          processed_by_bot: boolean | null
+          reply_to_message_id: string | null
           sender_id: string | null
+          sender_name: string | null
           sender_type: Database["public"]["Enums"]["message_sender_type"]
+          sent_by: string | null
+          server_timestamp: string | null
+          type: string | null
         }
         Insert: {
           body: string
+          client_timestamp?: string | null
           company_id: string
           conversation_id: string
           created_at?: string
+          delivery_status?: string | null
+          direction?: string | null
           external_message_id?: string | null
           id?: string
+          is_annotation?: boolean | null
+          media_file_id?: string | null
           media_url?: string | null
+          processed_by_bot?: boolean | null
+          reply_to_message_id?: string | null
           sender_id?: string | null
+          sender_name?: string | null
           sender_type?: Database["public"]["Enums"]["message_sender_type"]
+          sent_by?: string | null
+          server_timestamp?: string | null
+          type?: string | null
         }
         Update: {
           body?: string
+          client_timestamp?: string | null
           company_id?: string
           conversation_id?: string
           created_at?: string
+          delivery_status?: string | null
+          direction?: string | null
           external_message_id?: string | null
           id?: string
+          is_annotation?: boolean | null
+          media_file_id?: string | null
           media_url?: string | null
+          processed_by_bot?: boolean | null
+          reply_to_message_id?: string | null
           sender_id?: string | null
+          sender_name?: string | null
           sender_type?: Database["public"]["Enums"]["message_sender_type"]
+          sent_by?: string | null
+          server_timestamp?: string | null
+          type?: string | null
         }
         Relationships: [
           {
@@ -872,6 +1384,56 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      scheduled_messages: {
+        Row: {
+          cancelled_at: string | null
+          company_id: string
+          content: string
+          conversation_id: string
+          created_at: string | null
+          created_by: string | null
+          id: string
+          media_url: string | null
+          scheduled_at: string
+          sent_at: string | null
+          type: string | null
+        }
+        Insert: {
+          cancelled_at?: string | null
+          company_id: string
+          content: string
+          conversation_id: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          media_url?: string | null
+          scheduled_at: string
+          sent_at?: string | null
+          type?: string | null
+        }
+        Update: {
+          cancelled_at?: string | null
+          company_id?: string
+          content?: string
+          conversation_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          media_url?: string | null
+          scheduled_at?: string
+          sent_at?: string | null
+          type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       tags: {
         Row: {
