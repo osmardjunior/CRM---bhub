@@ -391,22 +391,12 @@ export async function closeConversation(
     .eq('id', conversationId);
 
   if (error) handleError(error);
+}
 
-  // Trigger satisfaction survey (best-effort)
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-satisfaction-survey`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ conversation_id: conversationId }),
-      }).catch((e) => console.error('Satisfaction survey error:', e));
-    }
-  } catch (e) {
-    console.error('Satisfaction survey error:', e);
-  }
+// ── Group detection helper ────────────────────────────
+export function isGroupChat(phone: string | null | undefined): boolean {
+  if (!phone) return false;
+  const digits = phone.replace(/\D/g, '');
+  // WhatsApp group JIDs typically start with 120363
+  return digits.startsWith('120363');
 }

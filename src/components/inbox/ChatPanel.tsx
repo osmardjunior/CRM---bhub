@@ -10,6 +10,7 @@ import {
   Mic,
   ChevronDown,
   CheckCheck,
+  Users,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -46,7 +47,7 @@ import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
-import { closeConversation } from '@/services/api';
+import { closeConversation, isGroupChat } from '@/services/api';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
@@ -171,12 +172,19 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 bg-card">
         <Avatar className="h-9 w-9 shrink-0">
-          <AvatarFallback className="text-sm font-semibold bg-primary/10 text-primary">
-            {conversation.contact.name[0]}
+          <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conversation.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
+            {isGroupChat(conversation.contact.phone) ? <Users size={16} /> : conversation.contact.name[0]}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-semibold text-foreground">{conversation.contact.name}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-foreground">{conversation.contact.name}</span>
+            {isGroupChat(conversation.contact.phone) && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">
+                Grupo
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">{conversation.contact.phone}</p>
         </div>
 
