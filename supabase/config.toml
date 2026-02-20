@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.chatbot-process]
 verify_jwt = false
+
+[functions.evolution-api]
+verify_jwt = false

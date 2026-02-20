@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import PageHeader from '@/components/shared/PageHeader';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import EvolutionQRModal from '@/components/integracoes/EvolutionQRModal';
 
 const PROVIDERS = [
   { value: 'meta', label: 'Meta Cloud API' },
@@ -84,12 +86,13 @@ function ProviderFields({ provider, config, onChange }: {
 }
 
 // ── Device Card ──────────────────────────────────────
-function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit }: {
+function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect }: {
   device: Integration;
   isAdmin: boolean;
   onDisconnect: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (device: Integration) => void;
+  onConnect: (device: Integration) => void;
 }) {
   const connected = device.status === 'connected';
 
@@ -138,6 +141,11 @@ function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit }: {
           <Button variant="outline" size="sm" className="text-xs gap-1.5 flex-1" onClick={() => onEdit(device)}>
             <Pencil size={12} /> Editar
           </Button>
+          {device.provider === 'evolution' && !connected && (
+            <Button variant="outline" size="sm" className="text-xs gap-1.5 text-primary hover:text-primary" onClick={() => onConnect(device)}>
+              <QrCode size={12} /> Conectar
+            </Button>
+          )}
           {connected && (
             <Button variant="outline" size="sm" className="text-xs text-destructive hover:text-destructive" onClick={() => onDisconnect(device.id)}>
               Desativar
@@ -167,6 +175,15 @@ export default function IntegracoesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [step, setStep] = useState(1);
+
+  // Evolution QR modal state
+  const [qrModal, setQrModal] = useState<{
+    open: boolean;
+    integrationId: string | null;
+    apiUrl: string;
+    apiKey: string;
+    instanceName: string;
+  }>({ open: false, integrationId: null, apiUrl: '', apiKey: '', instanceName: '' });
 
   // form state
   const [deviceName, setDeviceName] = useState('');
@@ -200,6 +217,9 @@ export default function IntegracoesPage() {
       toast.error('Preencha nome, número e provedor');
       return;
     }
+    const isEvolution = provider === 'evolution';
+    const savedConfig = { ...config };
+    const savedInstanceName = config.instance_name || '';
     addDevice.mutate({
       channel: 'whatsapp',
       provider,
@@ -207,9 +227,31 @@ export default function IntegracoesPage() {
       phone_number: phoneNumber,
       device_name: deviceName,
     }, {
-      onSuccess: () => {
+      onSuccess: (_, variables) => {
         setAddOpen(false);
         resetForm();
+        // For Evolution API, open QR modal to pair
+        if (isEvolution && savedConfig.api_url && savedConfig.api_key) {
+          // Small delay to let the DB insert complete and get the ID
+          setTimeout(async () => {
+            // Find the newly created integration
+            const { data } = await supabase
+              .from('integrations')
+              .select('id')
+              .eq('device_name', variables.device_name)
+              .eq('provider', 'evolution')
+              .order('created_at', { ascending: false })
+              .limit(1);
+            const newId = data?.[0]?.id || null;
+            setQrModal({
+              open: true,
+              integrationId: newId,
+              apiUrl: savedConfig.api_url,
+              apiKey: savedConfig.api_key,
+              instanceName: savedInstanceName,
+            });
+          }, 500);
+        }
       },
     });
   };
@@ -277,6 +319,20 @@ export default function IntegracoesPage() {
               onDisconnect={id => setConfirmId(id)}
               onDelete={id => setDeleteId(id)}
               onEdit={openEdit}
+              onConnect={(dev) => {
+                const cfg = dev.config as Record<string, string>;
+                if (cfg.api_url && cfg.api_key) {
+                  setQrModal({
+                    open: true,
+                    integrationId: dev.id,
+                    apiUrl: cfg.api_url,
+                    apiKey: cfg.api_key,
+                    instanceName: cfg.instance_name || dev.device_name || 'default',
+                  });
+                } else {
+                  toast.error('Configure a URL e API Key da Evolution API primeiro');
+                }
+              }}
             />
           ))}
         </div>
@@ -501,6 +557,16 @@ export default function IntegracoesPage() {
           if (deleteId) deleteDevice.mutate(deleteId);
           setDeleteId(null);
         }}
+      />
+
+      {/* ── Evolution QR Code Modal ─────────────────── */}
+      <EvolutionQRModal
+        open={qrModal.open}
+        onOpenChange={(v) => setQrModal(prev => ({ ...prev, open: v }))}
+        integrationId={qrModal.integrationId}
+        apiUrl={qrModal.apiUrl}
+        apiKey={qrModal.apiKey}
+        instanceName={qrModal.instanceName}
       />
     </div>
   );
