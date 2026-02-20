@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -218,6 +219,7 @@ function OverviewTable() {
 
 // ── Page ─────────────────────────────────────────────────
 export default function ChatsOverview() {
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
 
@@ -239,6 +241,7 @@ export default function ChatsOverview() {
   const handleSelect = (id: string) => {
     setSelectedId(id);
     markRead.mutate(id);
+    navigate(`/inbox?id=${id}`);
   };
 
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
