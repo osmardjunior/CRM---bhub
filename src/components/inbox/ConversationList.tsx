@@ -102,11 +102,16 @@ export default function ConversationList({
   });
 
   function handleApplyFilters() {
-    onFilterChange({
-      channel: localChannel && localChannel !== 'todos'
-        ? (localChannel as Enums<'conversation_channel'>)
-        : undefined,
-    });
+    const newFilters: Partial<ConversationFilters> = {};
+    if (localChannel && localChannel !== 'todos') {
+      newFilters.channel = localChannel as Enums<'conversation_channel'>;
+    }
+    if (localName) newFilters.name = localName;
+    if (localPhone) newFilters.phone = localPhone;
+    if (localTag && localTag !== 'qualquer') newFilters.tag = localTag;
+    if (localUser && localUser !== 'qualquer') newFilters.assigned_user_id = localUser;
+    if (localOrder) newFilters.sort = localOrder as 'recent' | 'oldest' | 'name';
+    onFilterChange(newFilters);
   }
 
   function handleClearFilters() {
@@ -117,7 +122,7 @@ export default function ConversationList({
     setLocalStatus('');
     setLocalOrder('');
     setLocalChannel('');
-    onFilterChange({ channel: undefined });
+    onFilterChange({ channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
   }
 
   const channelIcons = [
