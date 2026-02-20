@@ -200,6 +200,7 @@ export type Database = {
       }
       contacts: {
         Row: {
+          avatar_url: string | null
           company_id: string
           created_at: string
           email: string | null
@@ -214,6 +215,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          avatar_url?: string | null
           company_id: string
           created_at?: string
           email?: string | null
@@ -228,6 +230,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          avatar_url?: string | null
           company_id?: string
           created_at?: string
           email?: string | null
