@@ -17,6 +17,7 @@ const PROVIDERS = [
   { value: 'twilio', label: 'Twilio' },
   { value: '360dialog', label: '360dialog' },
   { value: 'gupshup', label: 'Gupshup' },
+  { value: 'evolution', label: 'Evolution API' },
 ];
 
 const WEBHOOK_URL = `https://loamacrszlgxhaqvnkzw.supabase.co/functions/v1/incoming-message`;
@@ -70,6 +71,13 @@ function ProviderFields({ provider, config, onChange }: {
     <div className="space-y-3">
       <div><Label className="text-xs">API Key</Label><Input type="password" className="mt-1" value={config.api_key ?? ''} onChange={e => set('api_key', e.target.value)} /></div>
       <div><Label className="text-xs">App Name</Label><Input className="mt-1" value={config.app_name ?? ''} onChange={e => set('app_name', e.target.value)} /></div>
+    </div>
+  );
+  if (provider === 'evolution') return (
+    <div className="space-y-3">
+      <div><Label className="text-xs">URL da API</Label><Input className="mt-1" value={config.api_url ?? ''} onChange={e => set('api_url', e.target.value)} placeholder="https://sua-evolution-api.com" /><p className="text-[11px] text-muted-foreground mt-1">URL onde a Evolution API está rodando (Docker local, Railway, etc.)</p></div>
+      <div><Label className="text-xs">API Key (Global)</Label><Input type="password" className="mt-1" value={config.api_key ?? ''} onChange={e => set('api_key', e.target.value)} placeholder="Chave definida em AUTHENTICATION_API_KEY" /></div>
+      <div><Label className="text-xs">Nome da instância</Label><Input className="mt-1" value={config.instance_name ?? ''} onChange={e => set('instance_name', e.target.value)} placeholder="Ex: minha-empresa" /><p className="text-[11px] text-muted-foreground mt-1">Nome que será usado para criar a instância na Evolution API</p></div>
     </div>
   );
   return null;
@@ -347,11 +355,11 @@ export default function IntegracoesPage() {
           {step === 1 && (
             <div className="space-y-4 py-2">
               <div className="rounded-lg bg-secondary/50 p-3 space-y-2">
-                <p className="text-xs font-semibold text-foreground">📋 Como obter as credenciais?</p>
+                <p className="text-xs font-semibold text-foreground">📋 Como conectar?</p>
                 <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
-                  <li>Escolha um provedor parceiro da Meta (recomendamos <strong>Meta Cloud API</strong> ou <strong>Gupshup</strong>)</li>
-                  <li>Crie uma conta no painel do provedor e registre seu número de telefone</li>
-                  <li>Obtenha as credenciais de API (token, chave, etc.)</li>
+                  <li>Para <strong>API oficial</strong>: escolha Meta, Twilio, 360dialog ou Gupshup e use suas credenciais</li>
+                  <li>Para <strong>QR Code</strong>: escolha <strong>Evolution API</strong> (requer servidor próprio via Docker)</li>
+                  <li>Obtenha as credenciais de API (token, chave, URL, etc.)</li>
                   <li>Cole as credenciais aqui no passo 3</li>
                 </ol>
               </div>
