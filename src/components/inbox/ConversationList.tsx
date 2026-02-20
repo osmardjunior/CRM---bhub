@@ -85,8 +85,12 @@ export default function ConversationList({
   const { data: teamMembers = [] } = useTeamProfiles();
 
   const activeStatus = filters.status ?? 'open';
+  const [chatType, setChatType] = useState<'individual' | 'group'>('individual');
 
   const filtered = conversations.filter((c) => {
+    const isGroup = isGroupChat(c.contact.phone);
+    if (chatType === 'group' && !isGroup) return false;
+    if (chatType === 'individual' && isGroup) return false;
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -335,6 +339,32 @@ export default function ConversationList({
             {tab.label}
           </button>
         ))}
+      </div>
+
+      {/* Chat type subdivision */}
+      <div className="flex border-b border-border shrink-0">
+        <button
+          onClick={() => setChatType('individual')}
+          className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${
+            chatType === 'individual'
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <User size={12} />
+          Individual
+        </button>
+        <button
+          onClick={() => setChatType('group')}
+          className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${
+            chatType === 'group'
+              ? 'bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Users size={12} />
+          Grupos
+        </button>
       </div>
 
       {/* Count */}
