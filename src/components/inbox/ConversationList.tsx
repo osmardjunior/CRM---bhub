@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
-  Mail, Monitor, Wifi, Star, Clock, User,
+  Mail, Monitor, Wifi, Star, Clock, User, Users,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { isGroupChat } from '@/services/api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -381,8 +382,8 @@ export default function ConversationList({
                 >
                   <div className="relative shrink-0 mt-0.5">
                     <Avatar className="h-10 w-10">
-                      <AvatarFallback className="text-sm font-semibold bg-primary/10 text-primary">
-                        {conv.contact.name[0]}
+                      <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conv.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
+                        {isGroupChat(conv.contact.phone) ? <Users size={16} /> : conv.contact.name[0]}
                       </AvatarFallback>
                     </Avatar>
                     {unread > 0 && (
@@ -394,9 +395,16 @@ export default function ConversationList({
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">
-                      <span className={`text-sm truncate ${unread > 0 ? 'font-semibold' : 'font-medium'} text-foreground`}>
-                        {conv.contact.name}
-                      </span>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className={`text-sm truncate ${unread > 0 ? 'font-semibold' : 'font-medium'} text-foreground`}>
+                          {conv.contact.name}
+                        </span>
+                        {isGroupChat(conv.contact.phone) && (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
+                            Grupo
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${statusColors[conv.status]}`}>
                           {statusLabels[conv.status]}
