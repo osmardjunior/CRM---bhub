@@ -172,7 +172,7 @@ serve(async (req) => {
           throw new Error(`360dialog API error: ${err}`);
         }
         delivered = true;
-      } else if (provider === "gupshup" || provider === "Gupshup") {
+    } else if (provider === "gupshup" || provider === "Gupshup") {
         const apiKey = config.api_key;
         const appName = config.app_name;
         const fromNumber = (integration as any).phone_number || config.from_number;
@@ -196,6 +196,35 @@ serve(async (req) => {
         if (!res.ok) {
           const err = await res.text();
           throw new Error(`Gupshup API error: ${err}`);
+        }
+        delivered = true;
+      } else if (provider === "evolution" || provider === "Evolution") {
+        const apiKey = config.api_key as string;
+        let apiUrl = (config.api_url as string || "").trim().replace(/\/+$/, "");
+        if (!/^https?:\/\//i.test(apiUrl)) {
+          apiUrl = `https://${apiUrl}`;
+        }
+        const instanceName = config.instance_name as string;
+        if (!apiKey || !apiUrl || !instanceName) throw new Error("Evolution config missing api_key, api_url or instance_name");
+
+        // Evolution API v2 send text message
+        const res = await fetch(
+          `${apiUrl}/message/sendText/${instanceName}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: apiKey,
+            },
+            body: JSON.stringify({
+              number: phone.replace(/\D/g, ""),
+              text: messageBody,
+            }),
+          },
+        );
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(`Evolution API error: ${err}`);
         }
         delivered = true;
       } else {
