@@ -241,12 +241,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [conversation, companyId, queryClient]);
+  }, [conversation, companyId, user, queryClient]);
 
   // Audio send
   const handleAudioSend = useCallback(async (blob: Blob) => {
     if (!conversation || !companyId || !user) {
       toast.error('Sessão inválida. Recarregue a página e tente novamente.');
+      return;
+    }
+    if (blob.size === 0) {
+      toast.error('Gravação vazia. Tente gravar novamente.');
       return;
     }
     setUploading(true);
@@ -305,7 +309,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     } finally {
       setUploading(false);
     }
-  }, [conversation, companyId, queryClient]);
+  }, [conversation, companyId, user, queryClient]);
 
   const handleChangeStatus = async (newStatus: 'open' | 'pending' | 'closed') => {
     if (!conversation) return;
