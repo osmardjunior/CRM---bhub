@@ -80,10 +80,13 @@ export default function AudioRecorder({ onSend }: Props) {
   }, [audioUrl]);
 
   const handleSend = useCallback(() => {
-    if (blobRef.current) {
-      onSend(blobRef.current);
-      discard();
+    if (!blobRef.current) {
+      toast.error('[DEBUG] Blob nulo — gravação não capturou dados');
+      return;
     }
+    toast.info(`[DEBUG] Enviando blob: ${blobRef.current.type} — ${(blobRef.current.size / 1024).toFixed(1)}KB`);
+    onSend(blobRef.current);
+    discard();
   }, [onSend, discard]);
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
