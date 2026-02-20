@@ -81,10 +81,9 @@ export default function AudioRecorder({ onSend }: Props) {
 
   const handleSend = useCallback(() => {
     if (!blobRef.current) {
-      toast.error('[DEBUG] Blob nulo — gravação não capturou dados');
+      toast.error('Gravação vazia. Tente gravar novamente.');
       return;
     }
-    toast.info(`[DEBUG] Enviando blob: ${blobRef.current.type} — ${(blobRef.current.size / 1024).toFixed(1)}KB`);
     onSend(blobRef.current);
     discard();
   }, [onSend, discard]);

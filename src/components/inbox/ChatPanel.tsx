@@ -245,7 +245,6 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
   // Audio send
   const handleAudioSend = useCallback(async (blob: Blob) => {
-    toast.info(`[DEBUG] handleAudioSend chamado — conv:${!!conversation} cid:${!!companyId} usr:${!!user} blob:${blob.size}b`);
     if (!conversation || !companyId || !user) {
       toast.error('Sessão inválida. Recarregue a página e tente novamente.');
       return;
