@@ -36,7 +36,6 @@ export default function AudioRecorder({ onSend }: Props) {
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
 
-      const usedMimeType = recorder.mimeType || mimeType;
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -44,8 +43,9 @@ export default function AudioRecorder({ onSend }: Props) {
       };
 
       recorder.onstop = () => {
-        // Use the same mimeType the recorder actually produced
-        const blob = new Blob(chunksRef.current, { type: usedMimeType });
+        // Capture mimeType here — recorder.mimeType is guaranteed to be set after recording
+        const actualMimeType = recorder.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type: actualMimeType });
         blobRef.current = blob;
         setAudioUrl(URL.createObjectURL(blob));
         setState('preview');

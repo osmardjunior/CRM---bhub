@@ -178,7 +178,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
   // File upload
   const handleFileSelect = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0 || !conversation || !companyId) return;
+    if (!files || files.length === 0 || !conversation || !companyId || !user) return;
     const file = files[0];
     if (file.size > MAX_FILE_SIZE) {
       toast.error(`Arquivo muito grande. Máximo: ${MAX_FILE_SIZE_MB}MB`);
@@ -191,27 +191,22 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       const { error: uploadErr } = await supabase.storage
         .from('chat-media')
         .upload(path, file);
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) throw new Error(`Falha no upload: ${uploadErr.message}`);
 
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
       const mediaUrl = urlData.publicUrl;
 
-      // Send as message with media_url
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error('Não autenticado');
-      const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', authUser.id).maybeSingle();
-      if (!profile) throw new Error('Perfil não encontrado');
-
       const body = file.type.startsWith('image/') ? '📷 Imagem' : file.type.startsWith('audio/') ? '🎵 Áudio' : `📎 ${file.name}`;
 
-      await supabase.from('messages').insert({
+      const { error: msgErr } = await supabase.from('messages').insert({
         conversation_id: conversation.id,
-        company_id: profile.company_id,
+        company_id: companyId,
         sender_type: 'agent',
-        sender_id: authUser.id,
+        sender_id: user.id,
         body,
         media_url: mediaUrl,
       });
+      if (msgErr) throw new Error(`Falha ao salvar mensagem: ${msgErr.message}`);
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
@@ -250,31 +245,31 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
   // Audio send
   const handleAudioSend = useCallback(async (blob: Blob) => {
-    if (!conversation || !companyId) return;
+    if (!conversation || !companyId || !user) {
+      toast.error('Sessão inválida. Recarregue a página e tente novamente.');
+      return;
+    }
     setUploading(true);
     try {
-      const ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogg' : 'mp3';
-      const contentType = blob.type || 'audio/ogg';
+      const ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'mp4' : 'webm';
+      const contentType = blob.type || 'audio/webm';
       const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
+
       const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType });
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) throw new Error(`Falha no upload: ${uploadErr.message}`);
 
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
       const mediaUrl = urlData.publicUrl;
 
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error('Não autenticado');
-      const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', authUser.id).maybeSingle();
-      if (!profile) throw new Error('Perfil não encontrado');
-
-      await supabase.from('messages').insert({
+      const { error: msgErr } = await supabase.from('messages').insert({
         conversation_id: conversation.id,
-        company_id: profile.company_id,
+        company_id: companyId,
         sender_type: 'agent',
-        sender_id: authUser.id,
+        sender_id: user.id,
         body: '🎤 Áudio',
         media_url: mediaUrl,
       });
+      if (msgErr) throw new Error(`Falha ao salvar mensagem: ${msgErr.message}`);
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
