@@ -247,8 +247,10 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     if (!conversation || !companyId) return;
     setUploading(true);
     try {
-      const path = `${companyId}/${conversation.id}/${Date.now()}.ogg`;
-      const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType: 'audio/ogg' });
+      const ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogg' : 'mp3';
+      const contentType = blob.type || 'audio/ogg';
+      const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType });
       if (uploadErr) throw uploadErr;
 
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
