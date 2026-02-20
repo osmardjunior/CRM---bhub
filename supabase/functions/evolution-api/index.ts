@@ -49,8 +49,11 @@ serve(async (req) => {
       );
     }
 
-    // Normalize URL - remove trailing slash
-    const baseUrl = api_url.replace(/\/+$/, "");
+    // Normalize URL - ensure protocol and remove trailing slash
+    let baseUrl = api_url.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      baseUrl = `https://${baseUrl}`;
+    }
 
     // ── Action: create-instance ──────────────────────
     if (action === "create-instance") {
