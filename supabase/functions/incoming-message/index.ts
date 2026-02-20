@@ -312,32 +312,20 @@ serve(async (req) => {
       }
     }
 
-    // ── Find existing conversation (any status) or create ───
-    // First try to find an open conversation
+    // ── Find the most recent conversation for this contact (any status) ───
     let { data: conversation } = await supabase
       .from("conversations")
       .select("id, status")
       .eq("company_id", company_id)
       .eq("contact_id", contact.id)
       .eq("channel", channel)
-      .eq("status", "open")
+      .order("last_message_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
-    if (!conversation) {
-      // Look for a closed or pending conversation to reopen
-      const { data: closedConv } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("company_id", company_id)
-        .eq("contact_id", contact.id)
-        .eq("channel", channel)
-        .in("status", ["closed", "pending"])
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (closedConv) {
-        // Reopen the existing conversation
+    if (conversation) {
+      // If it's closed or pending, reopen it
+      if (conversation.status !== "open") {
         await supabase
           .from("conversations")
           .update({
@@ -345,25 +333,24 @@ serve(async (req) => {
             close_reason: null,
             last_message_at: timestamp || new Date().toISOString(),
           })
-          .eq("id", closedConv.id);
-        conversation = closedConv;
-      } else {
-        // No conversation exists at all, create a new one
-        const { data: newConv, error: convErr } = await supabase
-          .from("conversations")
-          .insert({
-            company_id,
-            contact_id: contact.id,
-            channel,
-            status: "open",
-            last_message_at: timestamp || new Date().toISOString(),
-          })
-          .select("id")
-          .single();
-
-        if (convErr) throw convErr;
-        conversation = newConv;
+          .eq("id", conversation.id);
       }
+    } else {
+      // No conversation exists, create a new one
+      const { data: newConv, error: convErr } = await supabase
+        .from("conversations")
+        .insert({
+          company_id,
+          contact_id: contact.id,
+          channel,
+          status: "open",
+          last_message_at: timestamp || new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+
+      if (convErr) throw convErr;
+      conversation = newConv;
     }
 
     // ── Insert message ─────────────────────────────────
