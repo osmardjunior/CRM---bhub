@@ -13,6 +13,7 @@ import {
   StickyNote,
   X,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,9 @@ import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail, Annotation } from '@/services/api';
 import { listAnnotations } from '@/services/api';
+import AIChatAssistDrawer from '@/components/ai/AIChatAssistDrawer';
+import AIAnnotationHelper from '@/components/ai/AIAnnotationHelper';
+import { useChatStore } from '@/store/chatStore';
 
 function groupMessagesByDate(items: any[]) {
   const groups: { date: string; messages: any[] }[] = [];
@@ -98,6 +102,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const { user, companyId } = useAuth();
   const queryClient = useQueryClient();
   const [closing, setClosing] = useState(false);
+  const { setAIDrawerOpen } = useChatStore();
 
   const canReassign = permissions.canReassignConversations;
   const reassignTooltip = getPermissionTooltip('canReassignConversations', permissions);
@@ -210,8 +215,27 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // Send via WhatsApp (best-effort, non-blocking)
-      sendViaWhatsApp(conversation.id, body, mediaUrl);
+      // Send via WhatsApp — check delivery and show feedback
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl }),
+          });
+          const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
+          if (!whatsappData.delivered) {
+            toast.warning('Arquivo salvo, mas não foi possível encaminhar via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
+          }
+        }
+      } catch {
+        // WhatsApp send failure is non-fatal — file was already saved
+      }
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -229,8 +253,10 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     if (!conversation || !companyId) return;
     setUploading(true);
     try {
-      const path = `${companyId}/${conversation.id}/${Date.now()}.ogg`;
-      const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType: 'audio/ogg' });
+      const ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogg' : 'mp3';
+      const contentType = blob.type || 'audio/ogg';
+      const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType });
       if (uploadErr) throw uploadErr;
 
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
@@ -252,8 +278,29 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // WhatsApp send (best-effort, non-blocking)
-      sendViaWhatsApp(conversation.id, '🎤 Áudio', mediaUrl);
+      // WhatsApp send — check delivery and show feedback
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl }),
+          });
+          const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
+          if (!whatsappData.delivered) {
+            toast.warning('Áudio salvo, mas não foi possível encaminhar via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
+          }
+        } else {
+          toast.warning('Áudio salvo, mas sessão expirada para envio via WhatsApp');
+        }
+      } catch {
+        toast.warning('Áudio salvo, mas falha ao encaminhar via WhatsApp');
+      }
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -441,10 +488,22 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           )}
         </Tooltip>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-primary" onClick={() => setAIDrawerOpen(true)}>
+              <Sparkles size={16} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom"><p className="text-xs">Assistente IA</p></TooltipContent>
+        </Tooltip>
+
         <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={onToggleProfile}>
           {profileOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </Button>
       </div>
+
+      {/* AI Chat Assist Drawer */}
+      <AIChatAssistDrawer conversation={conversation} />
 
       {/* Messages area */}
       <div
@@ -572,6 +631,9 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                 <p className="text-xs">{isAnnotationMode ? 'Voltar para mensagem' : 'Anotação interna'}</p>
               </TooltipContent>
             </Tooltip>
+            {isAnnotationMode && conversation && (
+              <AIAnnotationHelper conversation={conversation} onInsert={(text) => setInput(text)} />
+            )}
             <Popover open={quickReplyOpen && !input.startsWith('/')} onOpenChange={(open) => { setQuickReplyOpen(open); if (!open) setQuickReplyFilter(''); }}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
