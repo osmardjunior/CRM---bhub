@@ -273,6 +273,25 @@ serve(async (req) => {
       const webhookSecret = Deno.env.get("WEBHOOK_SECRET") || "";
       const webhookUrl = `${supabaseUrl}/functions/v1/incoming-message`;
 
+      const webhookPayload = {
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          webhook_by_events: false,
+          webhook_base64: false,
+          headers: {
+            "x-webhook-secret": webhookSecret,
+          },
+          events: [
+            "MESSAGES_UPSERT",
+            "CONNECTION_UPDATE",
+            "QRCODE_UPDATED",
+          ],
+        },
+      };
+
+      console.log("Setting webhook:", JSON.stringify(webhookPayload));
+
       const whResp = await fetch(
         `${baseUrl}/webhook/set/${instance_name}`,
         {
@@ -281,19 +300,7 @@ serve(async (req) => {
             "Content-Type": "application/json",
             apikey: api_key,
           },
-          body: JSON.stringify({
-            enabled: true,
-            url: webhookUrl,
-            webhookByEvents: false,
-            headers: {
-              "x-webhook-secret": webhookSecret,
-            },
-            events: [
-              "MESSAGES_UPSERT",
-              "CONNECTION_UPDATE",
-              "QRCODE_UPDATED",
-            ],
-          }),
+          body: JSON.stringify(webhookPayload),
         }
       );
 
