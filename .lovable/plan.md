@@ -1,178 +1,161 @@
 
+# Plano de Implementacao: Chat Center (Fase 1 -- Prioridade Essencial)
 
-# Comparativo: Seu CRM vs ChatGuru -- O que tem e o que falta
-
-## Legenda
-- [OK] = Ja implementado e funcional
-- [PARCIAL] = Existe mas incompleto
-- [FALTA] = Nao implementado
+Dado o tamanho do escopo total (32+ funcionalidades faltantes), este plano cobre a **Fase 1** -- os 5 itens de maior impacto no atendimento diario. As fases seguintes serao planejadas apos a conclusao desta.
 
 ---
 
-## MODULO: CHATS (Inbox)
+## Escopo da Fase 1
 
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Lista de conversas com busca | [OK] | Busca por nome e telefone |
-| Filtros avancados (tags, usuario, canal, status) | [PARCIAL] | Filtros existem na UI mas maioria nao aplica no backend (so canal funciona) |
-| Abas de status (Aberto/Pendente/Fechado) | [OK] | 3 status implementados |
-| Separacao Individual vs Grupo | [OK] | Detecta grupos por JID |
-| Foto de perfil do contato | [OK] | avatar_url implementado |
-| Renderizacao de midia (audio, imagem, video, sticker) | [OK] | MessageBubble implementado |
-| Atribuicao de agente | [OK] | Select com onValueChange |
-| Troca de status no header | [OK] | Dropdown Em Atendimento/Aguardando/Fechar |
-| Tags no contato via painel lateral | [OK] | Popover com checkboxes |
-| Respostas rapidas | [PARCIAL] | Lista fixa hardcoded, nao usa tabela quick_replies do banco |
-| Anotacoes internas (visivel so pra equipe) | [FALTA] | Guru tem campo de anotacoes internas com @mencoes |
-| Agendamento de mensagens | [FALTA] | Guru permite agendar envio para data/hora futura |
-| Gravacao de audio no compositor | [FALTA] | Botao de mic existe mas nao funciona |
-| Envio de arquivos/imagens pelo compositor | [FALTA] | Botao de clipe existe mas nao funciona |
-| Emojis picker | [FALTA] | Botao de smile existe mas nao funciona |
-| Responder mensagem especifica (reply) | [FALTA] | Guru tem reply com citacao |
-| Reacoes a mensagens | [FALTA] | Guru tem reacoes com emoji |
-| Historico de midias/documentos (aba lateral) | [FALTA] | Guru tem aba separada com todas midias da conversa |
-| Motivo de fechamento com dialog | [OK] | Modal com select de motivos |
-| Reabertura automatica ao receber msg | [OK] | incoming-message reabri conversas fechadas |
-| Transferencia entre departamentos | [FALTA] | Guru permite transferir para departamento |
-| Indicador de digitando | [FALTA] | Status de "digitando..." |
-| Leitura de msgs (visto/entregue) | [FALTA] | Checkmarks tipo WhatsApp |
-| Timer de atendimento (SLA) | [FALTA] | Guru mostra tempo em cada status |
-
-## MODULO: CONTATOS
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Lista com busca e filtros | [OK] | Busca, filtro por tag e origem |
-| Painel de detalhes lateral | [OK] | ContactDetailPanel |
-| Criar/editar contato | [OK] | Modal de novo contato |
-| Import/Export CSV | [OK] | Importar e exportar implementados |
-| Tags no contato | [OK] | Via painel lateral |
-| Responsavel (agente) | [OK] | Campo responsible_user_id |
-| Campos personalizados (ficha cadastral) | [FALTA] | Guru tem campos custom (texto, email, data, numero) |
-| Historico de atendimentos do contato | [FALTA] | Guru mostra todas conversas anteriores |
-| Funil vinculado ao contato | [FALTA] | Guru mostra em qual etapa do funil o contato esta |
-| Bloqueio de contato | [FALTA] | Guru permite bloquear contato |
-| Merge de contatos duplicados | [FALTA] | Guru tem deteccao e merge |
-
-## MODULO: FUNIS / PIPELINE
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Kanban de negocios | [OK] | FunnelKanban com drag-and-drop |
-| Multiplos funis | [OK] | Tabela funnels + funnel_stages |
-| Criar/editar etapas | [OK] | Customizacao de etapas |
-| Vincular contato ao negocio | [OK] | contact_id no deal |
-| Mover contato entre etapas via chat | [FALTA] | Guru permite mover contato de etapa direto do chat |
-| Automacoes por mudanca de etapa | [FALTA] | Guru envia msg automatica ao mudar etapa |
-
-## MODULO: CHATBOT / DIALOGOS
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Fluxos de chatbot | [OK] | Editor de fluxo com nos |
-| Tipos de no (mensagem, condicao, acao) | [OK] | chatbot_nodes |
-| Configuracoes (horario, msg offline) | [OK] | FlowSettings |
-| Instrucoes de IA | [OK] | Campo ai_instructions |
-| Simulador de fluxo | [PARCIAL] | FlowSimulator existe mas funcionalidade limitada |
-| Chatbot com IA generativa (respostas inteligentes) | [FALTA] | Guru usa IA pra responder perguntas nao previstas |
-| Webhook/integracao externa nos nos | [FALTA] | Guru permite chamar APIs externas no fluxo |
-
-## MODULO: CAMPANHAS
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Criar campanhas | [OK] | CRUD completo |
-| Filtros de publico | [OK] | Campo filters na campanha |
-| Agendamento | [OK] | schedule_at |
-| Janela de envio (horarios) | [OK] | send_window |
-| Pular fins de semana | [OK] | skip_weekends |
-| Progresso (processados/total) | [OK] | Campos processed/total_contacts |
-| Templates de mensagem | [FALTA] | Guru usa templates pre-aprovados do WhatsApp |
-| Preview da mensagem | [FALTA] | Guru mostra preview antes de enviar |
-| Relatorio de entrega da campanha | [FALTA] | Guru mostra taxa de entrega, leitura, resposta |
-
-## MODULO: RELATORIOS
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Relatorios de chats | [OK] | ReportBuilder com filtros |
-| Relatorios de usuarios | [OK] | UsersReportPanel |
-| Graficos | [OK] | ChartsPanel com recharts |
-| Salvar relatorios | [OK] | saved_reports |
-| NPS / Pesquisa de satisfacao | [OK] | satisfaction_surveys |
-| Relatorio de tempo medio de resposta | [FALTA] | Guru mostra TMA por agente |
-| Relatorio de primeiro tempo de resposta | [FALTA] | Guru mostra tempo da primeira resposta |
-| Exportar relatorio em PDF | [FALTA] | Guru exporta relatorios |
-
-## MODULO: CONFIGURACOES
-
-| Funcionalidade | Status | Detalhes |
-|---|---|---|
-| Dados da empresa | [OK] | Nome e plano |
-| Gestao de usuarios (convidar, roles) | [OK] | Admin/Supervisor/Agente |
-| Integracoes (Evolution API) | [OK] | QR Code, status |
-| Departamentos | [OK] | Tabela departments |
-| Horario de atendimento | [PARCIAL] | Existe nos flows do chatbot, nao global |
-| Mensagem de ausencia global | [FALTA] | Guru tem msg de ausencia configuravel |
-| Distribuicao automatica de chats | [FALTA] | Guru distribui chats entre agentes automaticamente (round-robin) |
-| Webhook configuravel | [FALTA] | Guru permite configurar webhooks de saida |
-| Permissoes granulares por modulo | [FALTA] | Guru tem permissoes por funcionalidade, nao so por role |
+1. Envio de arquivos/imagens pelo compositor (botao de clipe)
+2. Gravacao e envio de audio (botao de mic)
+3. Respostas rapidas conectadas ao banco de dados
+4. Filtros avancados funcionais na lista de conversas
+5. Anotacoes internas (visiveis apenas para a equipe)
 
 ---
 
-## PRIORIDADES DE IMPLEMENTACAO
+## 1. Envio de Arquivos e Imagens
 
-### Prioridade 1 -- Essencial (impacto direto no atendimento diario)
+**O que muda:** O botao de clipe no compositor passa a abrir um seletor de arquivos. O arquivo eh enviado para o storage, a URL eh salva na mensagem e enviada via WhatsApp.
 
-1. **Envio de arquivos/imagens pelo compositor** -- Botao de clipe funcional para enviar fotos, documentos, PDFs pelo chat
-2. **Gravacao e envio de audio** -- Botao de mic funcional para gravar e enviar audios
-3. **Respostas rapidas do banco** -- Conectar ao tabela quick_replies em vez de lista fixa
-4. **Filtros avancados funcionais** -- Fazer os filtros de nome, telefone, tag, usuario, ordenacao realmente filtrarem as conversas
-5. **Anotacoes internas** -- Campo de nota interna visivel apenas para a equipe, nao enviada ao cliente
+**Detalhes tecnicos:**
 
-### Prioridade 2 -- Importante (melhora produtividade)
+- Criar storage bucket `chat-media` (publico, com RLS para insert/select por company)
+- No `ChatPanel.tsx`, ao clicar no clipe:
+  - Abrir `<input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx" />`
+  - Fazer upload para `chat-media/{company_id}/{conversation_id}/{filename}`
+  - Inserir mensagem com `media_url` apontando para a URL publica do storage
+  - Chamar `send-whatsapp` com `media_url` alem do `body`
+- Atualizar `send-whatsapp/index.ts` para enviar midia (Evolution API: `sendMedia` endpoint; Meta: `image/document` type)
+- Suportar drag-and-drop na area de mensagens (preview antes de enviar)
 
-6. **Distribuicao automatica de chats** -- Round-robin entre agentes online
-7. **Transferencia entre departamentos** -- Permitir mover conversa para outro departamento
-8. **Historico de atendimentos do contato** -- Ver conversas anteriores no painel lateral
-9. **Campos personalizados no contato** -- Ficha cadastral com campos custom
-10. **Timer de SLA** -- Mostrar tempo de espera e tempo de atendimento
+**Migracao SQL:**
+```sql
+INSERT INTO storage.buckets (id, name, public) VALUES ('chat-media', 'chat-media', true);
 
-### Prioridade 3 -- Diferencial (funcionalidades avancadas)
+CREATE POLICY "Users can upload chat media"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'chat-media');
 
-11. **Reply (responder mensagem especifica)** -- Citar mensagem anterior
-12. **Emoji picker** -- Seletor de emojis no compositor
-13. **Relatorios de TMA e primeiro tempo de resposta** -- Metricas de performance
-14. **Mover contato de etapa do funil via chat** -- Acao rapida no painel lateral
-15. **Chatbot com IA generativa** -- Respostas inteligentes baseadas em contexto
-
-### Prioridade 4 -- Futuro (nice to have)
-
-16. Agendamento de mensagens
-17. Reacoes a mensagens
-18. Indicador de digitando
-19. Checkmarks de leitura/entrega
-20. Merge de contatos duplicados
-21. Templates de campanha do WhatsApp
-22. Relatorios de campanha (entrega/leitura)
-23. Export PDF de relatorios
-24. Webhooks configuraveis de saida
-25. Permissoes granulares por modulo
+CREATE POLICY "Anyone can view chat media"
+ON storage.objects FOR SELECT TO authenticated
+USING (bucket_id = 'chat-media');
+```
 
 ---
 
-## Resumo quantitativo
+## 2. Gravacao e Envio de Audio
 
-| Categoria | OK | Parcial | Falta |
-|---|---|---|---|
-| Chats/Inbox | 11 | 2 | 13 |
-| Contatos | 6 | 0 | 5 |
-| Funis/Pipeline | 4 | 0 | 2 |
-| Chatbot | 4 | 1 | 2 |
-| Campanhas | 5 | 0 | 3 |
-| Relatorios | 5 | 0 | 3 |
-| Configuracoes | 4 | 1 | 4 |
-| **Total** | **39** | **4** | **32** |
+**O que muda:** O botao de microfone inicia gravacao de audio. Ao soltar, mostra preview com opcao de enviar ou descartar.
 
-Aproximadamente 52% das funcionalidades da ChatGuru ja estao implementadas. As 32 funcionalidades faltantes estao priorizadas acima por impacto no dia a dia de atendimento.
+**Detalhes tecnicos:**
 
+- Usar `MediaRecorder` API do navegador
+- Estados: `idle` -> `recording` -> `preview` -> `sending`
+- No estado `recording`: mostrar timer e botao de parar/descartar
+- No estado `preview`: player de audio inline + botoes enviar/descartar
+- Audio gravado como `audio/ogg; codecs=opus` (compativel com WhatsApp)
+- Upload para `chat-media` bucket, depois enviar como mensagem com `media_url`
+- Criar componente `AudioRecorder.tsx` separado para manter o `ChatPanel` limpo
+
+---
+
+## 3. Respostas Rapidas do Banco de Dados
+
+**O que muda:** O botao de raio (Zap) busca da tabela `quick_replies` em vez da lista fixa hardcoded.
+
+**Detalhes tecnicos:**
+
+- No `ChatPanel.tsx`:
+  - Importar `useQuickReplies` (hook ja existe e funciona)
+  - Substituir o array `quickReplies` fixo pela query do banco
+  - Adicionar busca por atalho: digitar `/` no textarea filtra respostas rapidas em um popover inline (estilo autocomplete)
+  - Exibir `shortcut` e `message` na lista de respostas
+- Manter fallback para lista vazia ("Nenhuma resposta rapida cadastrada. Crie na pagina Respostas Rapidas.")
+
+---
+
+## 4. Filtros Avancados Funcionais
+
+**O que muda:** Os filtros de nome, telefone, tag, usuario, status e ordenacao passam a funcionar de verdade no backend.
+
+**Detalhes tecnicos:**
+
+- Atualizar `ConversationFilters` em `api.ts` para incluir:
+  - `name?: string` -- filtro por nome do contato (ilike)
+  - `phone?: string` -- filtro por telefone (ilike)
+  - `tag?: string` -- filtro por tag do contato
+  - `assigned_user_id?: string` -- filtro por agente atribuido
+  - `sort?: 'recent' | 'oldest' | 'name'` -- ordenacao
+- Atualizar `listConversations()` para aplicar todos os filtros na query Supabase
+- No `ConversationList.tsx`, conectar `handleApplyFilters` para enviar todos os filtros locais (nao apenas channel)
+- Filtro de tag: buscar conversas onde o contato tem a tag selecionada (feito client-side apos query, pois tags sao JSONB no contato)
+
+---
+
+## 5. Anotacoes Internas
+
+**O que muda:** Agentes podem escrever notas internas visiveis apenas para a equipe, sem enviar para o contato.
+
+**Detalhes tecnicos:**
+
+- **Nova tabela `annotations`:**
+```sql
+CREATE TABLE public.annotations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL,
+  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  author_id uuid NOT NULL,
+  body text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE annotations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view company annotations"
+ON annotations FOR SELECT TO authenticated
+USING (company_id = get_user_company_id());
+
+CREATE POLICY "Users can insert company annotations"
+ON annotations FOR INSERT TO authenticated
+WITH CHECK (company_id = get_user_company_id());
+
+ALTER PUBLICATION supabase_realtime ADD TABLE annotations;
+```
+
+- No `ChatPanel.tsx`:
+  - Adicionar toggle "Mensagem / Anotacao" no compositor (botao ou switch)
+  - Quando em modo anotacao, mudar cor do fundo do textarea para amarelo claro
+  - Ao enviar anotacao: inserir na tabela `annotations` (NAO na tabela `messages`, NAO enviar via WhatsApp)
+  - Buscar anotacoes junto com mensagens e intercalar por `created_at`
+  - Renderizar anotacoes com fundo amarelo distinto e icone de cadeado, mostrando nome do autor
+
+---
+
+## Arquivos que serao modificados/criados
+
+| Arquivo | Tipo | Mudanca |
+|---|---|---|
+| Migracao SQL | novo | Bucket storage + tabela annotations + RLS |
+| `src/components/inbox/ChatPanel.tsx` | editar | Clipe funcional, audio recorder, respostas rapidas do banco, toggle anotacao |
+| `src/components/inbox/AudioRecorder.tsx` | novo | Componente de gravacao de audio |
+| `src/components/inbox/MessageBubble.tsx` | editar | Renderizar anotacoes com estilo diferenciado |
+| `src/services/api.ts` | editar | Novos filtros em ConversationFilters + listConversations |
+| `src/components/inbox/ConversationList.tsx` | editar | Aplicar todos os filtros no handleApplyFilters |
+| `src/hooks/useConversations.ts` | editar | Buscar e intercalar anotacoes na query de detalhes |
+| `src/hooks/useInboxRealtime.ts` | editar | Subscrever a tabela annotations para realtime |
+| `supabase/functions/send-whatsapp/index.ts` | editar | Suportar envio de midia (imagem, documento, audio) |
+
+---
+
+## Ordem de implementacao
+
+1. Migracao SQL (bucket + tabela annotations)
+2. Filtros avancados (backend + frontend)
+3. Respostas rapidas do banco
+4. Envio de arquivos/imagens (upload + send-whatsapp media)
+5. Gravacao de audio
+6. Anotacoes internas
+
+Essa ordem permite testar cada funcionalidade de forma independente conforme implementada.
