@@ -312,10 +312,11 @@ serve(async (req) => {
       }
     }
 
-    // ── Find or create open conversation ───────────────
+    // ── Find existing conversation (any status) or create ───
+    // First try to find an open conversation
     let { data: conversation } = await supabase
       .from("conversations")
-      .select("id")
+      .select("id, status")
       .eq("company_id", company_id)
       .eq("contact_id", contact.id)
       .eq("channel", channel)
@@ -323,20 +324,46 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!conversation) {
-      const { data: newConv, error: convErr } = await supabase
+      // Look for a closed or pending conversation to reopen
+      const { data: closedConv } = await supabase
         .from("conversations")
-        .insert({
-          company_id,
-          contact_id: contact.id,
-          channel,
-          status: "open",
-          last_message_at: timestamp || new Date().toISOString(),
-        })
-        .select("id")
-        .single();
+        .select("id, status")
+        .eq("company_id", company_id)
+        .eq("contact_id", contact.id)
+        .eq("channel", channel)
+        .in("status", ["closed", "pending"])
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (convErr) throw convErr;
-      conversation = newConv;
+      if (closedConv) {
+        // Reopen the existing conversation
+        await supabase
+          .from("conversations")
+          .update({
+            status: "open",
+            close_reason: null,
+            last_message_at: timestamp || new Date().toISOString(),
+          })
+          .eq("id", closedConv.id);
+        conversation = closedConv;
+      } else {
+        // No conversation exists at all, create a new one
+        const { data: newConv, error: convErr } = await supabase
+          .from("conversations")
+          .insert({
+            company_id,
+            contact_id: contact.id,
+            channel,
+            status: "open",
+            last_message_at: timestamp || new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+
+        if (convErr) throw convErr;
+        conversation = newConv;
+      }
     }
 
     // ── Insert message ─────────────────────────────────
