@@ -270,6 +270,7 @@ serve(async (req) => {
         );
       }
 
+      const webhookSecret = Deno.env.get("WEBHOOK_SECRET") || "";
       const webhookUrl = `${supabaseUrl}/functions/v1/incoming-message`;
 
       const whResp = await fetch(
@@ -284,6 +285,9 @@ serve(async (req) => {
             enabled: true,
             url: webhookUrl,
             webhookByEvents: false,
+            headers: {
+              "x-webhook-secret": webhookSecret,
+            },
             events: [
               "MESSAGES_UPSERT",
               "CONNECTION_UPDATE",

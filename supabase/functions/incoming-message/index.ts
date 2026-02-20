@@ -7,6 +7,87 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-webhook-secret",
 };
 
+/**
+ * Parse Evolution API v2 webhook payload into our internal format.
+ * Evolution sends different event types; we only care about MESSAGES_UPSERT.
+ */
+function parseEvolutionPayload(body: any): {
+  isEvolution: boolean;
+  event?: string;
+  company_id?: string;
+  channel?: string;
+  external_message_id?: string;
+  from_phone?: string;
+  from_name?: string;
+  body?: string;
+  media_url?: string;
+  timestamp?: string;
+  instance_name?: string;
+} {
+  // Evolution API v2 sends: { event, instance, data, ... }
+  if (body.event && body.instance) {
+    const event = body.event;
+    const instanceName = body.instance;
+
+    if (event === "messages.upsert" || event === "MESSAGES_UPSERT") {
+      const data = body.data || {};
+      const key = data.key || {};
+      const message = data.message || {};
+
+      // Skip messages sent by us (fromMe = true)
+      if (key.fromMe) {
+        return { isEvolution: true, event: "skip_from_me" };
+      }
+
+      // Extract phone from remoteJid (format: 5531XXXX@s.whatsapp.net)
+      const remoteJid = key.remoteJid || "";
+      const fromPhone = remoteJid.replace(/@.*$/, "");
+
+      // Extract message body
+      const messageBody =
+        message.conversation ||
+        message.extendedTextMessage?.text ||
+        message.imageMessage?.caption ||
+        message.videoMessage?.caption ||
+        message.documentMessage?.caption ||
+        data.body ||
+        "";
+
+      // Extract media URL if present
+      const mediaUrl = data.media?.url || null;
+
+      // Extract contact name
+      const pushName = data.pushName || key.pushName || fromPhone;
+
+      // Message ID
+      const messageId = key.id || data.messageId || `evo_${Date.now()}`;
+
+      // Timestamp
+      const ts = data.messageTimestamp
+        ? new Date(data.messageTimestamp * 1000).toISOString()
+        : new Date().toISOString();
+
+      return {
+        isEvolution: true,
+        event: "messages_upsert",
+        channel: "whatsapp",
+        external_message_id: messageId,
+        from_phone: fromPhone,
+        from_name: pushName,
+        body: messageBody,
+        media_url: mediaUrl,
+        timestamp: ts,
+        instance_name: instanceName,
+      };
+    }
+
+    // Other events we don't process as messages
+    return { isEvolution: true, event };
+  }
+
+  return { isEvolution: false };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -31,17 +112,88 @@ serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
-    const {
-      company_id,
-      channel,
-      external_message_id,
-      from_phone,
-      from_name,
-      body: messageBody,
-      media_url,
-      timestamp,
-    } = body;
+    const rawBody = await req.json();
+
+    // ── Try to parse as Evolution API payload ──────────
+    const evolution = parseEvolutionPayload(rawBody);
+
+    let company_id: string;
+    let channel: string;
+    let external_message_id: string;
+    let from_phone: string;
+    let from_name: string;
+    let messageBody: string;
+    let media_url: string | null;
+    let timestamp: string | undefined;
+
+    if (evolution.isEvolution) {
+      // Skip non-message events
+      if (evolution.event !== "messages_upsert") {
+        return new Response(
+          JSON.stringify({ ok: true, skipped: true, event: evolution.event }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // For Evolution, we need to look up the company_id from the integration
+      const supabaseAdmin = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+
+      // Find integration by instance name to get company_id
+      const { data: integrations } = await supabaseAdmin
+        .from("integrations")
+        .select("company_id, config")
+        .eq("channel", "whatsapp")
+        .eq("provider", "evolution");
+
+      let foundCompanyId: string | null = null;
+      if (integrations) {
+        for (const integ of integrations) {
+          const config = integ.config as any;
+          if (config?.instance_name === evolution.instance_name) {
+            foundCompanyId = integ.company_id;
+            break;
+          }
+        }
+      }
+
+      if (!foundCompanyId) {
+        // Fallback: try finding any integration with matching instance name in config
+        console.error(`No integration found for instance: ${evolution.instance_name}`);
+        return new Response(
+          JSON.stringify({ error: "No integration found for this instance" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      company_id = foundCompanyId;
+      channel = evolution.channel!;
+      external_message_id = evolution.external_message_id!;
+      from_phone = evolution.from_phone!;
+      from_name = evolution.from_name || from_phone;
+      messageBody = evolution.body || "";
+      media_url = evolution.media_url || null;
+      timestamp = evolution.timestamp;
+
+      if (!messageBody && !media_url) {
+        return new Response(
+          JSON.stringify({ ok: true, skipped: true, reason: "empty_message" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    } else {
+      // ── Standard payload format ──────────────────────
+      company_id = rawBody.company_id;
+      channel = rawBody.channel;
+      external_message_id = rawBody.external_message_id;
+      from_phone = rawBody.from_phone;
+      from_name = rawBody.from_name;
+      messageBody = rawBody.body;
+      media_url = rawBody.media_url || null;
+      timestamp = rawBody.timestamp;
+    }
 
     // ── Validation ─────────────────────────────────────
     if (!company_id || typeof company_id !== "string") {
