@@ -207,7 +207,7 @@ serve(async (req) => {
         const instanceName = config.instance_name as string;
         if (!apiKey || !apiUrl || !instanceName) throw new Error("Evolution config missing api_key, api_url or instance_name");
 
-        if (media_url) {
+          if (media_url) {
           // Detect media type from URL
           const lower = media_url.toLowerCase();
           let mediaType = "document";
@@ -215,39 +215,63 @@ serve(async (req) => {
           else if (/\.(ogg|mp3|m4a|opus|aac|wav|webm)(\?|$)/.test(lower) || lower.includes("audio") || lower.includes("ptt")) mediaType = "audio";
           else if (/\.(mp4|3gp|mov|avi)(\?|$)/.test(lower) || lower.includes("video")) mediaType = "video";
 
-          // Use sendMedia for all media types (more reliable than sendWhatsAppAudio)
-          const bodyPayload: Record<string, any> = {
-            number: phone.replace(/\D/g, ""),
-            mediatype: mediaType,
-            media: media_url,
-          };
-          if (messageBody && mediaType !== "audio") bodyPayload.caption = messageBody;
-          if (mediaType === "document") {
-            const fileName = media_url.split("/").pop()?.split("?")[0] || "document";
-            bodyPayload.fileName = fileName;
-          }
-          if (mediaType === "audio") {
-            // Evolution API v2 expects audio via sendWhatsAppAudio with specific format
-            // Use sendMedia instead which is more flexible with formats
-            bodyPayload.mediatype = "audio";
-          }
+          const destNumber = phone.replace(/\D/g, "");
 
-          const res = await fetch(
-            `${apiUrl}/message/sendMedia/${instanceName}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                apikey: apiKey,
+          if (mediaType === "audio") {
+            // Use sendWhatsAppAudio for voice/audio messages (PTT)
+            const audioPayload = {
+              number: destNumber,
+              audio: media_url,
+            };
+            console.log("Evolution sendWhatsAppAudio payload:", JSON.stringify(audioPayload));
+            const res = await fetch(
+              `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  apikey: apiKey,
+                },
+                body: JSON.stringify(audioPayload),
               },
-              body: JSON.stringify(bodyPayload),
-            },
-          );
-          if (!res.ok) {
-            const err = await res.text();
-            throw new Error(`Evolution API media error: ${err}`);
+            );
+            const resBody = await res.text();
+            console.log("Evolution sendWhatsAppAudio response:", res.status, resBody);
+            if (!res.ok) {
+              throw new Error(`Evolution API audio error: ${resBody}`);
+            }
+            delivered = true;
+          } else {
+            // Use sendMedia for image, video, document
+            const bodyPayload: Record<string, any> = {
+              number: destNumber,
+              mediatype: mediaType,
+              media: media_url,
+            };
+            if (messageBody) bodyPayload.caption = messageBody;
+            if (mediaType === "document") {
+              const fileName = media_url.split("/").pop()?.split("?")[0] || "document";
+              bodyPayload.fileName = fileName;
+            }
+
+            const res = await fetch(
+              `${apiUrl}/message/sendMedia/${instanceName}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  apikey: apiKey,
+                },
+                body: JSON.stringify(bodyPayload),
+              },
+            );
+            const resBody = await res.text();
+            console.log("Evolution sendMedia response:", res.status, resBody);
+            if (!res.ok) {
+              throw new Error(`Evolution API media error: ${resBody}`);
+            }
+            delivered = true;
           }
-          delivered = true;
         } else {
           // Evolution API v2 send text message
           const res = await fetch(
