@@ -100,19 +100,23 @@ serve(async (req) => {
     });
   }
 
-  // ── Auth: X-WEBHOOK-SECRET ───────────────────────────
-  const secret = req.headers.get("x-webhook-secret");
-  const expected = Deno.env.get("WEBHOOK_SECRET");
-
-  if (!expected || secret !== expected) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
   try {
     const rawBody = await req.json();
+
+    // Detect if this is an Evolution API webhook (has event + instance fields)
+    const isEvolutionWebhook = !!(rawBody.event && rawBody.instance);
+
+    // ── Auth: X-WEBHOOK-SECRET (skip for Evolution webhooks, validated by instance lookup) ──
+    if (!isEvolutionWebhook) {
+      const secret = req.headers.get("x-webhook-secret");
+      const expected = Deno.env.get("WEBHOOK_SECRET");
+      if (!expected || secret !== expected) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // ── Try to parse as Evolution API payload ──────────
     const evolution = parseEvolutionPayload(rawBody);
