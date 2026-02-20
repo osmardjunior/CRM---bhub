@@ -51,34 +51,34 @@ export function useInboxRealtime(selectedConversationId: string | null) {
     const channel = supabase
       .channel('inbox-realtime')
       .on(
-        'postgres_changes',
+        'postgres_changes' as any,
         {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
           filter: `company_id=eq.${companyId}`,
         },
-        handleMessageChange,
+        handleMessageChange as any,
       )
       .on(
-        'postgres_changes',
+        'postgres_changes' as any,
         {
           event: '*',
           schema: 'public',
           table: 'conversations',
           filter: `company_id=eq.${companyId}`,
         },
-        handleConversationChange,
+        handleConversationChange as any,
       )
       .on(
-        'postgres_changes',
+        'postgres_changes' as any,
         {
           event: 'INSERT',
           schema: 'public',
           table: 'annotations',
           filter: `company_id=eq.${companyId}`,
         },
-        (payload: RealtimePayload<{ conversation_id: string }>) => {
+        (payload: any) => {
           const ann = payload.new;
           if (ann?.conversation_id === selectedConversationId) {
             queryClient.invalidateQueries({
