@@ -44,7 +44,7 @@ export function useCreateCampaign() {
     mutationFn: async (payload: Partial<Campaign>) => {
       const { data, error } = await supabase
         .from('campaigns')
-        .insert(payload as Parameters<ReturnType<typeof supabase.from<'campaigns'>>['insert']>[0])
+        .insert(payload as any)
         .select()
         .single();
       if (error) throw error;
@@ -64,7 +64,7 @@ export function useUpdateCampaign() {
     mutationFn: async ({ id, ...updates }: Partial<Campaign> & { id: string }) => {
       const { error } = await supabase
         .from('campaigns')
-        .update(updates as Parameters<ReturnType<typeof supabase.from<'campaigns'>>['update']>[0])
+        .update(updates as any)
         .eq('id', id);
       if (error) throw error;
     },
