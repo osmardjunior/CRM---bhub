@@ -21,6 +21,7 @@ function parseEvolutionPayload(body: any): {
   from_name?: string;
   body?: string;
   media_url?: string;
+  profile_picture_url?: string;
   timestamp?: string;
   instance_name?: string;
 } {
@@ -56,8 +57,9 @@ function parseEvolutionPayload(body: any): {
       // Extract media URL if present
       const mediaUrl = data.media?.url || null;
 
-      // Extract contact name
+      // Extract contact name and profile picture
       const pushName = data.pushName || key.pushName || fromPhone;
+      const profilePictureUrl = data.profilePictureUrl || null;
 
       // Message ID
       const messageId = key.id || data.messageId || `evo_${Date.now()}`;
@@ -76,6 +78,7 @@ function parseEvolutionPayload(body: any): {
         from_name: pushName,
         body: messageBody,
         media_url: mediaUrl,
+        profile_picture_url: profilePictureUrl,
         timestamp: ts,
         instance_name: instanceName,
       };
@@ -128,6 +131,7 @@ serve(async (req) => {
     let from_name: string;
     let messageBody: string;
     let media_url: string | null;
+    let profile_picture_url: string | null = null;
     let timestamp: string | undefined;
 
     if (evolution.isEvolution) {
@@ -179,6 +183,7 @@ serve(async (req) => {
       from_name = evolution.from_name || from_phone;
       messageBody = evolution.body || "";
       media_url = evolution.media_url || null;
+      profile_picture_url = evolution.profile_picture_url || null;
       timestamp = evolution.timestamp;
 
       if (!messageBody && !media_url) {
@@ -229,12 +234,14 @@ serve(async (req) => {
       );
     }
 
-    if (!messageBody || typeof messageBody !== "string") {
+    if ((!messageBody || typeof messageBody !== "string") && !media_url) {
       return new Response(
-        JSON.stringify({ error: "body is required" }),
+        JSON.stringify({ error: "body or media_url is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+    // Ensure messageBody is at least empty string
+    if (!messageBody) messageBody = "";
 
     // ── Supabase client (service role) ─────────────────
     const supabase = createClient(
@@ -303,6 +310,7 @@ serve(async (req) => {
             phone: from_phone,
             source: channel,
             tags: [],
+            avatar_url: profile_picture_url,
           })
           .select("id")
           .single();
@@ -310,6 +318,14 @@ serve(async (req) => {
         if (contactErr) throw contactErr;
         contact = newContact;
       }
+    }
+
+    // ── Update avatar_url if we have a new one ─────────
+    if (profile_picture_url) {
+      await supabase
+        .from("contacts")
+        .update({ avatar_url: profile_picture_url })
+        .eq("id", contact.id);
     }
 
     // ── Find the most recent conversation for this contact (any status) ───

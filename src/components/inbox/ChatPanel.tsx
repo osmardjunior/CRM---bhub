@@ -9,10 +9,9 @@ import {
   Smile,
   Mic,
   ChevronDown,
-  CheckCheck,
   Users,
 } from 'lucide-react';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -43,11 +42,13 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
+import MessageBubble from '@/components/inbox/MessageBubble';
 import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
-import { closeConversation, isGroupChat } from '@/services/api';
+import { isGroupChat } from '@/services/api';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
@@ -121,18 +122,51 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     setQuickReplyOpen(false);
   };
 
-  const handleClose = async () => {
+  const handleChangeStatus = async (newStatus: 'open' | 'pending' | 'closed') => {
     if (!conversation) return;
-    setClosing(true);
+    if (newStatus === 'closed') {
+      setClosing(true);
+      try {
+        const { error } = await supabase
+          .from('conversations')
+          .update({ status: 'closed' as any, close_reason: 'resolvido' } as any)
+          .eq('id', conversation.id);
+        if (error) throw error;
+        toast.success('Conversa fechada!');
+      } catch (err: any) {
+        toast.error(err.message ?? 'Erro ao fechar conversa');
+      } finally {
+        setClosing(false);
+      }
+    } else {
+      try {
+        const { error } = await supabase
+          .from('conversations')
+          .update({ status: newStatus as any, close_reason: null } as any)
+          .eq('id', conversation.id);
+        if (error) throw error;
+        toast.success(newStatus === 'open' ? 'Em Atendimento!' : 'Aguardando!');
+      } catch (err: any) {
+        toast.error(err.message ?? 'Erro ao alterar status');
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    queryClient.invalidateQueries({ queryKey: ['conversation'] });
+  };
+
+  const handleAssignAgent = async (userId: string) => {
+    if (!conversation) return;
     try {
-      await closeConversation(conversation.id, 'resolvido');
-      toast.success('Conversa fechada!');
+      const { error } = await supabase
+        .from('conversations')
+        .update({ assigned_user_id: userId })
+        .eq('id', conversation.id);
+      if (error) throw error;
+      toast.success('Agente atribuído!');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
     } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao fechar conversa');
-    } finally {
-      setClosing(false);
+      toast.error(err.message ?? 'Erro ao atribuir agente');
     }
   };
 
@@ -163,15 +197,18 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
   const statusLabel: Record<string, string> = {
     open: 'Em Atendimento',
-    pending: 'Pendente',
+    pending: 'Aguardando',
     closed: 'Fechado',
   };
+
+  const contactAvatarUrl = (conversation.contact as any).avatar_url;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 bg-card">
         <Avatar className="h-9 w-9 shrink-0">
+          <AvatarImage src={contactAvatarUrl ?? undefined} />
           <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conversation.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
             {isGroupChat(conversation.contact.phone) ? <Users size={16} /> : conversation.contact.name[0]}
           </AvatarFallback>
@@ -188,31 +225,43 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           <p className="text-xs text-muted-foreground">{conversation.contact.phone}</p>
         </div>
 
-        {/* Status + Close button */}
-        {conversation.status !== 'closed' && (
+        {/* Status dropdown */}
+        {conversation.status !== 'closed' ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 size="sm"
-                className="h-8 gap-1.5 text-xs font-semibold bg-success hover:bg-success/90 text-success-foreground rounded-full px-3"
+                className={`h-8 gap-1.5 text-xs font-semibold rounded-full px-3 ${
+                  conversation.status === 'open'
+                    ? 'bg-success hover:bg-success/90 text-success-foreground'
+                    : 'bg-warning hover:bg-warning/90 text-warning-foreground'
+                }`}
               >
                 {statusLabel[conversation.status]}
                 <ChevronDown size={12} />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {conversation.status !== 'open' && (
+                <DropdownMenuItem className="text-xs" onClick={() => handleChangeStatus('open')}>
+                  Em Atendimento
+                </DropdownMenuItem>
+              )}
+              {conversation.status !== 'pending' && (
+                <DropdownMenuItem className="text-xs" onClick={() => handleChangeStatus('pending')}>
+                  Aguardando
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive text-xs"
-                onClick={handleClose}
+                onClick={() => handleChangeStatus('closed')}
                 disabled={closing}
               >
                 Fechar conversa
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
-
-        {conversation.status === 'closed' && (
+        ) : (
           <StatusBadge status={conversation.status} />
         )}
 
@@ -223,6 +272,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               <Select
                 value={conversation.assigned_user_id ?? ''}
                 disabled={!canReassign && conversation.assigned_user_id === user?.id}
+                onValueChange={handleAssignAgent}
               >
                 <SelectTrigger className={`h-8 w-[140px] text-xs ${!canReassign ? 'opacity-60' : ''}`}>
                   <SelectValue placeholder="Atribuir agente" />
@@ -247,7 +297,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         </Button>
       </div>
 
-      {/* Messages area — WhatsApp-like background */}
+      {/* Messages area */}
       <div
         className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
         style={{
@@ -264,46 +314,20 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         ) : (
           grouped.map((group) => (
             <div key={group.date}>
-              {/* Date separator */}
               <div className="flex items-center justify-center my-3">
                 <span className="text-[11px] text-muted-foreground bg-card/80 backdrop-blur-sm px-3 py-1 rounded-full border border-border/50 shadow-sm">
                   {group.date}
                 </span>
               </div>
-              {group.messages.map((msg) => {
-                const isOutgoing = msg.sender_type === 'agent';
-                return (
-                  <div key={msg.id} className={`flex mb-1.5 ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
-                    {!isOutgoing && (
-                      <Avatar className="h-7 w-7 shrink-0 mr-1.5 mt-0.5 self-end">
-                        <AvatarFallback className="text-[10px] bg-muted">
-                          {conversation.contact.name[0]}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    <div
-                      className={`max-w-[65%] rounded-2xl px-3.5 py-2 shadow-sm relative ${
-                        isOutgoing
-                          ? 'bg-[hsl(142,60%,88%)] text-foreground rounded-br-sm dark:bg-[hsl(142,40%,25%)]'
-                          : 'bg-card text-foreground rounded-bl-sm border border-border/50'
-                      }`}
-                    >
-                      {!isOutgoing && (
-                        <p className="text-[10px] font-semibold mb-0.5 text-primary">
-                          {msg.sender?.name ?? conversation.contact.name}
-                        </p>
-                      )}
-                      <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.body}</p>
-                      <div className={`flex items-center justify-end gap-1 mt-0.5`}>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                        {isOutgoing && <CheckCheck size={12} className="text-primary shrink-0" />}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {group.messages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  msg={msg}
+                  isOutgoing={msg.sender_type === 'agent'}
+                  contactName={conversation.contact.name}
+                  contactAvatarUrl={contactAvatarUrl}
+                />
+              ))}
             </div>
           ))
         )}

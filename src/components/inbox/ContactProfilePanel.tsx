@@ -11,10 +11,11 @@ import {
   Calendar,
   Info,
 } from 'lucide-react';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,11 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -32,9 +38,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import TaskModal from '@/components/tarefas/TaskModal';
 import { useCreateDeal } from '@/hooks/useDeals';
-import { closeConversation } from '@/services/api';
+import { useTags } from '@/hooks/useTags';
+import { closeConversation, updateContact } from '@/services/api';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
@@ -67,6 +75,7 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const contact = conversation.contact;
   const tags = (contact.tags as string[]) || [];
   const queryClient = useQueryClient();
+  const { data: availableTags = [] } = useTags();
 
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [dealModalOpen, setDealModalOpen] = useState(false);
@@ -75,6 +84,29 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closeReason, setCloseReason] = useState('resolvido');
   const [closing, setClosing] = useState(false);
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
+
+  const handleToggleTag = async (tagName: string) => {
+    setSavingTags(true);
+    try {
+      const newTags = tags.includes(tagName)
+        ? tags.filter((t) => t !== tagName)
+        : [...tags, tagName];
+      await updateContact(contact.id, { tags: newTags as any });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao atualizar tags');
+    } finally {
+      setSavingTags(false);
+    }
+  };
+
+  const handleRemoveTag = async (tagName: string) => {
+    await handleToggleTag(tagName);
+  };
 
   const handleCreateDeal = () => {
     if (!dealForm.title.trim()) {
@@ -115,6 +147,8 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     minute: '2-digit',
   });
 
+  const contactAvatarUrl = (contact as any).avatar_url;
+
   return (
     <div className="flex w-72 min-w-[272px] flex-col border-l border-border bg-card">
       {/* Header */}
@@ -129,6 +163,7 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         {/* Contact card */}
         <div className="flex flex-col items-center pt-5 pb-4 px-4 border-b border-border">
           <Avatar className="h-14 w-14 mb-3 ring-2 ring-primary/20">
+            <AvatarImage src={contactAvatarUrl ?? undefined} />
             <AvatarFallback className="text-lg font-bold bg-primary/10 text-primary">
               {contact.name[0]}
             </AvatarFallback>
@@ -216,15 +251,52 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         <div className="px-3 py-3 border-b border-border">
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tags</p>
-            <Button variant="ghost" size="icon" className="h-5 w-5">
-              <Plus size={11} />
-            </Button>
+            <Popover open={tagPopoverOpen} onOpenChange={setTagPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-5 w-5">
+                  <Plus size={11} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-2" align="end">
+                <p className="text-xs font-semibold mb-2">Gerenciar tags</p>
+                <ScrollArea className="max-h-48">
+                  <div className="space-y-1">
+                    {availableTags.map((t) => (
+                      <label
+                        key={t.id}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer transition-colors"
+                      >
+                        <Checkbox
+                          checked={tags.includes(t.name)}
+                          onCheckedChange={() => handleToggleTag(t.name)}
+                          disabled={savingTags}
+                        />
+                        <div
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: t.color }}
+                        />
+                        <span className="text-xs">{t.name}</span>
+                      </label>
+                    ))}
+                    {availableTags.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhuma tag cadastrada</p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
           </div>
           {tags.length > 0 ? (
             <div className="flex flex-wrap gap-1">
               {tags.map((tag) => (
-                <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0.5 rounded-full">
+                <Badge
+                  key={tag}
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0.5 rounded-full gap-0.5 cursor-pointer hover:bg-destructive/15 hover:text-destructive transition-colors"
+                  onClick={() => handleRemoveTag(tag)}
+                >
                   {tag}
+                  <X size={9} className="shrink-0" />
                 </Badge>
               ))}
             </div>

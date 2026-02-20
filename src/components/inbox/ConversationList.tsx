@@ -3,7 +3,7 @@ import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
   Mail, Monitor, Wifi, Star, Clock, User, Users,
 } from 'lucide-react';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { isGroupChat } from '@/services/api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -412,6 +412,7 @@ export default function ConversationList({
                 >
                   <div className="relative shrink-0 mt-0.5">
                     <Avatar className="h-10 w-10">
+                      <AvatarImage src={(conv.contact as any).avatar_url ?? undefined} />
                       <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conv.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
                         {isGroupChat(conv.contact.phone) ? <Users size={16} /> : conv.contact.name[0]}
                       </AvatarFallback>
