@@ -1,161 +1,128 @@
 
-# Plano de Implementacao: Chat Center (Fase 1 -- Prioridade Essencial)
 
-Dado o tamanho do escopo total (32+ funcionalidades faltantes), este plano cobre a **Fase 1** -- os 5 itens de maior impacto no atendimento diario. As fases seguintes serao planejadas apos a conclusao desta.
+# Plano de Correções e Implementações em Blocos
 
----
-
-## Escopo da Fase 1
-
-1. Envio de arquivos/imagens pelo compositor (botao de clipe)
-2. Gravacao e envio de audio (botao de mic)
-3. Respostas rapidas conectadas ao banco de dados
-4. Filtros avancados funcionais na lista de conversas
-5. Anotacoes internas (visiveis apenas para a equipe)
+Vou organizar tudo em blocos priorizados por impacto no uso diario. Cada bloco sera implementado, testado e validado antes de passar ao proximo.
 
 ---
 
-## 1. Envio de Arquivos e Imagens
+## Bloco 1 -- Funil Funcional (Contatos no Kanban)
 
-**O que muda:** O botao de clipe no compositor passa a abrir um seletor de arquivos. O arquivo eh enviado para o storage, a URL eh salva na mensagem e enviada via WhatsApp.
+**Problema atual:** O Kanban do funil nao conecta contatos reais. As colunas ficam vazias, sem como vincular clientes a etapas. A tabela `contact_funnel_stages` existe no banco mas nao e usada no frontend.
 
-**Detalhes tecnicos:**
-
-- Criar storage bucket `chat-media` (publico, com RLS para insert/select por company)
-- No `ChatPanel.tsx`, ao clicar no clipe:
-  - Abrir `<input type="file" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx" />`
-  - Fazer upload para `chat-media/{company_id}/{conversation_id}/{filename}`
-  - Inserir mensagem com `media_url` apontando para a URL publica do storage
-  - Chamar `send-whatsapp` com `media_url` alem do `body`
-- Atualizar `send-whatsapp/index.ts` para enviar midia (Evolution API: `sendMedia` endpoint; Meta: `image/document` type)
-- Suportar drag-and-drop na area de mensagens (preview antes de enviar)
-
-**Migracao SQL:**
-```sql
-INSERT INTO storage.buckets (id, name, public) VALUES ('chat-media', 'chat-media', true);
-
-CREATE POLICY "Users can upload chat media"
-ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'chat-media');
-
-CREATE POLICY "Anyone can view chat media"
-ON storage.objects FOR SELECT TO authenticated
-USING (bucket_id = 'chat-media');
-```
+**O que sera feito:**
+- Carregar contatos vinculados a cada etapa do funil via `contact_funnel_stages`
+- Mostrar cards de contato reais nas colunas do Kanban (nome, telefone, tags)
+- Botao "Adicionar Chats" abre um seletor de contatos para vincular a etapa
+- Drag-and-drop entre colunas para mover contato de etapa
+- Remover contato de uma etapa
 
 ---
 
-## 2. Gravacao e Envio de Audio
+## Bloco 2 -- Tags no Perfil do Contato (Correcao)
 
-**O que muda:** O botao de microfone inicia gravacao de audio. Ao soltar, mostra preview com opcao de enviar ou descartar.
+**Problema atual:** As tags estao sendo salvas no campo JSON `contacts.tags` (texto livre), mas o sistema tem a tabela relacional `contact_tags` + `tags`. A UI de tags no painel de perfil precisa usar a tabela correta.
 
-**Detalhes tecnicos:**
-
-- Usar `MediaRecorder` API do navegador
-- Estados: `idle` -> `recording` -> `preview` -> `sending`
-- No estado `recording`: mostrar timer e botao de parar/descartar
-- No estado `preview`: player de audio inline + botoes enviar/descartar
-- Audio gravado como `audio/ogg; codecs=opus` (compativel com WhatsApp)
-- Upload para `chat-media` bucket, depois enviar como mensagem com `media_url`
-- Criar componente `AudioRecorder.tsx` separado para manter o `ChatPanel` limpo
+**O que sera feito:**
+- Migrar a logica de tags do `ContactProfilePanel` para usar `contact_tags` (insert/delete na tabela de juncao)
+- Exibir tags com cores reais da tabela `tags`
+- Garantir que adicionar/remover tag funcione corretamente
 
 ---
 
-## 3. Respostas Rapidas do Banco de Dados
+## Bloco 3 -- Acoes Rapidas Simplificadas (Estilo Guru)
 
-**O que muda:** O botao de raio (Zap) busca da tabela `quick_replies` em vez da lista fixa hardcoded.
+**Problema atual:** As acoes rapidas no perfil do contato mostram "Tarefa" e "Negocio", que sao conceitos complexos demais para o uso rapido. No Guru, as acoes rapidas sao: Delegar, Arquivar, Favoritar, Ativar/Desativar Chatbot, Mover no Funil.
 
-**Detalhes tecnicos:**
-
-- No `ChatPanel.tsx`:
-  - Importar `useQuickReplies` (hook ja existe e funciona)
-  - Substituir o array `quickReplies` fixo pela query do banco
-  - Adicionar busca por atalho: digitar `/` no textarea filtra respostas rapidas em um popover inline (estilo autocomplete)
-  - Exibir `shortcut` e `message` na lista de respostas
-- Manter fallback para lista vazia ("Nenhuma resposta rapida cadastrada. Crie na pagina Respostas Rapidas.")
-
----
-
-## 4. Filtros Avancados Funcionais
-
-**O que muda:** Os filtros de nome, telefone, tag, usuario, status e ordenacao passam a funcionar de verdade no backend.
-
-**Detalhes tecnicos:**
-
-- Atualizar `ConversationFilters` em `api.ts` para incluir:
-  - `name?: string` -- filtro por nome do contato (ilike)
-  - `phone?: string` -- filtro por telefone (ilike)
-  - `tag?: string` -- filtro por tag do contato
-  - `assigned_user_id?: string` -- filtro por agente atribuido
-  - `sort?: 'recent' | 'oldest' | 'name'` -- ordenacao
-- Atualizar `listConversations()` para aplicar todos os filtros na query Supabase
-- No `ConversationList.tsx`, conectar `handleApplyFilters` para enviar todos os filtros locais (nao apenas channel)
-- Filtro de tag: buscar conversas onde o contato tem a tag selecionada (feito client-side apos query, pois tags sao JSONB no contato)
+**O que sera feito:**
+- Substituir botoes "Tarefa" e "Negocio" por acoes praticas:
+  - **Delegar** -- select de agente para atribuir a conversa
+  - **Arquivar** -- toggle `is_archived` no contato
+  - **Favoritar** -- toggle `is_favorite` no contato (estrela)
+  - **Chatbot On/Off** -- toggle `chatbot_enabled`
+  - **Mover no Funil** -- select de funil + etapa para posicionar o contato
+- "Fechar conversa" permanece como esta
 
 ---
 
-## 5. Anotacoes Internas
+## Bloco 4 -- Painel Direito com Abas de Historico
 
-**O que muda:** Agentes podem escrever notas internas visiveis apenas para a equipe, sem enviar para o contato.
+**Problema atual:** O painel direito so mostra informacoes basicas. Faltam as abas de historico que existem no Guru.
 
-**Detalhes tecnicos:**
-
-- **Nova tabela `annotations`:**
-```sql
-CREATE TABLE public.annotations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id uuid NOT NULL,
-  conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  author_id uuid NOT NULL,
-  body text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-ALTER TABLE annotations ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view company annotations"
-ON annotations FOR SELECT TO authenticated
-USING (company_id = get_user_company_id());
-
-CREATE POLICY "Users can insert company annotations"
-ON annotations FOR INSERT TO authenticated
-WITH CHECK (company_id = get_user_company_id());
-
-ALTER PUBLICATION supabase_realtime ADD TABLE annotations;
-```
-
-- No `ChatPanel.tsx`:
-  - Adicionar toggle "Mensagem / Anotacao" no compositor (botao ou switch)
-  - Quando em modo anotacao, mudar cor do fundo do textarea para amarelo claro
-  - Ao enviar anotacao: inserir na tabela `annotations` (NAO na tabela `messages`, NAO enviar via WhatsApp)
-  - Buscar anotacoes junto com mensagens e intercalar por `created_at`
-  - Renderizar anotacoes com fundo amarelo distinto e icone de cadeado, mostrando nome do autor
+**O que sera feito:**
+- Adicionar sistema de abas no `ContactProfilePanel`:
+  - **Dados** -- informacoes do contato (ja existe)
+  - **Atendimento** -- historico de `attendance_history`
+  - **Anotacoes** -- lista de `annotations` da conversa
+  - **Funil** -- posicao atual em funis via `contact_funnel_stages`
+  - **Delegacoes** -- historico de `delegation_history`
+  - **NPS** -- pesquisas de `satisfaction_surveys`
 
 ---
 
-## Arquivos que serao modificados/criados
+## Bloco 5 -- Paginas Faltantes na Sidebar
 
-| Arquivo | Tipo | Mudanca |
-|---|---|---|
-| Migracao SQL | novo | Bucket storage + tabela annotations + RLS |
-| `src/components/inbox/ChatPanel.tsx` | editar | Clipe funcional, audio recorder, respostas rapidas do banco, toggle anotacao |
-| `src/components/inbox/AudioRecorder.tsx` | novo | Componente de gravacao de audio |
-| `src/components/inbox/MessageBubble.tsx` | editar | Renderizar anotacoes com estilo diferenciado |
-| `src/services/api.ts` | editar | Novos filtros em ConversationFilters + listConversations |
-| `src/components/inbox/ConversationList.tsx` | editar | Aplicar todos os filtros no handleApplyFilters |
-| `src/hooks/useConversations.ts` | editar | Buscar e intercalar anotacoes na query de detalhes |
-| `src/hooks/useInboxRealtime.ts` | editar | Subscrever a tabela annotations para realtime |
-| `supabase/functions/send-whatsapp/index.ts` | editar | Suportar envio de midia (imagem, documento, audio) |
+**Problema atual:** Rotas `/nps`, `/arquivos`, `/modulos`, `/suporte` existem na sidebar mas nao tem pagina implementada.
+
+**O que sera feito:**
+- **/nps** -- painel com pesquisas de satisfacao (lista + media + graficos)
+- **/arquivos** -- galeria de midias enviadas/recebidas do storage `chat-media`
+- **/modulos** -- pagina de configuracao de modulos ativos
+- **/suporte** -- pagina simples com informacoes de contato/ajuda
 
 ---
 
-## Ordem de implementacao
+## Bloco 6 -- Melhorias de Chat (Emoji, Reply, Busca)
 
-1. Migracao SQL (bucket + tabela annotations)
-2. Filtros avancados (backend + frontend)
-3. Respostas rapidas do banco
-4. Envio de arquivos/imagens (upload + send-whatsapp media)
-5. Gravacao de audio
-6. Anotacoes internas
+**O que sera feito:**
+- Emoji picker no input de mensagem
+- Reply/quote -- clicar em mensagem para responder com referencia
+- Busca global de mensagens
+- Notificacoes sonoras (toggle no header usando `soundEnabled` do chatStore)
 
-Essa ordem permite testar cada funcionalidade de forma independente conforme implementada.
+---
+
+## Detalhes Tecnicos
+
+### Bloco 1 (Funil)
+- Criar hook `useContactFunnelStages` com queries em `contact_funnel_stages` JOIN `contacts`
+- Atualizar `FunnelKanban.tsx` para consumir dados reais
+- Usar `@hello-pangea/dnd` (ja instalado) para drag-and-drop entre colunas
+- Modal de selecao de contatos com busca
+
+### Bloco 2 (Tags)
+- `ContactProfilePanel`: substituir `updateContact(id, { tags })` por `insert/delete` em `contact_tags`
+- Query: `contact_tags` JOIN `tags` para exibir cor e nome
+
+### Bloco 3 (Acoes Rapidas)
+- Usar `updateContact(id, { is_archived, is_favorite, chatbot_enabled })`
+- Delegar: `update conversations set assigned_user_id`
+- Mover funil: `upsert contact_funnel_stages`
+
+### Bloco 4 (Abas)
+- Componente `Tabs` do Radix UI (ja instalado)
+- Queries individuais por aba (lazy loading)
+
+### Bloco 5 (Paginas)
+- Criar 4 novos arquivos em `src/pages/`
+- Adicionar rotas em `App.tsx`
+- Hooks de dados correspondentes
+
+### Bloco 6 (Chat)
+- Instalar `emoji-mart` ou usar emoji picker nativo
+- Estado de reply no `chatStore`
+- Busca via query fulltext em `messages.body`
+
+---
+
+## Ordem de Execucao
+
+Cada bloco sera implementado sequencialmente. Apos cada bloco, voce testa e confirma antes de seguir para o proximo.
+
+1. Bloco 1 (Funil) -- impacto direto no fluxo de vendas
+2. Bloco 2 (Tags) -- correcao de bug existente
+3. Bloco 3 (Acoes rapidas) -- usabilidade diaria
+4. Bloco 4 (Abas historico) -- visibilidade de dados
+5. Bloco 5 (Paginas) -- completude do sistema
+6. Bloco 6 (Chat) -- melhorias de experiencia
+
