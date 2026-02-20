@@ -1,85 +1,97 @@
 
+# Plano: Corrigir funcionalidades do Inbox (midia, perfil, status, tags, atribuicao)
 
-# Celulares - Gerenciamento de Multiplos Numeros WhatsApp
+## Problemas identificados
 
-## Visao Geral
+1. **Mensagens de midia (audio, imagem, figurinha, video)** nao sao exibidas -- o chat so mostra texto
+2. **Foto de perfil do contato** nao aparece no chat
+3. **Nao e possivel alterar o status** da conversa (ex: Em Atendimento / Aguardando)
+4. **Nao e possivel adicionar tags** ao contato via painel lateral
+5. **Nao e possivel atribuir agente** -- o seletor nao tem handler de mudanca
 
-Transformar a pagina de Integracoes em um sistema completo de gerenciamento de "Celulares" (aparelhos/numeros WhatsApp), similar ao Guru. Atualmente o sistema suporta apenas uma integracao WhatsApp. O novo sistema permitira cadastrar e gerenciar multiplos numeros de WhatsApp, cada um como um "aparelho" independente com seu proprio provedor, credenciais e configuracoes.
+---
 
-## O que muda para o usuario
+## 1. Exibir mensagens de midia no chat
 
-### Pagina "Celulares" (antes "Integracoes")
-- Titulo muda para "Celulares" com subtitulo "Nesta area estao listados todos os aparelhos da sua conta"
-- Grid de cards, um por numero cadastrado, mostrando:
-  - Nome do aparelho (editavel, ex: "TIPSPLACE - 2410")
-  - Numero de telefone formatado (ex: +55 (31) 92692410)
-  - Status de conexao (badge Conectado/Desconectado)
-  - Provedor utilizado (Meta Cloud API, Twilio, 360dialog, Gupshup)
-  - Botao "Desativar" para desconectar
-  - Opcao "Restringir usuarios que podem adicionar chats" (toggle)
-- Botao "Adicionar Aparelho" no topo para cadastrar novo numero
+O campo `media_url` ja existe na tabela `messages` e o webhook ja salva URLs de midia. Porem o `ChatPanel.tsx` renderiza apenas `msg.body` como texto.
 
-### Modal de cadastro de novo aparelho
-- Nome do aparelho (texto livre)
-- Numero de telefone
-- Selecao de provedor (Meta Cloud API, Twilio, 360dialog, Gupshup)
-- Campos dinamicos conforme provedor:
-  - **Meta**: Access Token + Phone Number ID
-  - **Twilio**: Account SID + Auth Token + From Number
-  - **360dialog**: API Key
-  - **Gupshup**: API Key + App Name
-- Webhook URL para copiar
+**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
+- Na renderizacao de cada mensagem, verificar `msg.media_url`
+- Se existir, identificar o tipo de midia pela extensao/conteudo:
+  - **Imagem** (jpg, png, webp, jpeg): exibir `<img>` clicavel
+  - **Audio** (ogg, mp3, m4a, opus): exibir player `<audio>` nativo
+  - **Video** (mp4, 3gp): exibir `<video>` com controles
+  - **Sticker** (webp sem extensao longa): exibir como imagem menor sem fundo
+  - **Documento**: exibir link para download
+- Se `msg.body` tambem existir (caption), mostrar abaixo da midia
 
-### Secao "Informacoes da API"
-- Status da API (Ativa/Inativa)
-- Webhook URL (endpoint do incoming-message)
-- Chave de seguranca (webhook secret - apenas exibicao parcial)
-- Lista de IDs dos aparelhos cadastrados com seus numeros
+## 2. Foto de perfil do contato
 
-### Ajustes no modelo de dados
-A tabela `integrations` atual armazena uma unica integracao por canal. Para suportar multiplos numeros no mesmo canal, cada registro representara um "aparelho" individual.
+A Evolution API envia o `profilePictureUrl` no webhook. Precisamos salvar e exibir.
 
-## Detalhes Tecnicos
+**Mudancas:**
+- **Tabela `contacts`**: Adicionar coluna `avatar_url` (text, nullable)
+- **`supabase/functions/incoming-message/index.ts`**: Ao criar ou atualizar contato, buscar `profilePictureUrl` do payload da Evolution e salvar no `avatar_url`
+- **`src/components/inbox/ConversationList.tsx`**: Usar `AvatarImage` com `contact.avatar_url` quando disponivel
+- **`src/components/inbox/ChatPanel.tsx`**: Idem no header e nos baloes de mensagem
+- **`src/components/inbox/ContactProfilePanel.tsx`**: Idem no perfil lateral
 
-### Alteracao na tabela integrations
-Adicionar colunas para suportar multiplos aparelhos:
+## 3. Alterar status da conversa (Em Atendimento / Aguardando)
 
-```text
-ALTER TABLE integrations ADD COLUMN phone_number TEXT;
-ALTER TABLE integrations ADD COLUMN device_name TEXT DEFAULT '';
-ALTER TABLE integrations ADD COLUMN restrict_users UUID[] DEFAULT '{}';
+Atualmente o dropdown so tem "Fechar conversa". Precisa permitir trocar entre `open` (Em Atendimento) e `pending` (Aguardando).
+
+**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
+- Expandir o `DropdownMenu` no header para incluir opcoes:
+  - "Em Atendimento" (status: open)
+  - "Aguardando" (status: pending)
+  - "Fechar conversa" (status: closed)
+- Criar funcao `handleChangeStatus(newStatus)` que faz `supabase.from('conversations').update({ status }).eq('id', conversation.id)`
+- Invalidar queries apos mudanca
+
+## 4. Adicionar tags ao contato
+
+O botao "+" na secao de tags do `ContactProfilePanel` nao tem funcionalidade.
+
+**Mudancas em `src/components/inbox/ContactProfilePanel.tsx`:**
+- Ao clicar no "+", abrir um popover/dialog com:
+  - Lista de tags disponiveis (da tabela `tags`) com checkboxes
+  - Tags ja aplicadas aparecem marcadas
+- Ao marcar/desmarcar, chamar `updateContact(contact.id, { tags: [...] })` para salvar
+- Permitir remover tags clicando no "X" de cada badge
+
+## 5. Atribuir agente a conversa
+
+O `Select` de agente no header do `ChatPanel` nao tem `onValueChange`, entao selecionar um agente nao faz nada.
+
+**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
+- Adicionar `onValueChange` ao `Select` que:
+  - Faz `supabase.from('conversations').update({ assigned_user_id: newUserId }).eq('id', conversation.id)`
+  - Invalida queries `['conversation']` e `['conversations']`
+  - Mostra toast de confirmacao
+- Respeitar permissoes: agentes so podem atribuir a si mesmos, supervisores/admins podem atribuir a qualquer membro
+
+---
+
+## Detalhes tecnicos
+
+### Migracao de banco de dados
+```sql
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS avatar_url text;
 ```
 
-Isso permite que existam multiplos registros com `channel = 'whatsapp'`, cada um representando um numero/aparelho diferente.
+### Arquivos modificados
+| Arquivo | Mudanca |
+|---|---|
+| `src/components/inbox/ChatPanel.tsx` | Renderizar midia, alterar status, atribuir agente |
+| `src/components/inbox/ContactProfilePanel.tsx` | Adicionar/remover tags, exibir avatar |
+| `src/components/inbox/ConversationList.tsx` | Exibir avatar do contato |
+| `supabase/functions/incoming-message/index.ts` | Salvar avatar_url e media_url |
+| Migracao SQL | Adicionar coluna `avatar_url` em `contacts` |
 
-### Provedor Gupshup
-Adicionar suporte ao provedor Gupshup no edge function `send-whatsapp`:
-- Endpoint: `https://api.gupshup.io/wa/api/v1/msg`
-- Headers: `apikey` com a chave da API
-- Body: `channel=whatsapp&source=<from>&destination=<to>&message={"type":"text","text":"<body>"}`
+### Fluxo de renderizacao de midia
 
-### Arquivos que serao modificados
-
-1. **`src/pages/Integracoes.tsx`** - Redesign completo: grid de cards de aparelhos, modal de adicao, secao de info da API
-2. **`src/hooks/useIntegrations.ts`** - Ajustar para suportar multiplos registros por canal (add device, remove device, update device)
-3. **`supabase/functions/send-whatsapp/index.ts`** - Adicionar suporte ao provedor Gupshup
-4. **`supabase/functions/incoming-message/index.ts`** - Ajustar para identificar qual aparelho recebeu a mensagem (via phone_number_id ou parametro)
-
-### Arquivo de migracao
-
-1. **`supabase/migrations/xxx_integrations_multi_device.sql`** - Adicionar colunas `phone_number`, `device_name`, `restrict_users` na tabela integrations
-
-### Fluxo do usuario
-
-1. Acessa /integracoes e ve a lista de aparelhos cadastrados (cards)
-2. Clica "Adicionar Aparelho"
-3. Preenche nome, numero, seleciona provedor e insere credenciais
-4. Salva - aparece como novo card na grid
-5. Pode desativar ou editar cada aparelho individualmente
-6. Na secao inferior, ve as informacoes da API (webhook URL, IDs dos aparelhos)
-
-### Integracao com o fluxo existente
-
-- O `send-whatsapp` ja busca a integracao por `company_id + channel + status=connected`. Com multiplos aparelhos, a selecao do aparelho sera feita pelo `phone_number` do contato ou pelo primeiro aparelho disponivel
-- O `incoming-message` continuara funcionando normalmente - cada mensagem recebida ja identifica o `company_id` e cria/encontra o contato pelo telefone
-
+Para cada mensagem com `media_url`:
+1. Extrair extensao da URL
+2. Mapear para tipo: image, audio, video, sticker, document
+3. Renderizar componente apropriado dentro do balao de mensagem
+4. Manter `msg.body` como legenda abaixo da midia (quando houver)
