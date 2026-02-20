@@ -45,9 +45,12 @@ export function useCreateQuickReply() {
       qc.invalidateQueries({ queryKey: ['quick_replies'] });
       toast.success('Resposta rápida salva!');
     },
-    onError: (err: any) => {
-      if (err.code === '23505') toast.error('Esse atalho já existe. Escolha outro nome.');
-      else toast.error(err.message || 'Erro ao salvar');
+    onError: (err: unknown) => {
+      if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === '23505') {
+        toast.error('Esse atalho já existe. Escolha outro nome.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Erro ao salvar');
+      }
     },
   });
 }

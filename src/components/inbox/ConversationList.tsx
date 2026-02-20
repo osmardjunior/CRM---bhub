@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
   Mail, Monitor, Wifi, Star, Clock, User, Users,
@@ -87,19 +87,23 @@ export default function ConversationList({
   const activeStatus = filters.status ?? 'open';
   const [chatType, setChatType] = useState<'individual' | 'group'>('individual');
 
-  const filtered = conversations.filter((c) => {
-    const isGroup = isGroupChat(c.contact.phone);
-    if (chatType === 'group' && !isGroup) return false;
-    if (chatType === 'individual' && isGroup) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        c.contact.name.toLowerCase().includes(q) ||
-        (c.contact.phone ?? '').includes(q)
-      );
-    }
-    return true;
-  });
+  const filtered = useMemo(
+    () =>
+      conversations.filter((c) => {
+        const isGroup = isGroupChat(c.contact.phone);
+        if (chatType === 'group' && !isGroup) return false;
+        if (chatType === 'individual' && isGroup) return false;
+        if (search) {
+          const q = search.toLowerCase();
+          return (
+            c.contact.name.toLowerCase().includes(q) ||
+            (c.contact.phone ?? '').includes(q)
+          );
+        }
+        return true;
+      }),
+    [conversations, chatType, search],
+  );
 
   function handleApplyFilters() {
     const newFilters: Partial<ConversationFilters> = {};
@@ -417,7 +421,7 @@ export default function ConversationList({
                 >
                   <div className="relative shrink-0 mt-0.5">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={(conv.contact as any).avatar_url ?? undefined} />
+                      <AvatarImage src={(conv.contact as { avatar_url?: string | null }).avatar_url ?? undefined} />
                       <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conv.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
                         {isGroupChat(conv.contact.phone) ? <Users size={16} /> : conv.contact.name[0]}
                       </AvatarFallback>

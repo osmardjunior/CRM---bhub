@@ -68,15 +68,14 @@ export default function EvolutionQRModal({
         setPhase('qrcode');
       }
 
-      // Set webhook
+      // Set webhook (non-critical: failure doesn't block connection)
       try {
         await callEvolution('set-webhook');
-      } catch (e) {
-        console.warn('Webhook setup failed (non-critical):', e);
+      } catch {
+        // Webhook setup is best-effort
       }
-    } catch (err: any) {
-      console.error('Create instance error:', err);
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro ao criar instância');
       setPhase('error');
     }
   }, [callEvolution]);

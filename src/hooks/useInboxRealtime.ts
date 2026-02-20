@@ -3,6 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
+interface RealtimePayload<T = Record<string, unknown>> {
+  new: T | null;
+  old: T | null;
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+}
+
 /**
  * Subscribes to realtime changes on messages and conversations
  * scoped to the current user's company.
@@ -13,7 +19,7 @@ export function useInboxRealtime(selectedConversationId: string | null) {
   const { companyId } = useAuth();
 
   const handleMessageChange = useCallback(
-    (payload: any) => {
+    (payload: RealtimePayload<{ conversation_id: string }>) => {
       const newMsg = payload.new;
       if (!newMsg) return;
 
@@ -72,7 +78,7 @@ export function useInboxRealtime(selectedConversationId: string | null) {
           table: 'annotations',
           filter: `company_id=eq.${companyId}`,
         },
-        (payload: any) => {
+        (payload: RealtimePayload<{ conversation_id: string }>) => {
           const ann = payload.new;
           if (ann?.conversation_id === selectedConversationId) {
             queryClient.invalidateQueries({

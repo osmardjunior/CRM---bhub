@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import type { TablesInsert } from '@/integrations/supabase/types';
 
 export interface FunnelStage {
   id: string;
@@ -79,9 +80,10 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
   }, [fetchFunnels]);
 
   const addFunnel = async (data: { name: string; stages: { label: string; count: number }[] }) => {
+    // company_id is set automatically by DB trigger
     const { data: newFunnel, error } = await supabase
       .from('funnels')
-      .insert({ name: data.name } as any)
+      .insert({ name: data.name } as TablesInsert<'funnels'>)
       .select()
       .single();
 
@@ -97,7 +99,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
         position: i,
       }));
 
-      const { error: sErr } = await supabase.from('funnel_stages').insert(stagesToInsert as any);
+      const { error: sErr } = await supabase.from('funnel_stages').insert(stagesToInsert as TablesInsert<'funnel_stages'>[]);
       if (sErr) {
         toast({ title: 'Erro ao criar etapas', variant: 'destructive' });
       }
@@ -130,9 +132,10 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
     const funnel = funnels.find((f) => f.id === funnelId);
     const nextPos = funnel ? Math.max(0, ...funnel.stages.map((s) => s.position)) + 1 : 0;
 
+    // company_id is set automatically by DB trigger
     const { error } = await supabase
       .from('funnel_stages')
-      .insert({ funnel_id: funnelId, label, position: nextPos } as any);
+      .insert({ funnel_id: funnelId, label, position: nextPos } as TablesInsert<'funnel_stages'>);
 
     if (error) {
       toast({ title: 'Erro ao adicionar etapa', variant: 'destructive' });

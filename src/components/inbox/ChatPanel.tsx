@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   MessageSquare,
   Send,
@@ -50,7 +50,10 @@ import { useTeamMembers } from '@/hooks/useContacts';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuickReplies } from '@/hooks/useQuickReplies';
-import { isGroupChat, createAnnotation } from '@/services/api';
+import { isGroupChat, createAnnotation, sendViaWhatsApp } from '@/services/api';
+
+const MAX_FILE_SIZE_MB = 20;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -110,12 +113,17 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     queryFn: () => listAnnotations(conversation!.id),
   });
 
-  // Merge messages and annotations by created_at
+  // Merge messages and annotations by created_at — memoized to avoid re-sorting on every render
   const messages = conversation?.messages ?? [];
-  const mergedItems = [...messages.map((m) => ({ ...m, _type: 'message' as const })), ...annotations.map((a) => ({ ...a, _type: 'annotation' as const }))].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  const mergedItems = useMemo(
+    () =>
+      [
+        ...messages.map((m) => ({ ...m, _type: 'message' as const })),
+        ...annotations.map((a) => ({ ...a, _type: 'annotation' as const })),
+      ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [messages, annotations],
   );
-  const grouped = groupMessagesByDate(mergedItems);
+  const grouped = useMemo(() => groupMessagesByDate(mergedItems), [mergedItems]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -128,8 +136,8 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         await createAnnotation(conversation.id, input.trim());
         setInput('');
         queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
-      } catch (err: any) {
-        toast.error(err.message ?? 'Erro ao salvar anotação');
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Erro ao salvar anotação');
       }
     } else {
       sendMessage.mutate({ conversationId: conversation.id, body: input.trim() });
@@ -167,9 +175,8 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !conversation || !companyId) return;
     const file = files[0];
-    const maxSize = 20 * 1024 * 1024; // 20MB
-    if (file.size > maxSize) {
-      toast.error('Arquivo muito grande. Máximo: 20MB');
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error(`Arquivo muito grande. Máximo: ${MAX_FILE_SIZE_MB}MB`);
       return;
     }
     setUploading(true);
@@ -203,27 +210,14 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // Send via WhatsApp (best-effort)
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl }),
-          }).catch(console.error);
-        }
-      } catch {}
+      // Send via WhatsApp (best-effort, non-blocking)
+      sendViaWhatsApp(conversation.id, body, mediaUrl);
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       toast.success('Arquivo enviado!');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao enviar arquivo');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -258,27 +252,14 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // WhatsApp send (best-effort)
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl }),
-          }).catch(console.error);
-        }
-      } catch {}
+      // WhatsApp send (best-effort, non-blocking)
+      sendViaWhatsApp(conversation.id, '🎤 Áudio', mediaUrl);
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       toast.success('Áudio enviado!');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao enviar áudio');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao enviar áudio');
     } finally {
       setUploading(false);
     }
@@ -291,12 +272,12 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       try {
         const { error } = await supabase
           .from('conversations')
-          .update({ status: 'closed' as any, close_reason: 'resolvido' } as any)
+          .update({ status: 'closed', close_reason: 'resolvido' })
           .eq('id', conversation.id);
         if (error) throw error;
         toast.success('Conversa fechada!');
-      } catch (err: any) {
-        toast.error(err.message ?? 'Erro ao fechar conversa');
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Erro ao fechar conversa');
       } finally {
         setClosing(false);
       }
@@ -304,12 +285,12 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       try {
         const { error } = await supabase
           .from('conversations')
-          .update({ status: newStatus as any, close_reason: null } as any)
+          .update({ status: newStatus, close_reason: null })
           .eq('id', conversation.id);
         if (error) throw error;
         toast.success(newStatus === 'open' ? 'Em Atendimento!' : 'Aguardando!');
-      } catch (err: any) {
-        toast.error(err.message ?? 'Erro ao alterar status');
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Erro ao alterar status');
       }
     }
     queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -327,8 +308,8 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       toast.success('Agente atribuído!');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
-    } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao atribuir agente');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao atribuir agente');
     }
   };
 
@@ -369,7 +350,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     closed: 'Fechado',
   };
 
-  const contactAvatarUrl = (conversation.contact as any).avatar_url;
+  const contactAvatarUrl = (conversation.contact as { avatar_url?: string | null }).avatar_url;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">

@@ -47,6 +47,31 @@ function handleError(error: { message: string; code?: string; details?: string }
   throw new ApiError(friendly, code);
 }
 
+// ── WhatsApp send helper (best-effort, never throws) ───
+export async function sendViaWhatsApp(
+  conversationId: string,
+  body: string,
+  mediaUrl?: string,
+): Promise<void> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
+    fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ conversation_id: conversationId, body, ...(mediaUrl ? { media_url: mediaUrl } : {}) }),
+    }).catch(() => {
+      // Best-effort: WhatsApp delivery failure is non-fatal
+    });
+  } catch {
+    // Session fetch failed — non-fatal
+  }
+}
+
 // ── Profile ────────────────────────────────────────────
 export async function getMyProfile(): Promise<Profile> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -222,25 +247,13 @@ export async function sendMessage(
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', conversationId);
 
-  if (convErr) console.error('Erro ao atualizar conversa:', convErr);
+  // Non-critical: update timestamp. Log in dev only.
+  if (convErr && import.meta.env.DEV) {
+    console.warn('[api] Erro ao atualizar last_message_at:', convErr);
+  }
 
   // Try to send via WhatsApp API (best-effort, don't block)
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ conversation_id: conversationId, body }),
-      }).catch((e) => console.error('WhatsApp send error:', e));
-    }
-  } catch (e) {
-    console.error('WhatsApp send error:', e);
-  }
+  sendViaWhatsApp(conversationId, body);
 
   return msg;
 }
@@ -418,9 +431,9 @@ export async function closeConversation(
   const { error } = await supabase
     .from('conversations')
     .update({
-      status: 'closed' as any,
+      status: 'closed' as TablesUpdate<'conversations'>['status'],
       close_reason: closeReason,
-    } as any)
+    })
     .eq('id', conversationId);
 
   if (error) handleError(error);
@@ -447,26 +460,29 @@ export interface Annotation {
 }
 
 export async function listAnnotations(conversationId: string): Promise<Annotation[]> {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from('annotations')
     .select('*, author:profiles!annotations_author_id_fkey(name, avatar_url)')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });
 
   if (error) handleError(error);
-  return (data ?? []) as Annotation[];
+  return (data ?? []) as unknown as Annotation[];
 }
 
 export async function createAnnotation(conversationId: string, body: string): Promise<Annotation> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
 
-  const { data, error } = await (supabase as any)
+  // company_id is set automatically by the DB trigger
+  const insertPayload = { conversation_id: conversationId, author_id: user.id, body } as TablesInsert<'annotations'>;
+
+  const { data, error } = await supabase
     .from('annotations')
-    .insert({ conversation_id: conversationId, author_id: user.id, body })
+    .insert(insertPayload)
     .select('*, author:profiles!annotations_author_id_fkey(name, avatar_url)')
     .single();
 
   if (error) handleError(error);
-  return data as Annotation;
+  return data as unknown as Annotation;
 }
