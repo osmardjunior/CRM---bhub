@@ -1,97 +1,178 @@
 
-# Plano: Corrigir funcionalidades do Inbox (midia, perfil, status, tags, atribuicao)
 
-## Problemas identificados
+# Comparativo: Seu CRM vs ChatGuru -- O que tem e o que falta
 
-1. **Mensagens de midia (audio, imagem, figurinha, video)** nao sao exibidas -- o chat so mostra texto
-2. **Foto de perfil do contato** nao aparece no chat
-3. **Nao e possivel alterar o status** da conversa (ex: Em Atendimento / Aguardando)
-4. **Nao e possivel adicionar tags** ao contato via painel lateral
-5. **Nao e possivel atribuir agente** -- o seletor nao tem handler de mudanca
+## Legenda
+- [OK] = Ja implementado e funcional
+- [PARCIAL] = Existe mas incompleto
+- [FALTA] = Nao implementado
 
 ---
 
-## 1. Exibir mensagens de midia no chat
+## MODULO: CHATS (Inbox)
 
-O campo `media_url` ja existe na tabela `messages` e o webhook ja salva URLs de midia. Porem o `ChatPanel.tsx` renderiza apenas `msg.body` como texto.
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Lista de conversas com busca | [OK] | Busca por nome e telefone |
+| Filtros avancados (tags, usuario, canal, status) | [PARCIAL] | Filtros existem na UI mas maioria nao aplica no backend (so canal funciona) |
+| Abas de status (Aberto/Pendente/Fechado) | [OK] | 3 status implementados |
+| Separacao Individual vs Grupo | [OK] | Detecta grupos por JID |
+| Foto de perfil do contato | [OK] | avatar_url implementado |
+| Renderizacao de midia (audio, imagem, video, sticker) | [OK] | MessageBubble implementado |
+| Atribuicao de agente | [OK] | Select com onValueChange |
+| Troca de status no header | [OK] | Dropdown Em Atendimento/Aguardando/Fechar |
+| Tags no contato via painel lateral | [OK] | Popover com checkboxes |
+| Respostas rapidas | [PARCIAL] | Lista fixa hardcoded, nao usa tabela quick_replies do banco |
+| Anotacoes internas (visivel so pra equipe) | [FALTA] | Guru tem campo de anotacoes internas com @mencoes |
+| Agendamento de mensagens | [FALTA] | Guru permite agendar envio para data/hora futura |
+| Gravacao de audio no compositor | [FALTA] | Botao de mic existe mas nao funciona |
+| Envio de arquivos/imagens pelo compositor | [FALTA] | Botao de clipe existe mas nao funciona |
+| Emojis picker | [FALTA] | Botao de smile existe mas nao funciona |
+| Responder mensagem especifica (reply) | [FALTA] | Guru tem reply com citacao |
+| Reacoes a mensagens | [FALTA] | Guru tem reacoes com emoji |
+| Historico de midias/documentos (aba lateral) | [FALTA] | Guru tem aba separada com todas midias da conversa |
+| Motivo de fechamento com dialog | [OK] | Modal com select de motivos |
+| Reabertura automatica ao receber msg | [OK] | incoming-message reabri conversas fechadas |
+| Transferencia entre departamentos | [FALTA] | Guru permite transferir para departamento |
+| Indicador de digitando | [FALTA] | Status de "digitando..." |
+| Leitura de msgs (visto/entregue) | [FALTA] | Checkmarks tipo WhatsApp |
+| Timer de atendimento (SLA) | [FALTA] | Guru mostra tempo em cada status |
 
-**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
-- Na renderizacao de cada mensagem, verificar `msg.media_url`
-- Se existir, identificar o tipo de midia pela extensao/conteudo:
-  - **Imagem** (jpg, png, webp, jpeg): exibir `<img>` clicavel
-  - **Audio** (ogg, mp3, m4a, opus): exibir player `<audio>` nativo
-  - **Video** (mp4, 3gp): exibir `<video>` com controles
-  - **Sticker** (webp sem extensao longa): exibir como imagem menor sem fundo
-  - **Documento**: exibir link para download
-- Se `msg.body` tambem existir (caption), mostrar abaixo da midia
+## MODULO: CONTATOS
 
-## 2. Foto de perfil do contato
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Lista com busca e filtros | [OK] | Busca, filtro por tag e origem |
+| Painel de detalhes lateral | [OK] | ContactDetailPanel |
+| Criar/editar contato | [OK] | Modal de novo contato |
+| Import/Export CSV | [OK] | Importar e exportar implementados |
+| Tags no contato | [OK] | Via painel lateral |
+| Responsavel (agente) | [OK] | Campo responsible_user_id |
+| Campos personalizados (ficha cadastral) | [FALTA] | Guru tem campos custom (texto, email, data, numero) |
+| Historico de atendimentos do contato | [FALTA] | Guru mostra todas conversas anteriores |
+| Funil vinculado ao contato | [FALTA] | Guru mostra em qual etapa do funil o contato esta |
+| Bloqueio de contato | [FALTA] | Guru permite bloquear contato |
+| Merge de contatos duplicados | [FALTA] | Guru tem deteccao e merge |
 
-A Evolution API envia o `profilePictureUrl` no webhook. Precisamos salvar e exibir.
+## MODULO: FUNIS / PIPELINE
 
-**Mudancas:**
-- **Tabela `contacts`**: Adicionar coluna `avatar_url` (text, nullable)
-- **`supabase/functions/incoming-message/index.ts`**: Ao criar ou atualizar contato, buscar `profilePictureUrl` do payload da Evolution e salvar no `avatar_url`
-- **`src/components/inbox/ConversationList.tsx`**: Usar `AvatarImage` com `contact.avatar_url` quando disponivel
-- **`src/components/inbox/ChatPanel.tsx`**: Idem no header e nos baloes de mensagem
-- **`src/components/inbox/ContactProfilePanel.tsx`**: Idem no perfil lateral
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Kanban de negocios | [OK] | FunnelKanban com drag-and-drop |
+| Multiplos funis | [OK] | Tabela funnels + funnel_stages |
+| Criar/editar etapas | [OK] | Customizacao de etapas |
+| Vincular contato ao negocio | [OK] | contact_id no deal |
+| Mover contato entre etapas via chat | [FALTA] | Guru permite mover contato de etapa direto do chat |
+| Automacoes por mudanca de etapa | [FALTA] | Guru envia msg automatica ao mudar etapa |
 
-## 3. Alterar status da conversa (Em Atendimento / Aguardando)
+## MODULO: CHATBOT / DIALOGOS
 
-Atualmente o dropdown so tem "Fechar conversa". Precisa permitir trocar entre `open` (Em Atendimento) e `pending` (Aguardando).
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Fluxos de chatbot | [OK] | Editor de fluxo com nos |
+| Tipos de no (mensagem, condicao, acao) | [OK] | chatbot_nodes |
+| Configuracoes (horario, msg offline) | [OK] | FlowSettings |
+| Instrucoes de IA | [OK] | Campo ai_instructions |
+| Simulador de fluxo | [PARCIAL] | FlowSimulator existe mas funcionalidade limitada |
+| Chatbot com IA generativa (respostas inteligentes) | [FALTA] | Guru usa IA pra responder perguntas nao previstas |
+| Webhook/integracao externa nos nos | [FALTA] | Guru permite chamar APIs externas no fluxo |
 
-**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
-- Expandir o `DropdownMenu` no header para incluir opcoes:
-  - "Em Atendimento" (status: open)
-  - "Aguardando" (status: pending)
-  - "Fechar conversa" (status: closed)
-- Criar funcao `handleChangeStatus(newStatus)` que faz `supabase.from('conversations').update({ status }).eq('id', conversation.id)`
-- Invalidar queries apos mudanca
+## MODULO: CAMPANHAS
 
-## 4. Adicionar tags ao contato
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Criar campanhas | [OK] | CRUD completo |
+| Filtros de publico | [OK] | Campo filters na campanha |
+| Agendamento | [OK] | schedule_at |
+| Janela de envio (horarios) | [OK] | send_window |
+| Pular fins de semana | [OK] | skip_weekends |
+| Progresso (processados/total) | [OK] | Campos processed/total_contacts |
+| Templates de mensagem | [FALTA] | Guru usa templates pre-aprovados do WhatsApp |
+| Preview da mensagem | [FALTA] | Guru mostra preview antes de enviar |
+| Relatorio de entrega da campanha | [FALTA] | Guru mostra taxa de entrega, leitura, resposta |
 
-O botao "+" na secao de tags do `ContactProfilePanel` nao tem funcionalidade.
+## MODULO: RELATORIOS
 
-**Mudancas em `src/components/inbox/ContactProfilePanel.tsx`:**
-- Ao clicar no "+", abrir um popover/dialog com:
-  - Lista de tags disponiveis (da tabela `tags`) com checkboxes
-  - Tags ja aplicadas aparecem marcadas
-- Ao marcar/desmarcar, chamar `updateContact(contact.id, { tags: [...] })` para salvar
-- Permitir remover tags clicando no "X" de cada badge
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Relatorios de chats | [OK] | ReportBuilder com filtros |
+| Relatorios de usuarios | [OK] | UsersReportPanel |
+| Graficos | [OK] | ChartsPanel com recharts |
+| Salvar relatorios | [OK] | saved_reports |
+| NPS / Pesquisa de satisfacao | [OK] | satisfaction_surveys |
+| Relatorio de tempo medio de resposta | [FALTA] | Guru mostra TMA por agente |
+| Relatorio de primeiro tempo de resposta | [FALTA] | Guru mostra tempo da primeira resposta |
+| Exportar relatorio em PDF | [FALTA] | Guru exporta relatorios |
 
-## 5. Atribuir agente a conversa
+## MODULO: CONFIGURACOES
 
-O `Select` de agente no header do `ChatPanel` nao tem `onValueChange`, entao selecionar um agente nao faz nada.
-
-**Mudancas em `src/components/inbox/ChatPanel.tsx`:**
-- Adicionar `onValueChange` ao `Select` que:
-  - Faz `supabase.from('conversations').update({ assigned_user_id: newUserId }).eq('id', conversation.id)`
-  - Invalida queries `['conversation']` e `['conversations']`
-  - Mostra toast de confirmacao
-- Respeitar permissoes: agentes so podem atribuir a si mesmos, supervisores/admins podem atribuir a qualquer membro
+| Funcionalidade | Status | Detalhes |
+|---|---|---|
+| Dados da empresa | [OK] | Nome e plano |
+| Gestao de usuarios (convidar, roles) | [OK] | Admin/Supervisor/Agente |
+| Integracoes (Evolution API) | [OK] | QR Code, status |
+| Departamentos | [OK] | Tabela departments |
+| Horario de atendimento | [PARCIAL] | Existe nos flows do chatbot, nao global |
+| Mensagem de ausencia global | [FALTA] | Guru tem msg de ausencia configuravel |
+| Distribuicao automatica de chats | [FALTA] | Guru distribui chats entre agentes automaticamente (round-robin) |
+| Webhook configuravel | [FALTA] | Guru permite configurar webhooks de saida |
+| Permissoes granulares por modulo | [FALTA] | Guru tem permissoes por funcionalidade, nao so por role |
 
 ---
 
-## Detalhes tecnicos
+## PRIORIDADES DE IMPLEMENTACAO
 
-### Migracao de banco de dados
-```sql
-ALTER TABLE contacts ADD COLUMN IF NOT EXISTS avatar_url text;
-```
+### Prioridade 1 -- Essencial (impacto direto no atendimento diario)
 
-### Arquivos modificados
-| Arquivo | Mudanca |
-|---|---|
-| `src/components/inbox/ChatPanel.tsx` | Renderizar midia, alterar status, atribuir agente |
-| `src/components/inbox/ContactProfilePanel.tsx` | Adicionar/remover tags, exibir avatar |
-| `src/components/inbox/ConversationList.tsx` | Exibir avatar do contato |
-| `supabase/functions/incoming-message/index.ts` | Salvar avatar_url e media_url |
-| Migracao SQL | Adicionar coluna `avatar_url` em `contacts` |
+1. **Envio de arquivos/imagens pelo compositor** -- Botao de clipe funcional para enviar fotos, documentos, PDFs pelo chat
+2. **Gravacao e envio de audio** -- Botao de mic funcional para gravar e enviar audios
+3. **Respostas rapidas do banco** -- Conectar ao tabela quick_replies em vez de lista fixa
+4. **Filtros avancados funcionais** -- Fazer os filtros de nome, telefone, tag, usuario, ordenacao realmente filtrarem as conversas
+5. **Anotacoes internas** -- Campo de nota interna visivel apenas para a equipe, nao enviada ao cliente
 
-### Fluxo de renderizacao de midia
+### Prioridade 2 -- Importante (melhora produtividade)
 
-Para cada mensagem com `media_url`:
-1. Extrair extensao da URL
-2. Mapear para tipo: image, audio, video, sticker, document
-3. Renderizar componente apropriado dentro do balao de mensagem
-4. Manter `msg.body` como legenda abaixo da midia (quando houver)
+6. **Distribuicao automatica de chats** -- Round-robin entre agentes online
+7. **Transferencia entre departamentos** -- Permitir mover conversa para outro departamento
+8. **Historico de atendimentos do contato** -- Ver conversas anteriores no painel lateral
+9. **Campos personalizados no contato** -- Ficha cadastral com campos custom
+10. **Timer de SLA** -- Mostrar tempo de espera e tempo de atendimento
+
+### Prioridade 3 -- Diferencial (funcionalidades avancadas)
+
+11. **Reply (responder mensagem especifica)** -- Citar mensagem anterior
+12. **Emoji picker** -- Seletor de emojis no compositor
+13. **Relatorios de TMA e primeiro tempo de resposta** -- Metricas de performance
+14. **Mover contato de etapa do funil via chat** -- Acao rapida no painel lateral
+15. **Chatbot com IA generativa** -- Respostas inteligentes baseadas em contexto
+
+### Prioridade 4 -- Futuro (nice to have)
+
+16. Agendamento de mensagens
+17. Reacoes a mensagens
+18. Indicador de digitando
+19. Checkmarks de leitura/entrega
+20. Merge de contatos duplicados
+21. Templates de campanha do WhatsApp
+22. Relatorios de campanha (entrega/leitura)
+23. Export PDF de relatorios
+24. Webhooks configuraveis de saida
+25. Permissoes granulares por modulo
+
+---
+
+## Resumo quantitativo
+
+| Categoria | OK | Parcial | Falta |
+|---|---|---|---|
+| Chats/Inbox | 11 | 2 | 13 |
+| Contatos | 6 | 0 | 5 |
+| Funis/Pipeline | 4 | 0 | 2 |
+| Chatbot | 4 | 1 | 2 |
+| Campanhas | 5 | 0 | 3 |
+| Relatorios | 5 | 0 | 3 |
+| Configuracoes | 4 | 1 | 4 |
+| **Total** | **39** | **4** | **32** |
+
+Aproximadamente 52% das funcionalidades da ChatGuru ja estao implementadas. As 32 funcionalidades faltantes estao priorizadas acima por impacto no dia a dia de atendimento.
+
