@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import ConversationList from '@/components/inbox/ConversationList';
 import ChatPanel from '@/components/inbox/ChatPanel';
 import ContactProfilePanel from '@/components/inbox/ContactProfilePanel';
@@ -12,7 +13,9 @@ import { useInboxRealtime } from '@/hooks/useInboxRealtime';
 import type { ConversationFilters } from '@/services/api';
 
 export default function InboxPage() {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const initialId = searchParams.get('id');
+  const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
 
