@@ -64,10 +64,30 @@ export function useInboxRealtime(selectedConversationId: string | null) {
         },
         handleConversationChange,
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'annotations',
+          filter: `company_id=eq.${companyId}`,
+        },
+        (payload: any) => {
+          const ann = payload.new;
+          if (ann?.conversation_id === selectedConversationId) {
+            queryClient.invalidateQueries({
+              queryKey: ['conversation', selectedConversationId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ['annotations', selectedConversationId],
+            });
+          }
+        },
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [companyId, handleMessageChange, handleConversationChange]);
+  }, [companyId, handleMessageChange, handleConversationChange, selectedConversationId, queryClient]);
 }

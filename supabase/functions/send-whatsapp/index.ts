@@ -39,11 +39,11 @@ serve(async (req) => {
       });
     }
 
-    const { conversation_id, body: messageBody } = await req.json();
+    const { conversation_id, body: messageBody, media_url } = await req.json();
 
-    if (!conversation_id || !messageBody) {
+    if (!conversation_id || (!messageBody && !media_url)) {
       return new Response(
-        JSON.stringify({ error: "conversation_id and body are required" }),
+        JSON.stringify({ error: "conversation_id and body or media_url are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -207,26 +207,64 @@ serve(async (req) => {
         const instanceName = config.instance_name as string;
         if (!apiKey || !apiUrl || !instanceName) throw new Error("Evolution config missing api_key, api_url or instance_name");
 
-        // Evolution API v2 send text message
-        const res = await fetch(
-          `${apiUrl}/message/sendText/${instanceName}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: apiKey,
+        if (media_url) {
+          // Detect media type from URL
+          const lower = media_url.toLowerCase();
+          let mediaType = "document";
+          if (/\.(jpg|jpeg|png|gif|bmp|webp)(\?|$)/.test(lower) || lower.includes("image")) mediaType = "image";
+          else if (/\.(ogg|mp3|m4a|opus|aac|wav)(\?|$)/.test(lower) || lower.includes("audio") || lower.includes("ptt")) mediaType = "audio";
+          else if (/\.(mp4|3gp|mov|avi|webm)(\?|$)/.test(lower) || lower.includes("video")) mediaType = "video";
+
+          const endpoint = mediaType === "audio" ? "sendWhatsAppAudio" : "sendMedia";
+          const bodyPayload: Record<string, any> = {
+            number: phone.replace(/\D/g, ""),
+            mediatype: mediaType,
+            media: media_url,
+          };
+          if (messageBody) bodyPayload.caption = messageBody;
+          if (mediaType === "document") {
+            const fileName = media_url.split("/").pop()?.split("?")[0] || "document";
+            bodyPayload.fileName = fileName;
+          }
+
+          const res = await fetch(
+            `${apiUrl}/message/${endpoint}/${instanceName}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: apiKey,
+              },
+              body: JSON.stringify(bodyPayload),
             },
-            body: JSON.stringify({
-              number: phone.replace(/\D/g, ""),
-              text: messageBody,
-            }),
-          },
-        );
-        if (!res.ok) {
-          const err = await res.text();
-          throw new Error(`Evolution API error: ${err}`);
+          );
+          if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Evolution API media error: ${err}`);
+          }
+          delivered = true;
+        } else {
+          // Evolution API v2 send text message
+          const res = await fetch(
+            `${apiUrl}/message/sendText/${instanceName}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: apiKey,
+              },
+              body: JSON.stringify({
+                number: phone.replace(/\D/g, ""),
+                text: messageBody,
+              }),
+            },
+          );
+          if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Evolution API error: ${err}`);
+          }
+          delivered = true;
         }
-        delivered = true;
       } else {
         externalError = `Unknown provider: ${provider}`;
       }

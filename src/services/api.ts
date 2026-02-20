@@ -68,6 +68,11 @@ export interface ConversationFilters {
   status?: Conversation['status'];
   channel?: Conversation['channel'];
   search?: string;
+  name?: string;
+  phone?: string;
+  tag?: string;
+  assigned_user_id?: string;
+  sort?: 'recent' | 'oldest' | 'name';
   page?: number;
   limit?: number;
 }
@@ -103,12 +108,24 @@ export async function listConversations(
   if (filters?.channel) {
     query = query.eq('channel', filters.channel);
   }
+  if (filters?.assigned_user_id) {
+    query = query.eq('assigned_user_id', filters.assigned_user_id);
+  }
+
+  // Sort order
+  if (filters?.sort === 'oldest') {
+    query = query.order('last_message_at', { ascending: true });
+  } else if (filters?.sort === 'name') {
+    // Will sort client-side after fetch since it's a joined column
+  }
+  // default is already 'recent' (desc) set above
 
   const { data, error } = await query;
   if (error) handleError(error);
 
   let results = (data ?? []) as ConversationWithRelations[];
 
+  // Client-side filters for joined fields
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     results = results.filter(
@@ -116,6 +133,22 @@ export async function listConversations(
         c.contact.name.toLowerCase().includes(q) ||
         (c.contact.phone ?? '').includes(q),
     );
+  }
+  if (filters?.name) {
+    const q = filters.name.toLowerCase();
+    results = results.filter((c) => c.contact.name.toLowerCase().includes(q));
+  }
+  if (filters?.phone) {
+    results = results.filter((c) => (c.contact.phone ?? '').includes(filters.phone!));
+  }
+  if (filters?.tag) {
+    results = results.filter((c) => {
+      const tags = ((c.contact as any).tags as string[]) || [];
+      return tags.includes(filters.tag!);
+    });
+  }
+  if (filters?.sort === 'name') {
+    results.sort((a, b) => a.contact.name.localeCompare(b.contact.name));
   }
 
   return results;
@@ -396,12 +429,44 @@ export async function closeConversation(
 // ── Group detection helper ────────────────────────────
 export function isGroupChat(phone: string | null | undefined): boolean {
   if (!phone) return false;
-  // WhatsApp group JIDs end with @g.us or contain @g.us
   if (phone.includes('@g.us')) return true;
-  // Also check for group JID prefix pattern (120363...)
   const digits = phone.replace(/\D/g, '');
   if (digits.startsWith('120363')) return true;
-  // Check if the number is too long to be a regular phone (groups have 18+ digit IDs)
   if (digits.length >= 18) return true;
   return false;
+}
+
+// ── Annotations ───────────────────────────────────────
+export interface Annotation {
+  id: string;
+  conversation_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+  author?: { name: string; avatar_url: string | null } | null;
+}
+
+export async function listAnnotations(conversationId: string): Promise<Annotation[]> {
+  const { data, error } = await (supabase as any)
+    .from('annotations')
+    .select('*, author:profiles!annotations_author_id_fkey(name, avatar_url)')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+
+  if (error) handleError(error);
+  return (data ?? []) as Annotation[];
+}
+
+export async function createAnnotation(conversationId: string, body: string): Promise<Annotation> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+
+  const { data, error } = await (supabase as any)
+    .from('annotations')
+    .insert({ conversation_id: conversationId, author_id: user.id, body })
+    .select('*, author:profiles!annotations_author_id_fkey(name, avatar_url)')
+    .single();
+
+  if (error) handleError(error);
+  return data as Annotation;
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageSquare,
   Send,
@@ -7,9 +7,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Smile,
-  Mic,
   ChevronDown,
   Users,
+  Lock,
+  StickyNote,
+  X,
+  Loader2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -22,13 +25,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -39,35 +35,33 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
 import MessageBubble from '@/components/inbox/MessageBubble';
+import AudioRecorder from '@/components/inbox/AudioRecorder';
 import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
-import { isGroupChat } from '@/services/api';
+import { useQuickReplies } from '@/hooks/useQuickReplies';
+import { isGroupChat, createAnnotation } from '@/services/api';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { useQueryClient } from '@tanstack/react-query';
-import type { ConversationDetail } from '@/services/api';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import type { ConversationDetail, Annotation } from '@/services/api';
+import { listAnnotations } from '@/services/api';
 
-const quickReplies = [
-  'Olá! Como posso ajudar você hoje?',
-  'Agradecemos o seu contato! Vou verificar e retorno em instantes.',
-  'Pode me informar o número do seu pedido, por favor?',
-  'Estou transferindo você para o setor responsável.',
-  'Seu problema foi resolvido? Posso ajudar em mais alguma coisa?',
-  'Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.',
-  'Obrigado pela preferência! Tenha um ótimo dia! 😊',
-];
-
-function groupMessagesByDate(messages: any[]) {
+function groupMessagesByDate(items: any[]) {
   const groups: { date: string; messages: any[] }[] = [];
   let current: { date: string; messages: any[] } | null = null;
 
-  for (const msg of messages) {
+  for (const msg of items) {
     const d = new Date(msg.created_at);
     const label = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     if (!current || current.date !== label) {
@@ -89,11 +83,16 @@ interface Props {
 export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen }: Props) {
   const [input, setInput] = useState('');
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [quickReplyFilter, setQuickReplyFilter] = useState('');
+  const [isAnnotationMode, setIsAnnotationMode] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sendMessage = useSendMessage();
   const { data: teamMembers } = useTeamMembers();
+  const { data: quickReplies = [] } = useQuickReplies();
   const permissions = usePermissions();
-  const { user } = useAuth();
+  const { user, companyId } = useAuth();
   const queryClient = useQueryClient();
   const [closing, setClosing] = useState(false);
 
@@ -104,23 +103,186 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     ? (teamMembers ?? [])
     : (teamMembers ?? []).filter((m) => m.id === user?.id);
 
+  // Fetch annotations for current conversation
+  const { data: annotations = [] } = useQuery({
+    queryKey: ['annotations', conversation?.id],
+    enabled: !!conversation?.id,
+    queryFn: () => listAnnotations(conversation!.id),
+  });
+
+  // Merge messages and annotations by created_at
   const messages = conversation?.messages ?? [];
-  const grouped = groupMessagesByDate(messages);
+  const mergedItems = [...messages.map((m) => ({ ...m, _type: 'message' as const })), ...annotations.map((a) => ({ ...a, _type: 'annotation' as const }))].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+  const grouped = groupMessagesByDate(mergedItems);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+  }, [mergedItems.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim() || !conversation) return;
-    sendMessage.mutate({ conversationId: conversation.id, body: input.trim() });
-    setInput('');
+    if (isAnnotationMode) {
+      try {
+        await createAnnotation(conversation.id, input.trim());
+        setInput('');
+        queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
+      } catch (err: any) {
+        toast.error(err.message ?? 'Erro ao salvar anotação');
+      }
+    } else {
+      sendMessage.mutate({ conversationId: conversation.id, body: input.trim() });
+      setInput('');
+    }
   };
 
   const handleQuickReply = (text: string) => {
     setInput(text);
     setQuickReplyOpen(false);
+    setQuickReplyFilter('');
   };
+
+  // Slash command detection
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    if (value.startsWith('/') && value.length > 1) {
+      setQuickReplyFilter(value.slice(1).toLowerCase());
+      setQuickReplyOpen(true);
+    } else if (quickReplyOpen && !value.startsWith('/')) {
+      setQuickReplyOpen(false);
+      setQuickReplyFilter('');
+    }
+  };
+
+  const filteredQuickReplies = quickReplyFilter
+    ? quickReplies.filter(
+        (qr) =>
+          qr.shortcut.toLowerCase().includes(quickReplyFilter) ||
+          qr.message.toLowerCase().includes(quickReplyFilter),
+      )
+    : quickReplies;
+
+  // File upload
+  const handleFileSelect = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0 || !conversation || !companyId) return;
+    const file = files[0];
+    const maxSize = 20 * 1024 * 1024; // 20MB
+    if (file.size > maxSize) {
+      toast.error('Arquivo muito grande. Máximo: 20MB');
+      return;
+    }
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() ?? 'bin';
+      const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('chat-media')
+        .upload(path, file);
+      if (uploadErr) throw uploadErr;
+
+      const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
+      const mediaUrl = urlData.publicUrl;
+
+      // Send as message with media_url
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Não autenticado');
+      const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', authUser.id).maybeSingle();
+      if (!profile) throw new Error('Perfil não encontrado');
+
+      const body = file.type.startsWith('image/') ? '📷 Imagem' : file.type.startsWith('audio/') ? '🎵 Áudio' : `📎 ${file.name}`;
+
+      await supabase.from('messages').insert({
+        conversation_id: conversation.id,
+        company_id: profile.company_id,
+        sender_type: 'agent',
+        sender_id: authUser.id,
+        body,
+        media_url: mediaUrl,
+      });
+
+      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
+
+      // Send via WhatsApp (best-effort)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl }),
+          }).catch(console.error);
+        }
+      } catch {}
+
+      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      toast.success('Arquivo enviado!');
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao enviar arquivo');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [conversation, companyId, queryClient]);
+
+  // Audio send
+  const handleAudioSend = useCallback(async (blob: Blob) => {
+    if (!conversation || !companyId) return;
+    setUploading(true);
+    try {
+      const path = `${companyId}/${conversation.id}/${Date.now()}.ogg`;
+      const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, blob, { contentType: 'audio/ogg' });
+      if (uploadErr) throw uploadErr;
+
+      const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
+      const mediaUrl = urlData.publicUrl;
+
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Não autenticado');
+      const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', authUser.id).maybeSingle();
+      if (!profile) throw new Error('Perfil não encontrado');
+
+      await supabase.from('messages').insert({
+        conversation_id: conversation.id,
+        company_id: profile.company_id,
+        sender_type: 'agent',
+        sender_id: authUser.id,
+        body: '🎤 Áudio',
+        media_url: mediaUrl,
+      });
+
+      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
+
+      // WhatsApp send (best-effort)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl }),
+          }).catch(console.error);
+        }
+      } catch {}
+
+      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      toast.success('Áudio enviado!');
+    } catch (err: any) {
+      toast.error(err.message ?? 'Erro ao enviar áudio');
+    } finally {
+      setUploading(false);
+    }
+  }, [conversation, companyId, queryClient]);
 
   const handleChangeStatus = async (newStatus: 'open' | 'pending' | 'closed') => {
     if (!conversation) return;
@@ -169,6 +331,12 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       toast.error(err.message ?? 'Erro ao atribuir agente');
     }
   };
+
+  // Drag and drop
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    handleFileSelect(e.dataTransfer.files);
+  }, [handleFileSelect]);
 
   if (loading) {
     return (
@@ -300,12 +468,14 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       {/* Messages area */}
       <div
         className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
         style={{
           background: 'hsl(var(--secondary) / 0.5)',
           backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
         }}
       >
-        {messages.length === 0 ? (
+        {mergedItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <MessageSquare size={32} className="text-muted-foreground/40 mb-2" />
             <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
@@ -319,82 +489,167 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                   {group.date}
                 </span>
               </div>
-              {group.messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  msg={msg}
-                  isOutgoing={msg.sender_type === 'agent'}
-                  contactName={conversation.contact.name}
-                  contactAvatarUrl={contactAvatarUrl}
-                />
-              ))}
+              {group.messages.map((item) =>
+                item._type === 'annotation' ? (
+                  <div key={item.id} className="flex justify-center my-2">
+                    <div className="max-w-[80%] rounded-xl px-3.5 py-2 bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 shadow-sm">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Lock size={10} className="text-amber-600 dark:text-amber-400" />
+                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                          {item.author?.name ?? 'Agente'} · Anotação interna
+                        </span>
+                      </div>
+                      <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{item.body}</p>
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 text-right mt-0.5">
+                        {new Date(item.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <MessageBubble
+                    key={item.id}
+                    msg={item}
+                    isOutgoing={item.sender_type === 'agent'}
+                    contactName={conversation.contact.name}
+                    contactAvatarUrl={contactAvatarUrl}
+                  />
+                ),
+              )}
             </div>
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Upload indicator */}
+      {uploading && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-primary/10 border-t border-border">
+          <Loader2 size={14} className="animate-spin text-primary" />
+          <span className="text-xs text-primary font-medium">Enviando arquivo...</span>
+        </div>
+      )}
+
       {/* Composer */}
-      <div className="border-t border-border bg-card p-2.5">
+      <div className={`border-t border-border bg-card p-2.5 ${isAnnotationMode ? 'bg-amber-50 dark:bg-amber-950/30 border-t-amber-300 dark:border-t-amber-700' : ''}`}>
+        {/* Annotation mode indicator */}
+        {isAnnotationMode && (
+          <div className="flex items-center gap-1.5 mb-1.5 px-1">
+            <Lock size={12} className="text-amber-600" />
+            <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Modo anotação interna — não será enviada ao contato</span>
+            <button onClick={() => setIsAnnotationMode(false)} className="ml-auto">
+              <X size={12} className="text-amber-600 hover:text-amber-800" />
+            </button>
+          </div>
+        )}
+
+        {/* Quick reply popover (slash command) */}
+        {quickReplyOpen && filteredQuickReplies.length > 0 && (
+          <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
+            {filteredQuickReplies.map((qr) => (
+              <button
+                key={qr.id}
+                onClick={() => handleQuickReply(qr.message)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center gap-2 border-b border-border/50 last:border-0"
+              >
+                <span className="text-xs font-mono text-primary font-semibold">/{qr.shortcut}</span>
+                <span className="text-muted-foreground truncate">{qr.message}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-end gap-1.5">
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+              className="hidden"
+              onChange={(e) => handleFileSelect(e.target.files)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
               <Paperclip size={17} />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <Smile size={17} />
-            </Button>
-            <Dialog open={quickReplyOpen} onOpenChange={setQuickReplyOpen}>
-              <DialogTrigger asChild>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={isAnnotationMode ? 'default' : 'ghost'}
+                  size="icon"
+                  className={`h-8 w-8 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                  onClick={() => setIsAnnotationMode(!isAnnotationMode)}
+                >
+                  <StickyNote size={17} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p className="text-xs">{isAnnotationMode ? 'Voltar para mensagem' : 'Anotação interna'}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Popover open={quickReplyOpen && !input.startsWith('/')} onOpenChange={(open) => { setQuickReplyOpen(open); if (!open) setQuickReplyFilter(''); }}>
+              <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                   <Zap size={17} />
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Respostas Rápidas</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-1.5 max-h-80 overflow-y-auto">
-                  {quickReplies.map((qr, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleQuickReply(qr)}
-                      className="w-full text-left rounded-lg px-3 py-2.5 text-sm hover:bg-accent transition-colors border border-border"
-                    >
-                      {qr}
-                    </button>
-                  ))}
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="start">
+                <div className="p-2 border-b border-border">
+                  <p className="text-xs font-semibold text-foreground">Respostas Rápidas</p>
+                  <p className="text-[10px] text-muted-foreground">Ou digite / no campo de mensagem</p>
                 </div>
-              </DialogContent>
-            </Dialog>
+                <div className="max-h-60 overflow-y-auto">
+                  {quickReplies.length === 0 ? (
+                    <p className="p-3 text-xs text-muted-foreground text-center">
+                      Nenhuma resposta rápida cadastrada.<br />Crie na página Respostas Rápidas.
+                    </p>
+                  ) : (
+                    quickReplies.map((qr) => (
+                      <button
+                        key={qr.id}
+                        onClick={() => handleQuickReply(qr.message)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors border-b border-border/50 last:border-0"
+                      >
+                        <span className="text-xs font-mono text-primary font-semibold">/{qr.shortcut}</span>
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{qr.message}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <Textarea
-            placeholder="Digite uma mensagem..."
+            placeholder={isAnnotationMode ? 'Escreva uma anotação interna...' : 'Digite uma mensagem...'}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-            className="flex-1 min-h-[38px] max-h-[120px] resize-none bg-secondary border-0 text-sm py-2 leading-relaxed"
+            className={`flex-1 min-h-[38px] max-h-[120px] resize-none border-0 text-sm py-2 leading-relaxed ${isAnnotationMode ? 'bg-amber-100/50 dark:bg-amber-900/20' : 'bg-secondary'}`}
             rows={1}
           />
 
           <div className="flex items-center gap-0.5">
-            {!input.trim() ? (
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                <Mic size={17} />
-              </Button>
+            {!input.trim() && !isAnnotationMode ? (
+              <AudioRecorder onSend={handleAudioSend} />
             ) : null}
             <Button
               size="icon"
               onClick={handleSend}
               disabled={!input.trim() || sendMessage.isPending}
-              className="h-8 w-8 rounded-full shrink-0"
+              className={`h-8 w-8 rounded-full shrink-0 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600' : ''}`}
             >
               <Send size={15} />
             </Button>
           </div>
         </div>
       </div>
+
+      {/* Hidden file input */}
     </div>
   );
 }
