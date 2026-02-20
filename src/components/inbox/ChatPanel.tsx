@@ -208,11 +208,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // Send via WhatsApp (best-effort)
+      // Send via WhatsApp
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${session.access_token}`,
@@ -220,9 +220,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             },
             body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl }),
-          }).catch(console.error);
+          });
+          const whatsappData = await whatsappRes.json().catch(() => ({}));
+          if (!whatsappData.delivered) {
+            console.warn('WhatsApp media not delivered:', whatsappData);
+            toast.warning('Arquivo salvo, mas não foi possível encaminhar via WhatsApp: ' + (whatsappData.error || whatsappData.reason || 'integração não encontrada'));
+          }
         }
-      } catch {}
+      } catch (e) {
+        console.error('WhatsApp media send error:', e);
+      }
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -263,11 +270,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // WhatsApp send (best-effort)
+      // WhatsApp send
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
-          fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${session.access_token}`,
@@ -275,9 +282,19 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             },
             body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl }),
-          }).catch(console.error);
+          });
+          const whatsappData = await whatsappRes.json().catch(() => ({}));
+          if (!whatsappData.delivered) {
+            console.warn('WhatsApp audio not delivered:', whatsappData);
+            toast.warning('Áudio salvo, mas não foi possível encaminhar via WhatsApp: ' + (whatsappData.error || whatsappData.reason || 'integração não encontrada'));
+          }
+        } else {
+          toast.warning('Áudio salvo, mas sessão expirada para envio via WhatsApp');
         }
-      } catch {}
+      } catch (e) {
+        console.error('WhatsApp audio send error:', e);
+        toast.warning('Áudio salvo, mas falha ao encaminhar via WhatsApp');
+      }
 
       queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
