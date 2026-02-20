@@ -212,23 +212,28 @@ serve(async (req) => {
           const lower = media_url.toLowerCase();
           let mediaType = "document";
           if (/\.(jpg|jpeg|png|gif|bmp|webp)(\?|$)/.test(lower) || lower.includes("image")) mediaType = "image";
-          else if (/\.(ogg|mp3|m4a|opus|aac|wav)(\?|$)/.test(lower) || lower.includes("audio") || lower.includes("ptt")) mediaType = "audio";
-          else if (/\.(mp4|3gp|mov|avi|webm)(\?|$)/.test(lower) || lower.includes("video")) mediaType = "video";
+          else if (/\.(ogg|mp3|m4a|opus|aac|wav|webm)(\?|$)/.test(lower) || lower.includes("audio") || lower.includes("ptt")) mediaType = "audio";
+          else if (/\.(mp4|3gp|mov|avi)(\?|$)/.test(lower) || lower.includes("video")) mediaType = "video";
 
-          const endpoint = mediaType === "audio" ? "sendWhatsAppAudio" : "sendMedia";
+          // Use sendMedia for all media types (more reliable than sendWhatsAppAudio)
           const bodyPayload: Record<string, any> = {
             number: phone.replace(/\D/g, ""),
             mediatype: mediaType,
             media: media_url,
           };
-          if (messageBody) bodyPayload.caption = messageBody;
+          if (messageBody && mediaType !== "audio") bodyPayload.caption = messageBody;
           if (mediaType === "document") {
             const fileName = media_url.split("/").pop()?.split("?")[0] || "document";
             bodyPayload.fileName = fileName;
           }
+          if (mediaType === "audio") {
+            // Evolution API v2 expects audio via sendWhatsAppAudio with specific format
+            // Use sendMedia instead which is more flexible with formats
+            bodyPayload.mediatype = "audio";
+          }
 
           const res = await fetch(
-            `${apiUrl}/message/${endpoint}/${instanceName}`,
+            `${apiUrl}/message/sendMedia/${instanceName}`,
             {
               method: "POST",
               headers: {
