@@ -1,6 +1,19 @@
 import { useState, useRef, useCallback } from 'react';
 import { Mic, Square, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+
+// Pick the best supported mimeType for the current browser
+function getSupportedMimeType(): string {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+    'audio/mp4',
+  ];
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+}
 
 interface Props {
   onSend: (blob: Blob) => void;
@@ -18,7 +31,12 @@ export default function AudioRecorder({ onSend }: Props) {
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      const mimeType = getSupportedMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      const usedMimeType = recorder.mimeType || mimeType;
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -26,7 +44,8 @@ export default function AudioRecorder({ onSend }: Props) {
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/ogg' });
+        // Use the same mimeType the recorder actually produced
+        const blob = new Blob(chunksRef.current, { type: usedMimeType });
         blobRef.current = blob;
         setAudioUrl(URL.createObjectURL(blob));
         setState('preview');
@@ -38,8 +57,12 @@ export default function AudioRecorder({ onSend }: Props) {
       setState('recording');
       setDuration(0);
       timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
-    } catch {
-      // Permission denied or no mic
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        toast.error('Permissão de microfone negada. Habilite nas configurações do navegador.');
+      } else {
+        toast.error('Não foi possível acessar o microfone.');
+      }
     }
   }, []);
 
