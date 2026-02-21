@@ -530,6 +530,87 @@ serve(async (req) => {
       conversation = newConv;
     }
 
+    // ── Download media from Evolution and store in our bucket ───
+    if (evolution.isEvolution && media_url && media_type !== "text") {
+      try {
+        const { data: evoInteg2 } = await supabase
+          .from("integrations")
+          .select("config")
+          .eq("company_id", company_id)
+          .eq("provider", "evolution")
+          .limit(1)
+          .maybeSingle();
+
+        if (evoInteg2) {
+          const ec = evoInteg2.config as any;
+          let evoUrl = (ec?.api_url || "").trim().replace(/\/+$/, "");
+          if (evoUrl && !/^https?:\/\//i.test(evoUrl)) evoUrl = `https://${evoUrl}`;
+          evoUrl = evoUrl.replace(/\/(manager|api)\/?$/i, "");
+          const evoKey = ec?.api_key || "";
+
+          if (evoUrl && evoKey) {
+            // Use getBase64FromMediaMessage to get decoded media
+            const mediaResp = await fetch(
+              `${evoUrl}/chat/getBase64FromMediaMessage/${evolution.instance_name}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoKey },
+                body: JSON.stringify({ message: { key: { id: external_message_id } }, convertToMp4: false }),
+              },
+            );
+
+            if (mediaResp.ok) {
+              const mediaData = await mediaResp.json();
+              const base64 = mediaData.base64 || mediaData.data;
+              const mimetype = mediaData.mimetype || mediaData.mediaType || "application/octet-stream";
+
+              if (base64) {
+                // Determine file extension
+                const extMap: Record<string, string> = {
+                  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a",
+                  "audio/aac": "aac", "audio/opus": "opus",
+                  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+                  "video/mp4": "mp4", "video/3gpp": "3gp",
+                  "application/pdf": "pdf",
+                };
+                const ext = extMap[mimetype] || mimetype.split("/")[1] || "bin";
+                const fileName = `${company_id}/${conversation.id}/${external_message_id}.${ext}`;
+
+                // Decode base64 and upload
+                const binaryStr = atob(base64);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) {
+                  bytes[i] = binaryStr.charCodeAt(i);
+                }
+
+                const { data: uploadData, error: uploadErr } = await supabase.storage
+                  .from("chat-media")
+                  .upload(fileName, bytes.buffer, {
+                    contentType: mimetype,
+                    upsert: true,
+                  });
+
+                if (!uploadErr && uploadData) {
+                  const { data: publicUrl } = supabase.storage
+                    .from("chat-media")
+                    .getPublicUrl(fileName);
+                  media_url = publicUrl.publicUrl;
+                  console.log(`Media stored: ${media_url}`);
+                } else {
+                  console.warn("Upload failed:", uploadErr?.message);
+                }
+              }
+            } else {
+              console.warn(`getBase64FromMediaMessage failed: ${mediaResp.status}`);
+            }
+          }
+        }
+      } catch (mediaErr: any) {
+        console.warn("Media download/upload failed:", mediaErr.message);
+        // Continue with original URL as fallback
+      }
+    }
+
     // ── Insert message (with sender_name for groups) ───
     const { error: msgErr } = await supabase.from("messages").insert({
       company_id,

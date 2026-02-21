@@ -6,6 +6,7 @@ interface Message {
   id?: string;
   body?: string | null;
   media_url?: string | null;
+  type?: string | null;
   created_at: string;
   delivery_status?: string | null;
   processed_by_bot?: boolean | null;
@@ -39,8 +40,11 @@ function getMediaType(url: string): 'image' | 'audio' | 'video' | 'sticker' | 'd
   return 'document';
 }
 
-function MediaContent({ url }: { url: string }) {
-  const type = getMediaType(url);
+function MediaContent({ url, dbType }: { url: string; dbType?: string | null }) {
+  // Prefer DB type field over URL-based detection (WhatsApp CDN URLs are encrypted/opaque)
+  const type = dbType && ['audio', 'image', 'video', 'sticker', 'document'].includes(dbType)
+    ? dbType as ReturnType<typeof getMediaType>
+    : getMediaType(url);
 
   switch (type) {
     case 'image':
@@ -165,7 +169,7 @@ export default function MessageBubble({ msg, isOutgoing, contactName, contactAva
             </div>
           )}
 
-          {hasMedia && msg.media_url && <MediaContent url={msg.media_url} />}
+          {hasMedia && msg.media_url && <MediaContent url={msg.media_url} dbType={msg.type} />}
 
           {hasBody && (
             <p className={`text-sm leading-relaxed whitespace-pre-wrap ${hasMedia ? 'mt-1.5' : ''}`}>

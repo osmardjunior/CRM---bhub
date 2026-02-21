@@ -25,6 +25,7 @@ export function useInboxRealtime(selectedConversationId: string | null) {
 
       // Refresh conversation list (preview text, ordering)
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
       // Refresh unread counts
       queryClient.invalidateQueries({ queryKey: ['unread-counts'] });
 
@@ -41,6 +42,7 @@ export function useInboxRealtime(selectedConversationId: string | null) {
   const handleConversationChange = useCallback(
     () => {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
     },
     [queryClient],
   );
