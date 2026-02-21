@@ -1,81 +1,106 @@
 
 
-# Melhorias Visuais: Chats Individuais vs Grupos
+# Correções de Filtros do Inbox + Agendamento de Mensagens
 
 ## Problemas Identificados
 
-1. **Mensagens em grupo mostram apenas um remetente** -- O `MessageBubble` exibe o nome do contato da conversa para todas as mensagens recebidas, sem diferenciar os participantes do grupo. Todas as mensagens parecem ser da mesma pessoa.
+1. **Chats Overview mostra conversas fechadas e em atendimento misturadas** -- A pagina `/chats` (ChatsOverview) nao passa filtro de status inicial, entao carrega todas as conversas sem distinção.
 
-2. **Avatares genericos** -- Na lista de conversas e no header do chat, grupos mostram apenas um icone `Users` generico e individuais mostram a primeira letra do nome. Nao ha diferenciacao visual profissional.
+2. **Filtro "Não Lidas" redundante** -- Existe um botão "Não Lidas" fixo acima da lista que deve ser removido, pois essa opção já existe dentro do painel de filtros avançados.
 
-3. **Formatacao geral precisa de polimento** -- Espacamentos, tamanhos e hierarquia visual precisam de refinamento para um look profissional.
+3. **Ícones de filtro rápido desnecessários** -- Os ícones de E-mail (Mail), Monitor (Webchat) e Wi-Fi (WhatsApp) devem ser removidos. Manter apenas Estrela (Favoritos) e Relógio (Agendados).
 
----
+4. **Filtros avançados não funcionam** -- O problema principal: os filtros `name`, `phone` e `tag` são aplicados no lado do cliente DEPOIS da paginação. Se a query do banco traz 20 resultados e nenhum coincide, a lista fica vazia. Além disso, o status local do filtro avançado não é passado corretamente ao `onFilterChange`.
 
-## O que sera feito
-
-### 1. MessageBubble -- Suporte a multiplos remetentes em grupo
-
-- Detectar se a conversa e grupo (via `isGroupChat`)
-- Passar flag `isGroup` para o `MessageBubble`
-- Em grupos, mostrar nome do remetente com cor unica por participante (hash do nome para cor)
-- Mostrar mini-avatar ao lado de cada mensagem em grupo com inicial do remetente
-- Agrupar mensagens consecutivas do mesmo remetente (sem repetir nome/avatar)
-
-### 2. Avatares profissionais na lista de conversas
-
-- **Grupos**: icone estilizado com gradiente e icone de grupo (silhuetas sobrepostas), borda diferenciada
-- **Individuais**: avatar com gradiente baseado no nome, inicial centralizada com fonte bold
-- Se `avatar_url` existir no contato, usar a imagem real
-- Adicionar indicador visual de status online (bolinha verde) quando aplicavel
-- Badge de contagem de participantes nos grupos
-
-### 3. Header do ChatPanel melhorado
-
-- Avatar maior e mais destacado no header
-- Para grupos: mostrar contagem de membros abaixo do nome
-- Para individuais: mostrar telefone formatado e status
-- Tipografia mais clara com hierarquia nome > subtitulo
-
-### 4. Formatacao geral refinada
-
-- Bolhas de mensagem com sombras mais suaves
-- Espacamento entre mensagens ajustado
-- Timestamps mais discretos
-- Transicoes suaves ao hover
-- Cores diferenciadas para remetentes em grupo
+5. **Sem funcionalidade de agendamento de mensagens** -- Não existe no sistema a capacidade de agendar uma mensagem para ser enviada num horário futuro.
 
 ---
 
-## Detalhes Tecnicos
+## Plano de Implementação
 
-### Arquivos modificados
+### Tarefa 1: Corrigir ChatsOverview para filtrar apenas conversas abertas
 
-1. **`src/components/inbox/MessageBubble.tsx`**
-   - Adicionar prop `isGroup: boolean`
-   - Gerar cor unica por remetente usando hash do `sender_name`
-   - Mostrar avatar inline para cada remetente diferente em grupo
-   - Agrupar mensagens consecutivas do mesmo remetente
+- Na pagina `ChatsOverview.tsx`, inicializar o estado `filters` com `{ status: 'open' }` para que a lista à esquerda mostre apenas conversas abertas por padrão (assim como faz o Inbox).
 
-2. **`src/components/inbox/ConversationList.tsx`**
-   - Criar componente `ConversationAvatar` com visual profissional
-   - Grupos: icone com fundo gradiente, badge de membros
-   - Individuais: avatar com inicial estilizada ou foto real
-   - Melhorar layout do item da lista (espacamento, tipografia)
+### Tarefa 2: Remover filtro rápido "Não Lidas" e ícones desnecessários
 
-3. **`src/components/inbox/ChatPanel.tsx`**
-   - Passar `isGroup` flag para cada `MessageBubble`
-   - Melhorar header com avatar maior e info contextual
-   - Para grupos: exibir "X participantes" como subtitulo
+No arquivo `ConversationList.tsx`:
+- Remover o estado `onlyUnread` e o bloco de quick filter "Não Lidas" (linhas 354-365).
+- Remover a lógica `if (onlyUnread ...)` do `useMemo` de filtragem.
+- No array `channelIcons`, remover os itens `email` (Mail), `webchat` (Monitor) e `whatsapp` (Wifi).
+- Manter apenas `star` (Star/Favoritos) e `pending` (Clock/Agendados).
+- Remover imports não utilizados (Mail, Monitor, Wifi).
 
-4. **`src/components/inbox/ContactProfilePanel.tsx`**
-   - Avatar no perfil consistente com o novo design
+### Tarefa 3: Corrigir filtros avançados
 
-### Funcao de cor por remetente (hash)
+No arquivo `ConversationList.tsx`:
+- Na função `handleApplyFilters`, incluir o `localStatus` no objeto `newFilters` quando selecionado (atualmente é ignorado).
+- Na função `handleClearFilters`, resetar o status para o padrão.
 
-Sera criada uma funcao `getColorForName(name: string)` que retorna uma cor HSL consistente para cada nome, garantindo que cada participante de grupo tenha uma cor unica e reconhecivel.
+No arquivo `src/services/api.ts` (função `listConversations`):
+- Mover os filtros `name` e `phone` para serem aplicados via query do banco (usando `.ilike` ou `.like`) ao invés de filtrar no cliente após a paginação. Isso resolve o problema de aplicar filtros em apenas 20 resultados por vez.
+- Para `tag`, como é um campo JSON/array no contato, manter client-side mas aumentar o limite temporário da query quando filtros client-side estão ativos.
 
-### Sem mudancas no banco de dados
+### Tarefa 4: Agendamento de mensagens
 
-Todas as alteracoes sao puramente visuais/frontend. Os dados de `sender_name`, `sender_id`, e `avatar_url` ja existem nas mensagens e contatos.
+**Banco de Dados** -- Criar tabela `scheduled_messages`:
+- `id` (uuid, PK)
+- `company_id` (uuid, FK)
+- `conversation_id` (uuid, FK)
+- `sender_id` (uuid, FK para profiles)
+- `body` (text)
+- `media_url` (text, nullable)
+- `scheduled_at` (timestamptz) -- quando enviar
+- `status` (text: 'pending', 'sent', 'cancelled', default 'pending')
+- `created_at` (timestamptz)
+- RLS: usuários da mesma empresa podem ler/criar/atualizar
+
+**Frontend** -- No `ChatPanel.tsx`:
+- Adicionar um botão de relógio ao lado do botão de enviar.
+- Ao clicar, abrir um popover com seletor de data/hora.
+- Ao confirmar, inserir na tabela `scheduled_messages` ao invés de enviar imediatamente.
+- Mostrar toast de confirmação com o horário agendado.
+
+**Backend** -- Criar edge function `process-scheduled-messages`:
+- Consultar mensagens com `status = 'pending'` e `scheduled_at <= now()`.
+- Para cada uma, inserir na tabela `messages` e chamar `send-whatsapp`.
+- Atualizar status para `sent`.
+- Configurar um cron job (pg_cron) para executar a cada minuto.
+
+### Tarefa 5: Corrigir erro de build em Arquivos.tsx
+
+- Corrigir o erro de TypeScript em `src/pages/Arquivos.tsx` linha 54 adicionando `as unknown as StorageFile[]` para a conversão de tipo.
+
+---
+
+## Detalhes Técnicos
+
+### Estrutura da tabela scheduled_messages
+
+```text
+scheduled_messages
++------------------+------------------+
+| column           | type             |
++------------------+------------------+
+| id               | uuid (PK)        |
+| company_id       | uuid (FK)        |
+| conversation_id  | uuid (FK)        |
+| sender_id        | uuid (FK)        |
+| body             | text             |
+| media_url        | text (nullable)  |
+| scheduled_at     | timestamptz      |
+| status           | text (default    |
+|                  | 'pending')       |
+| created_at       | timestamptz      |
++------------------+------------------+
+```
+
+### Arquivos que serao modificados
+- `src/components/inbox/ConversationList.tsx` -- remover filtros redundantes, corrigir aplicação de filtros
+- `src/services/api.ts` -- mover filtros para query do banco
+- `src/pages/ChatsOverview.tsx` -- filtro inicial de status
+- `src/components/inbox/ChatPanel.tsx` -- UI de agendamento
+- `src/pages/Arquivos.tsx` -- fix build error
+- `supabase/functions/process-scheduled-messages/index.ts` -- nova edge function
+- Nova migração SQL para tabela e cron job
 
