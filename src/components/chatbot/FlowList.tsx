@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -11,6 +11,22 @@ import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import type { ChatbotFlow } from '@/hooks/useChatbotFlows';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+const TRIGGER_LABELS: Record<string, string> = {
+  none: 'Manual',
+  first_message: '1ª mensagem',
+  any_message: 'Qualquer msg',
+  keyword: 'Palavra-chave',
+  status_resolved: 'Resolvido',
+  status_opened: 'Em Atend.',
+  new_contact: 'Novo contato',
+};
+
+function getTriggerLabel(flow: ChatbotFlow) {
+  const bh = flow.business_hours as Record<string, any> || {};
+  const type = bh._trigger?.type || 'none';
+  return TRIGGER_LABELS[type] || 'Manual';
+}
 
 interface FlowListProps {
   flows: ChatbotFlow[];
@@ -83,9 +99,15 @@ export default function FlowList({ flows, onSelect, onCreate, onDelete, onToggle
                     {flow.is_active ? 'Ativo' : 'Inativo'}
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Criado em {format(new Date(flow.created_at), "dd 'de' MMM, yyyy", { locale: ptBR })}
-                </p>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    Criado em {format(new Date(flow.created_at), "dd 'de' MMM, yyyy", { locale: ptBR })}
+                  </p>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Zap size={10} className="text-warning" />
+                    {getTriggerLabel(flow)}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                 <Switch checked={flow.is_active} onCheckedChange={checked => onToggleActive(flow.id, checked)} />

@@ -5,8 +5,19 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import type { ChatbotFlow } from '@/hooks/useChatbotFlows';
+
+const TRIGGER_OPTIONS = [
+  { value: 'none', label: 'Nenhum (manual)' },
+  { value: 'first_message', label: 'Primeira mensagem do contato' },
+  { value: 'any_message', label: 'Qualquer mensagem recebida' },
+  { value: 'keyword', label: 'Palavra-chave' },
+  { value: 'status_resolved', label: 'Status: Resolvido' },
+  { value: 'status_opened', label: 'Status: Em Atendimento' },
+  { value: 'new_contact', label: 'Novo contato cadastrado' },
+];
 
 const DAYS = [
   { key: 'mon', label: 'Segunda' },
@@ -29,6 +40,8 @@ export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
   const [aiInstructions, setAiInstructions] = useState('');
   const [timeoutMinutes, setTimeoutMinutes] = useState(30);
   const [businessHours, setBusinessHours] = useState<Record<string, { enabled: boolean; start: string; end: string }>>({});
+  const [triggerType, setTriggerType] = useState('none');
+  const [triggerKeyword, setTriggerKeyword] = useState('');
 
   useEffect(() => {
     if (flow) {
@@ -41,6 +54,8 @@ export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
         parsed[d.key] = bh[d.key] || { enabled: d.key !== 'sat' && d.key !== 'sun', start: '08:00', end: '18:00' };
       });
       setBusinessHours(parsed);
+      setTriggerType(bh._trigger?.type || 'none');
+      setTriggerKeyword(bh._trigger?.keyword || '');
     }
   }, [flow]);
 
@@ -53,18 +68,51 @@ export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
   }
 
   const handleSave = () => {
+    const bh = { ...businessHours, _trigger: { type: triggerType, keyword: triggerKeyword } };
     onSave({
       id: flow.id,
       offline_message: offlineMessage,
       ai_instructions: aiInstructions,
       timeout_minutes: timeoutMinutes,
-      business_hours: businessHours,
+      business_hours: bh,
     });
     toast({ title: 'Configurações salvas!' });
   };
 
   return (
     <div className="space-y-6 max-w-2xl">
+      {/* Trigger */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Gatilho (Trigger)</CardTitle>
+          <CardDescription>Defina o evento que ativa este fluxo automaticamente.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <Label>Tipo de gatilho</Label>
+            <Select value={triggerType} onValueChange={setTriggerType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TRIGGER_OPTIONS.map(o => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {triggerType === 'keyword' && (
+            <div className="space-y-2">
+              <Label>Palavra-chave</Label>
+              <Input
+                placeholder="Ex: olá, oi, começar"
+                value={triggerKeyword}
+                onChange={e => setTriggerKeyword(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Separe múltiplas palavras com vírgula. O fluxo é ativado quando qualquer uma for detectada.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Horário de Atendimento</CardTitle>

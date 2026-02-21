@@ -20,6 +20,9 @@ const NODE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'apply_tag', label: 'Aplicar Tag' },
   { value: 'move_to_funnel', label: 'Mover para Funil' },
   { value: 'delegate', label: 'Delegar Chat' },
+  { value: 'delay', label: 'Aguardar (Delay)' },
+  { value: 'close_chat', label: 'Encerrar Chat' },
+  { value: 'webhook', label: 'Webhook' },
 ];
 
 interface FlowEditorProps {

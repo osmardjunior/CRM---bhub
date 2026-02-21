@@ -27,6 +27,9 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   apply_tag: 'Aplicar Tag',
   move_to_funnel: 'Mover para Funil',
   delegate: 'Delegar Chat',
+  delay: 'Aguardar (Delay)',
+  close_chat: 'Encerrar Chat',
+  webhook: 'Webhook',
 };
 
 interface NodeConfigPanelProps {
@@ -362,6 +365,95 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
 
       case 'delegate' as any:
         return renderDelegate();
+
+      case 'delay' as any:
+        return (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Aguarda um tempo antes de executar a próxima etapa do fluxo.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Minutos</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={config.minutes ?? 0}
+                  onChange={e => setConfig({ ...config, minutes: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Segundos</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={59}
+                  value={config.seconds ?? 0}
+                  onChange={e => setConfig({ ...config, seconds: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'close_chat' as any:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Mensagem ao encerrar (opcional)</Label>
+              <Textarea
+                placeholder="Obrigado pelo contato! Até a próxima."
+                value={config.message || ''}
+                onChange={e => setConfig({ ...config, message: e.target.value })}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Status final</Label>
+              <Select value={config.status || 'closed'} onValueChange={v => setConfig({ ...config, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="closed">Fechado</SelectItem>
+                  <SelectItem value="resolved">Resolvido</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        );
+
+      case 'webhook' as any:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>URL do Webhook</Label>
+              <Input
+                placeholder="https://seu-sistema.com/webhook"
+                value={config.url || ''}
+                onChange={e => setConfig({ ...config, url: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Método</Label>
+              <Select value={config.method || 'POST'} onValueChange={v => setConfig({ ...config, method: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="POST">POST</SelectItem>
+                  <SelectItem value="GET">GET</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Headers (JSON, opcional)</Label>
+              <Textarea
+                placeholder={'{\n  "Authorization": "Bearer token"\n}'}
+                value={config.headers || ''}
+                onChange={e => setConfig({ ...config, headers: e.target.value })}
+                rows={3}
+                className="font-mono text-xs"
+              />
+            </div>
+          </div>
+        );
 
       default:
         return <p className="text-sm text-muted-foreground">Tipo de etapa desconhecido.</p>;
