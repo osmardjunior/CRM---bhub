@@ -38,6 +38,7 @@ function parseEvolutionPayload(body: any): {
   instance_name?: string;
   is_group?: boolean;
   group_subject?: string;
+  from_me?: boolean;
 } {
   // Evolution API v2 sends: { event, instance, data, ... }
   if (body.event && body.instance) {
@@ -49,10 +50,8 @@ function parseEvolutionPayload(body: any): {
       const key = data.key || {};
       const message = data.message || {};
 
-      // Skip messages sent by us (fromMe = true)
-      if (key.fromMe) {
-        return { isEvolution: true, event: "skip_from_me" };
-      }
+      // Track if message was sent by us (fromMe = true)
+      const isFromMe = !!key.fromMe;
 
       // Extract phone from remoteJid (format: 5531XXXX@s.whatsapp.net or ...@g.us)
       const remoteJid = key.remoteJid || "";
@@ -131,6 +130,7 @@ function parseEvolutionPayload(body: any): {
         instance_name: instanceName,
         is_group: isGroup,
         group_subject: groupSubject || undefined,
+        from_me: isFromMe,
       };
     }
 
@@ -186,6 +186,7 @@ serve(async (req) => {
     let sender_name: string | undefined;
     let is_group = false;
     let media_type = "text";
+    let from_me = false;
 
     if (evolution.isEvolution) {
       // Skip non-message events
@@ -240,6 +241,7 @@ serve(async (req) => {
       sender_name = evolution.sender_name;
       is_group = evolution.is_group || false;
       media_type = evolution.media_type || "text";
+      from_me = evolution.from_me || false;
 
       // For media messages without body, set a descriptive placeholder
       if (!messageBody && media_url) {
@@ -501,8 +503,8 @@ serve(async (req) => {
       .maybeSingle();
 
     if (conversation) {
-      // If it's closed or pending, reopen it
-      if (conversation.status !== "open") {
+      // If it's closed or pending, reopen it — but only for incoming messages (not fromMe)
+      if (conversation.status !== "open" && !from_me) {
         await supabase
           .from("conversations")
           .update({
@@ -615,13 +617,14 @@ serve(async (req) => {
     const { error: msgErr } = await supabase.from("messages").insert({
       company_id,
       conversation_id: conversation.id,
-      sender_type: "user",
+      sender_type: from_me ? "agent" : "user",
       sender_id: null,
       sender_name: sender_name || null,
       body: messageBody,
       media_url: media_url || null,
       type: media_type !== "text" ? media_type : "text",
       external_message_id,
+      direction: from_me ? "outbound" : "inbound",
       created_at: timestamp || new Date().toISOString(),
     });
 
