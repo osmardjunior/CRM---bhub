@@ -14,6 +14,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -37,6 +38,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { isGroupChat } from '@/services/api';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { updateContact } from '@/services/api';
@@ -212,12 +214,14 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
       <div className="flex-1 overflow-y-auto">
         {/* Contact card */}
         <div className="flex flex-col items-center pt-5 pb-4 px-4 border-b border-border">
-          <Avatar className="h-14 w-14 mb-3 ring-2 ring-primary/20">
-            <AvatarImage src={contactAvatarUrl ?? undefined} />
-            <AvatarFallback className="text-lg font-bold bg-primary/10 text-primary">
-              {contact.name[0]}
-            </AvatarFallback>
-          </Avatar>
+          <div className="mb-3">
+            <ConversationAvatar
+              name={contact.name}
+              avatarUrl={contactAvatarUrl}
+              isGroup={isGroupChat(contact.phone)}
+              size="lg"
+            />
+          </div>
           <h3 className="text-sm font-bold text-foreground text-center">{contact.name}</h3>
           {contact.phone && (
             <p className="text-xs text-primary font-medium mt-0.5">{contact.phone}</p>

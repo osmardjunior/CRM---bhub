@@ -3,8 +3,8 @@ import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
   Mail, Monitor, Wifi, Star, Clock, User, Users,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { isGroupChat } from '@/services/api';
+import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -419,19 +419,12 @@ export default function ConversationList({
                     isSelected ? 'bg-accent border-l-2 border-l-primary' : ''
                   }`}
                 >
-                  <div className="relative shrink-0 mt-0.5">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={(conv.contact as { avatar_url?: string | null }).avatar_url ?? undefined} />
-                      <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conv.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
-                        {isGroupChat(conv.contact.phone) ? <Users size={16} /> : conv.contact.name[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    {unread > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
-                        {unread > 9 ? '9+' : unread}
-                      </span>
-                    )}
-                  </div>
+                  <ConversationAvatar
+                    name={conv.contact.name}
+                    avatarUrl={(conv.contact as { avatar_url?: string | null }).avatar_url}
+                    isGroup={isGroupChat(conv.contact.phone)}
+                    unread={unread}
+                  />
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">

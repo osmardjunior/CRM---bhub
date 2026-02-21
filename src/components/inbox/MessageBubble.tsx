@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Check, CheckCheck, Download, FileText, ChevronDown, Bot, Reply } from 'lucide-react';
+import { getColorForName, getBgColorForName } from '@/lib/colors';
 
 interface Message {
   id?: string;
@@ -22,6 +22,8 @@ interface MessageBubbleProps {
   isOutgoing: boolean;
   contactName: string;
   contactAvatarUrl?: string | null;
+  isGroup?: boolean;
+  showSenderHeader?: boolean;
 }
 
 function getMediaType(url: string): 'image' | 'audio' | 'video' | 'sticker' | 'document' {
@@ -89,21 +91,45 @@ function DeliveryTicks({ status }: { status?: string }) {
   return <Check size={12} className="text-destructive shrink-0" />;
 }
 
-export default function MessageBubble({ msg, isOutgoing, contactName, contactAvatarUrl }: MessageBubbleProps) {
+export default function MessageBubble({ msg, isOutgoing, contactName, contactAvatarUrl, isGroup = false, showSenderHeader = true }: MessageBubbleProps) {
   const [showMeta, setShowMeta] = useState(false);
   const hasMedia = !!msg.media_url;
   const hasBody = !!msg.body?.trim();
   const isBot = msg.processed_by_bot || msg.sent_by === 'bot';
   const deliveryStatus = msg.delivery_status ?? 'sent';
 
+  const senderName = msg.sender_name ?? msg.sender?.name ?? contactName;
+  const senderColor = isGroup && !isOutgoing ? getColorForName(senderName) : undefined;
+  const senderBg = isGroup && !isOutgoing ? getBgColorForName(senderName) : undefined;
+
   return (
     <div className={`flex mb-1.5 ${isOutgoing ? 'justify-end' : 'justify-start'} group`}>
-      {!isOutgoing && (
-        <Avatar className="h-7 w-7 shrink-0 mr-1.5 mt-0.5 self-end">
-          <AvatarImage src={contactAvatarUrl ?? undefined} />
-          <AvatarFallback className="text-[10px] bg-muted">{contactName[0]}</AvatarFallback>
-        </Avatar>
+      {/* Avatar for incoming messages */}
+      {!isOutgoing && showSenderHeader && (
+        <div className="shrink-0 mr-1.5 mt-0.5 self-end">
+          {isGroup ? (
+            <div
+              className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm"
+              style={{ background: senderColor }}
+            >
+              {senderName[0]?.toUpperCase()}
+            </div>
+          ) : (
+            <div className="h-7 w-7 rounded-full overflow-hidden bg-muted flex items-center justify-center">
+              {contactAvatarUrl ? (
+                <img src={contactAvatarUrl} className="h-full w-full object-cover" alt="" />
+              ) : (
+                <span className="text-[10px] font-semibold text-muted-foreground">{contactName[0]}</span>
+              )}
+            </div>
+          )}
+        </div>
       )}
+      {/* Spacer when avatar is hidden (consecutive same sender) */}
+      {!isOutgoing && !showSenderHeader && (
+        <div className="w-7 shrink-0 mr-1.5" />
+      )}
+
       <div className="relative max-w-[65%]">
         {/* Hover actions */}
         <div className="absolute -top-6 right-0 hidden group-hover:flex items-center gap-0.5 bg-card border border-border rounded-lg shadow-sm px-1 py-0.5 z-10">
@@ -119,12 +145,15 @@ export default function MessageBubble({ msg, isOutgoing, contactName, contactAva
               : 'bg-card text-foreground rounded-bl-sm border border-border/50'
           }`}
         >
-          {/* Sender name (for groups or bot) */}
-          {!isOutgoing && (
+          {/* Sender name for group chats or bot */}
+          {!isOutgoing && showSenderHeader && (
             <div className="flex items-center gap-1 mb-0.5">
               {isBot && <Bot size={10} className="text-primary" />}
-              <p className="text-[10px] font-semibold text-primary">
-                {msg.sender_name ?? msg.sender?.name ?? contactName}
+              <p
+                className="text-[10px] font-semibold"
+                style={{ color: senderColor ?? 'hsl(var(--primary))' }}
+              >
+                {senderName}
               </p>
             </div>
           )}
