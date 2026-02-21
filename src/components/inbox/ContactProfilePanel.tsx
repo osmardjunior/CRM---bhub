@@ -42,7 +42,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import TaskModal from '@/components/tarefas/TaskModal';
 import { useCreateDeal } from '@/hooks/useDeals';
 import { useTags } from '@/hooks/useTags';
-import { closeConversation, updateContact } from '@/services/api';
+import { useContactTags, useAddContactTag, useRemoveContactTag } from '@/hooks/useContactTags';
+import { closeConversation } from '@/services/api';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
@@ -73,9 +74,11 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
 
 export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const contact = conversation.contact;
-  const tags = (contact.tags as string[]) || [];
   const queryClient = useQueryClient();
   const { data: availableTags = [] } = useTags();
+  const { data: contactTags = [] } = useContactTags(contact.id);
+  const addTag = useAddContactTag();
+  const removeTag = useRemoveContactTag();
 
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [dealModalOpen, setDealModalOpen] = useState(false);
@@ -85,27 +88,19 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const [closeReason, setCloseReason] = useState('resolvido');
   const [closing, setClosing] = useState(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
-  const [savingTags, setSavingTags] = useState(false);
 
-  const handleToggleTag = async (tagName: string) => {
-    setSavingTags(true);
-    try {
-      const newTags = tags.includes(tagName)
-        ? tags.filter((t) => t !== tagName)
-        : [...tags, tagName];
-      await updateContact(contact.id, { tags: newTags as any });
-      queryClient.invalidateQueries({ queryKey: ['conversation'] });
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
-    } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao atualizar tags');
-    } finally {
-      setSavingTags(false);
+  const contactTagIds = contactTags.map((ct) => ct.tag_id);
+
+  const handleToggleTag = (tagId: string) => {
+    if (contactTagIds.includes(tagId)) {
+      removeTag.mutate({ contactId: contact.id, tagId });
+    } else {
+      addTag.mutate({ contactId: contact.id, tagId });
     }
   };
 
-  const handleRemoveTag = async (tagName: string) => {
-    await handleToggleTag(tagName);
+  const handleRemoveTag = (tagId: string) => {
+    removeTag.mutate({ contactId: contact.id, tagId });
   };
 
   const handleCreateDeal = () => {
@@ -174,11 +169,11 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
           )}
 
           {/* Tags */}
-          {tags.length > 0 && (
+          {contactTags.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1 justify-center">
-              {tags.map((tag) => (
-                <Badge key={tag} className="text-[10px] px-2 py-0.5 bg-accent text-accent-foreground border-0 rounded-full">
-                  {tag}
+              {contactTags.map((ct) => (
+                <Badge key={ct.tag_id} className="text-[10px] px-2 py-0.5 border-0 rounded-full text-white" style={{ backgroundColor: ct.tag_color }}>
+                  {ct.tag_name}
                 </Badge>
               ))}
             </div>
@@ -267,9 +262,9 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                         className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer transition-colors"
                       >
                         <Checkbox
-                          checked={tags.includes(t.name)}
-                          onCheckedChange={() => handleToggleTag(t.name)}
-                          disabled={savingTags}
+                          checked={contactTagIds.includes(t.id)}
+                          onCheckedChange={() => handleToggleTag(t.id)}
+                          disabled={addTag.isPending || removeTag.isPending}
                         />
                         <div
                           className="h-2.5 w-2.5 rounded-full shrink-0"
@@ -286,16 +281,17 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               </PopoverContent>
             </Popover>
           </div>
-          {tags.length > 0 ? (
+          {contactTags.length > 0 ? (
             <div className="flex flex-wrap gap-1">
-              {tags.map((tag) => (
+              {contactTags.map((ct) => (
                 <Badge
-                  key={tag}
+                  key={ct.tag_id}
                   variant="outline"
                   className="text-[10px] px-1.5 py-0.5 rounded-full gap-0.5 cursor-pointer hover:bg-destructive/15 hover:text-destructive transition-colors"
-                  onClick={() => handleRemoveTag(tag)}
+                  style={{ borderColor: ct.tag_color, color: ct.tag_color }}
+                  onClick={() => handleRemoveTag(ct.tag_id)}
                 >
-                  {tag}
+                  {ct.tag_name}
                   <X size={9} className="shrink-0" />
                 </Badge>
               ))}
