@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
 import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
-  Star, Clock,
+  Star, Clock, MailWarning,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { isGroupChat } from '@/services/api';
 import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import { Input } from '@/components/ui/input';
@@ -73,6 +75,7 @@ export default function ConversationList({
 }: Props) {
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [quickFilter, setQuickFilter] = useState<'all' | 'favorites' | 'unread' | 'scheduled'>('all');
   const [localName, setLocalName] = useState('');
   const [localPhone, setLocalPhone] = useState('');
   const [localTag, setLocalTag] = useState('');
@@ -84,23 +87,46 @@ export default function ConversationList({
   const { data: tags = [] } = useTags();
   const { data: teamMembers = [] } = useTeamProfiles();
 
+  // Fetch scheduled conversation IDs for the "Agendados" quick filter
+  const { data: scheduledConvIds = [] } = useQuery({
+    queryKey: ['scheduled-conv-ids'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('scheduled_messages')
+        .select('conversation_id')
+        .is('sent_at', null)
+        .is('cancelled_at', null);
+      return [...new Set((data ?? []).map((d) => d.conversation_id))];
+    },
+    refetchInterval: 60_000,
+  });
+
   const activeStatus = filters.status ?? 'open';
-  const filtered = useMemo(
-    () =>
-      conversations.filter((c) => {
-        const isGroup = isGroupChat(c.contact.phone);
-        if (isGroup) return false;
-        if (search) {
-          const q = search.toLowerCase();
-          return (
-            c.contact.name.toLowerCase().includes(q) ||
-            (c.contact.phone ?? '').includes(q)
-          );
-        }
-        return true;
-      }),
-    [conversations, search],
-  );
+  const filtered = useMemo(() => {
+    let list = conversations.filter((c) => {
+      const isGroup = isGroupChat(c.contact.phone);
+      if (isGroup) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          c.contact.name.toLowerCase().includes(q) ||
+          (c.contact.phone ?? '').includes(q)
+        );
+      }
+      return true;
+    });
+
+    // Apply quick filters
+    if (quickFilter === 'favorites') {
+      list = list.filter((c) => c.contact.is_favorite);
+    } else if (quickFilter === 'unread') {
+      list = list.filter((c) => (unreadCounts[c.id] ?? 0) > 0);
+    } else if (quickFilter === 'scheduled') {
+      list = list.filter((c) => scheduledConvIds.includes(c.id));
+    }
+
+    return list;
+  }, [conversations, search, quickFilter, unreadCounts, scheduledConvIds]);
 
   function handleApplyFilters() {
     const newFilters: Partial<ConversationFilters> = {};
@@ -131,10 +157,7 @@ export default function ConversationList({
     onFilterChange({ status: 'open', channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
   }
 
-  const channelIcons = [
-    { id: 'star', icon: Star, label: 'Favoritos' },
-    { id: 'pending', icon: Clock, label: 'Agendados' },
-  ];
+  // Quick filter chips are now in the main UI below status tabs
 
   return (
     <div className="flex w-[320px] min-w-[300px] flex-col border-r border-border bg-card">
@@ -305,19 +328,6 @@ export default function ConversationList({
               </div>
             </div>
 
-            {/* Channel icon filters */}
-            <div className="flex items-center justify-between pt-1">
-              {channelIcons.map(({ id, icon: Icon, label }) => (
-                <label key={id} className="flex flex-col items-center gap-1 cursor-pointer group">
-                  <div className={`h-7 w-7 rounded border border-border flex items-center justify-center transition-colors group-hover:border-primary ${localChannel === id ? 'bg-primary/10 border-primary' : 'bg-background'}`}
-                    onClick={() => setLocalChannel(localChannel === id ? '' : id)}
-                  >
-                    <Icon size={13} className={localChannel === id ? 'text-primary' : 'text-muted-foreground'} />
-                  </div>
-                  <input type="checkbox" className="h-3 w-3 accent-primary" checked={localChannel === id} onChange={() => setLocalChannel(localChannel === id ? '' : id)} />
-                </label>
-              ))}
-            </div>
 
             {/* Actions */}
             <div className="flex gap-2 pt-1">
@@ -349,8 +359,28 @@ export default function ConversationList({
         ))}
       </div>
 
-
-      {/* Count */}
+      {/* Quick filter chips */}
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border bg-secondary/10">
+        {([
+          { key: 'all' as const, label: 'Todos', icon: null },
+          { key: 'favorites' as const, label: 'Favoritos', icon: Star },
+          { key: 'unread' as const, label: 'Não Lidas', icon: MailWarning },
+          { key: 'scheduled' as const, label: 'Agendados', icon: Clock },
+        ] as const).map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setQuickFilter(quickFilter === key ? 'all' : key)}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-colors ${
+              quickFilter === key
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`}
+          >
+            {Icon && <Icon size={11} />}
+            {label}
+          </button>
+        ))}
+      </div>
       {!loading && filtered.length > 0 && (
         <div className="px-3 py-1.5 border-b border-border bg-secondary/20">
           <p className="text-[10px] text-muted-foreground">
