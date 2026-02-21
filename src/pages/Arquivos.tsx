@@ -51,7 +51,7 @@ export default function ArquivosPage() {
         sortBy: { column: 'created_at', order: 'desc' },
       });
       if (error) throw error;
-      return (data ?? []) as StorageFile[];
+      return (data ?? []) as unknown as StorageFile[];
     },
   });
 

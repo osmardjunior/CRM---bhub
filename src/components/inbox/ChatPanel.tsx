@@ -19,6 +19,8 @@ import {
   RefreshCw,
   BellOff,
   Bot,
+  Clock,
+  CalendarIcon,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -66,6 +68,11 @@ import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail, Annotation, MessageWithSender } from '@/services/api';
 import { listAnnotations } from '@/services/api';
+import { Calendar } from '@/components/ui/calendar';
+import { Input } from '@/components/ui/input';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
 
 type MergedItem =
   | (MessageWithSender & { _type: 'message' })
@@ -88,6 +95,105 @@ function groupMessagesByDate(items: MergedItem[]) {
     current.messages.push(msg);
   }
   return groups;
+}
+
+// ── Schedule Message Button ──────────────────────────
+function ScheduleMessageButton({
+  conversationId,
+  companyId,
+  userId,
+  messageBody,
+  onScheduled,
+}: {
+  conversationId: string;
+  companyId: string | null;
+  userId: string | undefined;
+  messageBody: string;
+  onScheduled: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [time, setTime] = useState('12:00');
+  const [scheduling, setScheduling] = useState(false);
+
+  const handleSchedule = async () => {
+    if (!date || !companyId || !userId) return;
+    const [hours, minutes] = time.split(':').map(Number);
+    const scheduledAt = new Date(date);
+    scheduledAt.setHours(hours, minutes, 0, 0);
+
+    if (scheduledAt <= new Date()) {
+      toast.error('Selecione um horário futuro.');
+      return;
+    }
+
+    setScheduling(true);
+    try {
+      const { error } = await supabase.from('scheduled_messages').insert({
+        conversation_id: conversationId,
+        company_id: companyId,
+        created_by: userId,
+        content: messageBody,
+        scheduled_at: scheduledAt.toISOString(),
+      });
+      if (error) throw error;
+      toast.success(`Mensagem agendada para ${format(scheduledAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`);
+      setOpen(false);
+      setDate(undefined);
+      setTime('12:00');
+      onScheduled();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao agendar mensagem');
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Clock size={15} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top"><p className="text-xs">Agendar mensagem</p></TooltipContent>
+        </Tooltip>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-3" align="end" side="top">
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-foreground">Agendar envio</p>
+          <Calendar
+            mode="single"
+            selected={date}
+            onSelect={setDate}
+            disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
+            className={cn("p-2 pointer-events-auto")}
+            locale={ptBR}
+          />
+          <div className="flex items-center gap-2">
+            <CalendarIcon size={14} className="text-muted-foreground" />
+            <Input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="h-8 w-28 text-xs"
+            />
+          </div>
+          <Button
+            size="sm"
+            className="w-full h-8 text-xs"
+            disabled={!date || scheduling}
+            onClick={handleSchedule}
+          >
+            {scheduling ? <Loader2 size={13} className="animate-spin mr-1" /> : <Clock size={13} className="mr-1" />}
+            Agendar
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 interface Props {
@@ -762,6 +868,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             {!input.trim() && !isAnnotationMode ? (
               <AudioRecorder onSend={handleAudioSend} />
             ) : null}
+            {/* Schedule message button */}
+            {input.trim() && !isAnnotationMode && (
+              <ScheduleMessageButton
+                conversationId={conversation.id}
+                companyId={companyId}
+                userId={user?.id}
+                messageBody={input.trim()}
+                onScheduled={() => setInput('')}
+              />
+            )}
             <Button
               size="icon"
               onClick={handleSend}

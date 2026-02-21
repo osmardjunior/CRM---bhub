@@ -221,7 +221,7 @@ function OverviewTable() {
 export default function ChatsOverview() {
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({ status: 'open' });
 
   const {
     data: infiniteData,
