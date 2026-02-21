@@ -440,7 +440,8 @@ export async function closeConversation(
 }
 
 // ── Group detection helper ────────────────────────────
-export function isGroupChat(phone: string | null | undefined): boolean {
+export function isGroupChat(phone: string | null | undefined, contact?: { is_group?: boolean | null }): boolean {
+  if (contact?.is_group) return true;
   if (!phone) return false;
   if (phone.includes('@g.us')) return true;
   const digits = phone.replace(/\D/g, '');
