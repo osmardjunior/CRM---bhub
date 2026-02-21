@@ -1,106 +1,57 @@
 
-
-# Correções de Filtros do Inbox + Agendamento de Mensagens
+# Correções: Filtro do Inbox, Agendamento e Melhorias de UX
 
 ## Problemas Identificados
 
-1. **Chats Overview mostra conversas fechadas e em atendimento misturadas** -- A pagina `/chats` (ChatsOverview) nao passa filtro de status inicial, entao carrega todas as conversas sem distinção.
+1. **Inbox mostra conversas fechadas/em atendimento misturadas** -- O `InboxPage` inicializa `filters` como `{}` (sem status), trazendo todas as conversas. Deveria ser `{ status: 'open' }`.
 
-2. **Filtro "Não Lidas" redundante** -- Existe um botão "Não Lidas" fixo acima da lista que deve ser removido, pois essa opção já existe dentro do painel de filtros avançados.
+2. **Botão de agendar mensagem não funciona** -- O `ScheduleMessageButton` esta dentro de um `Tooltip` que envolve o `PopoverTrigger`. O Tooltip intercepta o clique e impede o Popover de abrir. Precisa reestruturar para que o Popover funcione corretamente.
 
-3. **Ícones de filtro rápido desnecessários** -- Os ícones de E-mail (Mail), Monitor (Webchat) e Wi-Fi (WhatsApp) devem ser removidos. Manter apenas Estrela (Favoritos) e Relógio (Agendados).
-
-4. **Filtros avançados não funcionam** -- O problema principal: os filtros `name`, `phone` e `tag` são aplicados no lado do cliente DEPOIS da paginação. Se a query do banco traz 20 resultados e nenhum coincide, a lista fica vazia. Além disso, o status local do filtro avançado não é passado corretamente ao `onFilterChange`.
-
-5. **Sem funcionalidade de agendamento de mensagens** -- Não existe no sistema a capacidade de agendar uma mensagem para ser enviada num horário futuro.
+3. **Filtros avancados: ao aplicar, limpa o status da aba** -- Quando o usuario clica "Aplicar" nos filtros avancados, o `handleApplyFilters` cria um objeto `newFilters` sem preservar o status da aba atual (`activeStatus`). Isso faz o filtro resetar e mostrar tudo.
 
 ---
 
-## Plano de Implementação
+## Plano de Implementacao
 
-### Tarefa 1: Corrigir ChatsOverview para filtrar apenas conversas abertas
+### 1. Inbox: filtro inicial com status 'open'
 
-- Na pagina `ChatsOverview.tsx`, inicializar o estado `filters` com `{ status: 'open' }` para que a lista à esquerda mostre apenas conversas abertas por padrão (assim como faz o Inbox).
+**Arquivo:** `src/pages/Inbox.tsx` (linha 20)
 
-### Tarefa 2: Remover filtro rápido "Não Lidas" e ícones desnecessários
+Mudar `useState<...>({})` para `useState<...>({ status: 'open' })` para que o Inbox abra mostrando apenas conversas em atendimento.
 
-No arquivo `ConversationList.tsx`:
-- Remover o estado `onlyUnread` e o bloco de quick filter "Não Lidas" (linhas 354-365).
-- Remover a lógica `if (onlyUnread ...)` do `useMemo` de filtragem.
-- No array `channelIcons`, remover os itens `email` (Mail), `webchat` (Monitor) e `whatsapp` (Wifi).
-- Manter apenas `star` (Star/Favoritos) e `pending` (Clock/Agendados).
-- Remover imports não utilizados (Mail, Monitor, Wifi).
+### 2. Corrigir botao de agendamento (Popover nao abre)
 
-### Tarefa 3: Corrigir filtros avançados
+**Arquivo:** `src/components/inbox/ChatPanel.tsx` (linhas 152-196)
 
-No arquivo `ConversationList.tsx`:
-- Na função `handleApplyFilters`, incluir o `localStatus` no objeto `newFilters` quando selecionado (atualmente é ignorado).
-- Na função `handleClearFilters`, resetar o status para o padrão.
+O problema e que o `PopoverTrigger` esta dentro de um `TooltipTrigger`, e ambos tentam controlar o mesmo botao. A solucao e remover o Tooltip do trigger ou usar uma abordagem diferente:
 
-No arquivo `src/services/api.ts` (função `listConversations`):
-- Mover os filtros `name` e `phone` para serem aplicados via query do banco (usando `.ilike` ou `.like`) ao invés de filtrar no cliente após a paginação. Isso resolve o problema de aplicar filtros em apenas 20 resultados por vez.
-- Para `tag`, como é um campo JSON/array no contato, manter client-side mas aumentar o limite temporário da query quando filtros client-side estão ativos.
+- Remover o `Tooltip`/`TooltipTrigger`/`TooltipContent` que envolve o `PopoverTrigger`
+- Deixar apenas o `Popover` + `PopoverTrigger` com o botao de relogio
+- Adicionar um `title` HTML simples no botao para manter a dica visual
 
-### Tarefa 4: Agendamento de mensagens
+### 3. Filtros avancados preservam o status ativo
 
-**Banco de Dados** -- Criar tabela `scheduled_messages`:
-- `id` (uuid, PK)
-- `company_id` (uuid, FK)
-- `conversation_id` (uuid, FK)
-- `sender_id` (uuid, FK para profiles)
-- `body` (text)
-- `media_url` (text, nullable)
-- `scheduled_at` (timestamptz) -- quando enviar
-- `status` (text: 'pending', 'sent', 'cancelled', default 'pending')
-- `created_at` (timestamptz)
-- RLS: usuários da mesma empresa podem ler/criar/atualizar
+**Arquivo:** `src/components/inbox/ConversationList.tsx` (funcao `handleApplyFilters`)
 
-**Frontend** -- No `ChatPanel.tsx`:
-- Adicionar um botão de relógio ao lado do botão de enviar.
-- Ao clicar, abrir um popover com seletor de data/hora.
-- Ao confirmar, inserir na tabela `scheduled_messages` ao invés de enviar imediatamente.
-- Mostrar toast de confirmação com o horário agendado.
-
-**Backend** -- Criar edge function `process-scheduled-messages`:
-- Consultar mensagens com `status = 'pending'` e `scheduled_at <= now()`.
-- Para cada uma, inserir na tabela `messages` e chamar `send-whatsapp`.
-- Atualizar status para `sent`.
-- Configurar um cron job (pg_cron) para executar a cada minuto.
-
-### Tarefa 5: Corrigir erro de build em Arquivos.tsx
-
-- Corrigir o erro de TypeScript em `src/pages/Arquivos.tsx` linha 54 adicionando `as unknown as StorageFile[]` para a conversão de tipo.
-
----
-
-## Detalhes Técnicos
-
-### Estrutura da tabela scheduled_messages
+Quando o usuario aplica filtros avancados sem selecionar um status especifico no dropdown, o status da aba ativa (`activeStatus`) deve ser preservado. Modificar `handleApplyFilters` para incluir:
 
 ```text
-scheduled_messages
-+------------------+------------------+
-| column           | type             |
-+------------------+------------------+
-| id               | uuid (PK)        |
-| company_id       | uuid (FK)        |
-| conversation_id  | uuid (FK)        |
-| sender_id        | uuid (FK)        |
-| body             | text             |
-| media_url        | text (nullable)  |
-| scheduled_at     | timestamptz      |
-| status           | text (default    |
-|                  | 'pending')       |
-| created_at       | timestamptz      |
-+------------------+------------------+
+if (!localStatus || localStatus === 'todos') {
+  // manter o status da aba ativa
+  newFilters.status = activeStatus as any;
+} else {
+  newFilters.status = localStatus as any;
+}
 ```
 
-### Arquivos que serao modificados
-- `src/components/inbox/ConversationList.tsx` -- remover filtros redundantes, corrigir aplicação de filtros
-- `src/services/api.ts` -- mover filtros para query do banco
-- `src/pages/ChatsOverview.tsx` -- filtro inicial de status
-- `src/components/inbox/ChatPanel.tsx` -- UI de agendamento
-- `src/pages/Arquivos.tsx` -- fix build error
-- `supabase/functions/process-scheduled-messages/index.ts` -- nova edge function
-- Nova migração SQL para tabela e cron job
+---
 
+## Detalhes Tecnicos
+
+### Arquivos modificados
+
+| Arquivo | Mudanca |
+|---|---|
+| `src/pages/Inbox.tsx` | Linha 20: `{}` para `{ status: 'open' }` |
+| `src/components/inbox/ChatPanel.tsx` | Reestruturar ScheduleMessageButton removendo Tooltip do PopoverTrigger |
+| `src/components/inbox/ConversationList.tsx` | handleApplyFilters preserva status da aba ativa |
