@@ -1,128 +1,81 @@
 
 
-# Plano de Correções e Implementações em Blocos
+# Melhorias Visuais: Chats Individuais vs Grupos
 
-Vou organizar tudo em blocos priorizados por impacto no uso diario. Cada bloco sera implementado, testado e validado antes de passar ao proximo.
+## Problemas Identificados
 
----
+1. **Mensagens em grupo mostram apenas um remetente** -- O `MessageBubble` exibe o nome do contato da conversa para todas as mensagens recebidas, sem diferenciar os participantes do grupo. Todas as mensagens parecem ser da mesma pessoa.
 
-## Bloco 1 -- Funil Funcional (Contatos no Kanban)
+2. **Avatares genericos** -- Na lista de conversas e no header do chat, grupos mostram apenas um icone `Users` generico e individuais mostram a primeira letra do nome. Nao ha diferenciacao visual profissional.
 
-**Problema atual:** O Kanban do funil nao conecta contatos reais. As colunas ficam vazias, sem como vincular clientes a etapas. A tabela `contact_funnel_stages` existe no banco mas nao e usada no frontend.
-
-**O que sera feito:**
-- Carregar contatos vinculados a cada etapa do funil via `contact_funnel_stages`
-- Mostrar cards de contato reais nas colunas do Kanban (nome, telefone, tags)
-- Botao "Adicionar Chats" abre um seletor de contatos para vincular a etapa
-- Drag-and-drop entre colunas para mover contato de etapa
-- Remover contato de uma etapa
+3. **Formatacao geral precisa de polimento** -- Espacamentos, tamanhos e hierarquia visual precisam de refinamento para um look profissional.
 
 ---
 
-## Bloco 2 -- Tags no Perfil do Contato (Correcao)
+## O que sera feito
 
-**Problema atual:** As tags estao sendo salvas no campo JSON `contacts.tags` (texto livre), mas o sistema tem a tabela relacional `contact_tags` + `tags`. A UI de tags no painel de perfil precisa usar a tabela correta.
+### 1. MessageBubble -- Suporte a multiplos remetentes em grupo
 
-**O que sera feito:**
-- Migrar a logica de tags do `ContactProfilePanel` para usar `contact_tags` (insert/delete na tabela de juncao)
-- Exibir tags com cores reais da tabela `tags`
-- Garantir que adicionar/remover tag funcione corretamente
+- Detectar se a conversa e grupo (via `isGroupChat`)
+- Passar flag `isGroup` para o `MessageBubble`
+- Em grupos, mostrar nome do remetente com cor unica por participante (hash do nome para cor)
+- Mostrar mini-avatar ao lado de cada mensagem em grupo com inicial do remetente
+- Agrupar mensagens consecutivas do mesmo remetente (sem repetir nome/avatar)
 
----
+### 2. Avatares profissionais na lista de conversas
 
-## Bloco 3 -- Acoes Rapidas Simplificadas (Estilo Guru)
+- **Grupos**: icone estilizado com gradiente e icone de grupo (silhuetas sobrepostas), borda diferenciada
+- **Individuais**: avatar com gradiente baseado no nome, inicial centralizada com fonte bold
+- Se `avatar_url` existir no contato, usar a imagem real
+- Adicionar indicador visual de status online (bolinha verde) quando aplicavel
+- Badge de contagem de participantes nos grupos
 
-**Problema atual:** As acoes rapidas no perfil do contato mostram "Tarefa" e "Negocio", que sao conceitos complexos demais para o uso rapido. No Guru, as acoes rapidas sao: Delegar, Arquivar, Favoritar, Ativar/Desativar Chatbot, Mover no Funil.
+### 3. Header do ChatPanel melhorado
 
-**O que sera feito:**
-- Substituir botoes "Tarefa" e "Negocio" por acoes praticas:
-  - **Delegar** -- select de agente para atribuir a conversa
-  - **Arquivar** -- toggle `is_archived` no contato
-  - **Favoritar** -- toggle `is_favorite` no contato (estrela)
-  - **Chatbot On/Off** -- toggle `chatbot_enabled`
-  - **Mover no Funil** -- select de funil + etapa para posicionar o contato
-- "Fechar conversa" permanece como esta
+- Avatar maior e mais destacado no header
+- Para grupos: mostrar contagem de membros abaixo do nome
+- Para individuais: mostrar telefone formatado e status
+- Tipografia mais clara com hierarquia nome > subtitulo
 
----
+### 4. Formatacao geral refinada
 
-## Bloco 4 -- Painel Direito com Abas de Historico
-
-**Problema atual:** O painel direito so mostra informacoes basicas. Faltam as abas de historico que existem no Guru.
-
-**O que sera feito:**
-- Adicionar sistema de abas no `ContactProfilePanel`:
-  - **Dados** -- informacoes do contato (ja existe)
-  - **Atendimento** -- historico de `attendance_history`
-  - **Anotacoes** -- lista de `annotations` da conversa
-  - **Funil** -- posicao atual em funis via `contact_funnel_stages`
-  - **Delegacoes** -- historico de `delegation_history`
-  - **NPS** -- pesquisas de `satisfaction_surveys`
-
----
-
-## Bloco 5 -- Paginas Faltantes na Sidebar
-
-**Problema atual:** Rotas `/nps`, `/arquivos`, `/modulos`, `/suporte` existem na sidebar mas nao tem pagina implementada.
-
-**O que sera feito:**
-- **/nps** -- painel com pesquisas de satisfacao (lista + media + graficos)
-- **/arquivos** -- galeria de midias enviadas/recebidas do storage `chat-media`
-- **/modulos** -- pagina de configuracao de modulos ativos
-- **/suporte** -- pagina simples com informacoes de contato/ajuda
-
----
-
-## Bloco 6 -- Melhorias de Chat (Emoji, Reply, Busca)
-
-**O que sera feito:**
-- Emoji picker no input de mensagem
-- Reply/quote -- clicar em mensagem para responder com referencia
-- Busca global de mensagens
-- Notificacoes sonoras (toggle no header usando `soundEnabled` do chatStore)
+- Bolhas de mensagem com sombras mais suaves
+- Espacamento entre mensagens ajustado
+- Timestamps mais discretos
+- Transicoes suaves ao hover
+- Cores diferenciadas para remetentes em grupo
 
 ---
 
 ## Detalhes Tecnicos
 
-### Bloco 1 (Funil)
-- Criar hook `useContactFunnelStages` com queries em `contact_funnel_stages` JOIN `contacts`
-- Atualizar `FunnelKanban.tsx` para consumir dados reais
-- Usar `@hello-pangea/dnd` (ja instalado) para drag-and-drop entre colunas
-- Modal de selecao de contatos com busca
+### Arquivos modificados
 
-### Bloco 2 (Tags)
-- `ContactProfilePanel`: substituir `updateContact(id, { tags })` por `insert/delete` em `contact_tags`
-- Query: `contact_tags` JOIN `tags` para exibir cor e nome
+1. **`src/components/inbox/MessageBubble.tsx`**
+   - Adicionar prop `isGroup: boolean`
+   - Gerar cor unica por remetente usando hash do `sender_name`
+   - Mostrar avatar inline para cada remetente diferente em grupo
+   - Agrupar mensagens consecutivas do mesmo remetente
 
-### Bloco 3 (Acoes Rapidas)
-- Usar `updateContact(id, { is_archived, is_favorite, chatbot_enabled })`
-- Delegar: `update conversations set assigned_user_id`
-- Mover funil: `upsert contact_funnel_stages`
+2. **`src/components/inbox/ConversationList.tsx`**
+   - Criar componente `ConversationAvatar` com visual profissional
+   - Grupos: icone com fundo gradiente, badge de membros
+   - Individuais: avatar com inicial estilizada ou foto real
+   - Melhorar layout do item da lista (espacamento, tipografia)
 
-### Bloco 4 (Abas)
-- Componente `Tabs` do Radix UI (ja instalado)
-- Queries individuais por aba (lazy loading)
+3. **`src/components/inbox/ChatPanel.tsx`**
+   - Passar `isGroup` flag para cada `MessageBubble`
+   - Melhorar header com avatar maior e info contextual
+   - Para grupos: exibir "X participantes" como subtitulo
 
-### Bloco 5 (Paginas)
-- Criar 4 novos arquivos em `src/pages/`
-- Adicionar rotas em `App.tsx`
-- Hooks de dados correspondentes
+4. **`src/components/inbox/ContactProfilePanel.tsx`**
+   - Avatar no perfil consistente com o novo design
 
-### Bloco 6 (Chat)
-- Instalar `emoji-mart` ou usar emoji picker nativo
-- Estado de reply no `chatStore`
-- Busca via query fulltext em `messages.body`
+### Funcao de cor por remetente (hash)
 
----
+Sera criada uma funcao `getColorForName(name: string)` que retorna uma cor HSL consistente para cada nome, garantindo que cada participante de grupo tenha uma cor unica e reconhecivel.
 
-## Ordem de Execucao
+### Sem mudancas no banco de dados
 
-Cada bloco sera implementado sequencialmente. Apos cada bloco, voce testa e confirma antes de seguir para o proximo.
-
-1. Bloco 1 (Funil) -- impacto direto no fluxo de vendas
-2. Bloco 2 (Tags) -- correcao de bug existente
-3. Bloco 3 (Acoes rapidas) -- usabilidade diaria
-4. Bloco 4 (Abas historico) -- visibilidade de dados
-5. Bloco 5 (Paginas) -- completude do sistema
-6. Bloco 6 (Chat) -- melhorias de experiencia
+Todas as alteracoes sao puramente visuais/frontend. Os dados de `sender_name`, `sender_id`, e `avatar_url` ja existem nas mensagens e contatos.
 
