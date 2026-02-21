@@ -49,11 +49,13 @@ serve(async (req) => {
       );
     }
 
-    // Normalize URL - ensure protocol and remove trailing slash
+    // Normalize URL - ensure protocol, remove trailing slash and known path prefixes
     let baseUrl = api_url.trim().replace(/\/+$/, "");
     if (!/^https?:\/\//i.test(baseUrl)) {
       baseUrl = `https://${baseUrl}`;
     }
+    // Remove common path prefixes that users might include (e.g. /manager)
+    baseUrl = baseUrl.replace(/\/(manager|api)\/?$/i, "");
 
     // ── Action: create-instance ──────────────────────
     if (action === "create-instance") {
