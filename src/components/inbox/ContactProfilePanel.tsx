@@ -10,6 +10,7 @@ import {
   Tag,
   Calendar,
   Info,
+  GitBranch,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +45,8 @@ import { useCreateDeal } from '@/hooks/useDeals';
 import { useTags } from '@/hooks/useTags';
 import { useContactTags, useAddContactTag, useRemoveContactTag } from '@/hooks/useContactTags';
 import { closeConversation } from '@/services/api';
+import { useFunnels } from '@/contexts/FunnelContext';
+import { useContactFunnelsByContact, useAddContactToStage, useRemoveContactFromStage } from '@/hooks/useContactFunnelStages';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
@@ -79,6 +82,26 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const { data: contactTags = [] } = useContactTags(contact.id);
   const addTag = useAddContactTag();
   const removeTag = useRemoveContactTag();
+
+  // Funnel
+  const { funnels } = useFunnels();
+  const { data: contactFunnelStages = [] } = useContactFunnelsByContact(contact.id);
+  const addContactToStage = useAddContactToStage();
+  const removeContactFromStage = useRemoveContactFromStage();
+  const [selectedFunnelId, setSelectedFunnelId] = useState('');
+  const [selectedStageId, setSelectedStageId] = useState('');
+
+  // Filter funnel stages for this contact
+  const contactFunnelEntries = contactFunnelStages.filter((cfs) => cfs.contact_id === contact.id);
+
+  const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId);
+
+  const handleAddToFunnel = () => {
+    if (!selectedFunnelId || !selectedStageId) return;
+    addContactToStage.mutate({ contactId: contact.id, funnelId: selectedFunnelId, stageId: selectedStageId });
+    setSelectedFunnelId('');
+    setSelectedStageId('');
+  };
 
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [dealModalOpen, setDealModalOpen] = useState(false);
@@ -299,6 +322,80 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
           ) : (
             <p className="text-[11px] text-muted-foreground italic">Nenhuma tag adicionada</p>
           )}
+        </div>
+
+        {/* Funnel section */}
+        <div className="px-3 py-3 border-b border-border">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              <GitBranch size={11} />
+              Funil
+            </p>
+          </div>
+
+          {/* Current funnel positions */}
+          {contactFunnelEntries.length > 0 && (
+            <div className="space-y-1 mb-2">
+              {contactFunnelEntries.map((entry) => {
+                const funnel = funnels.find((f) => f.id === entry.funnel_id);
+                const stage = funnel?.stages.find((s) => s.id === entry.stage_id);
+                return (
+                  <div key={entry.id} className="flex items-center justify-between bg-secondary/50 rounded px-2 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-medium text-foreground truncate">{funnel?.name ?? 'Funil'}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{stage?.label ?? 'Etapa'}</p>
+                    </div>
+                    <button
+                      onClick={() => removeContactFromStage.mutate(entry.id)}
+                      className="text-muted-foreground hover:text-destructive transition-colors p-0.5 shrink-0"
+                      title="Remover do funil"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Add to funnel */}
+          <div className="space-y-1.5">
+            <Select value={selectedFunnelId} onValueChange={(v) => { setSelectedFunnelId(v); setSelectedStageId(''); }}>
+              <SelectTrigger className="h-7 text-[11px]">
+                <SelectValue placeholder="Selecionar funil..." />
+              </SelectTrigger>
+              <SelectContent>
+                {funnels.map((f) => (
+                  <SelectItem key={f.id} value={f.id} className="text-xs">{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {selectedFunnel && (
+              <Select value={selectedStageId} onValueChange={setSelectedStageId}>
+                <SelectTrigger className="h-7 text-[11px]">
+                  <SelectValue placeholder="Selecionar etapa..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedFunnel.stages.map((s) => (
+                    <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {selectedFunnelId && selectedStageId && (
+              <Button
+                size="sm"
+                className="w-full h-7 text-[11px] gap-1 bg-success hover:bg-success/90 text-success-foreground"
+                onClick={handleAddToFunnel}
+                disabled={addContactToStage.isPending}
+              >
+                <Plus size={11} />
+                Adicionar ao Funil
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Notes */}

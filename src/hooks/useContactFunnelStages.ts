@@ -40,6 +40,33 @@ export function useContactFunnelStages(funnelId: string | undefined) {
   });
 }
 
+export function useContactFunnelsByContact(contactId: string | undefined) {
+  const { companyId } = useAuth();
+
+  return useQuery({
+    queryKey: ['contact-funnel-stages-by-contact', contactId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('contact_funnel_stages')
+        .select('id, contact_id, stage_id, funnel_id, contacts(name, phone, avatar_url)')
+        .eq('contact_id', contactId!);
+
+      if (error) throw error;
+
+      return (data ?? []).map((row: any) => ({
+        id: row.id,
+        contact_id: row.contact_id,
+        stage_id: row.stage_id,
+        funnel_id: row.funnel_id,
+        contact_name: row.contacts?.name ?? 'Sem nome',
+        contact_phone: row.contacts?.phone ?? null,
+        contact_avatar: row.contacts?.avatar_url ?? null,
+      })) as FunnelContact[];
+    },
+    enabled: !!contactId && !!companyId,
+  });
+}
+
 export function useMoveContactStage() {
   const qc = useQueryClient();
   return useMutation({
