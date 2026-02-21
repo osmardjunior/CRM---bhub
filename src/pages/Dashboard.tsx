@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { MessageSquare, Users, Kanban, CheckSquare, DollarSign, AlertTriangle, Star } from 'lucide-react';
+import { MessageSquare, Users, Kanban, CheckSquare, DollarSign, AlertTriangle, Star, Loader2, BarChart2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -26,7 +26,7 @@ export default function Dashboard() {
   const { companyId, user } = useAuth();
   const { data: npsData } = useNPSCard();
 
-  const { data: metrics } = useQuery({
+  const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['dashboard-metrics', companyId],
     queryFn: async () => {
       const [convOpen, contacts, dealsList, tasksPending, tasksOverdue] = await Promise.all([
@@ -92,38 +92,60 @@ export default function Dashboard() {
         {/* Bar chart */}
         <div className="rounded-xl border border-border bg-card card-shadow p-5">
           <h3 className="text-sm font-semibold text-foreground mb-4">Negócios por Etapa</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={metrics?.dealsByStage ?? []}>
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Bar dataKey="value" fill="hsl(168, 60%, 48%)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {metricsLoading ? (
+            <div className="flex items-center justify-center h-[250px]">
+              <Loader2 size={24} className="animate-spin text-muted-foreground" />
+            </div>
+          ) : (metrics?.dealsByStage ?? []).length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground gap-2">
+              <BarChart2 size={32} className="opacity-30" />
+              <p className="text-sm">Nenhum negócio cadastrado ainda</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={metrics?.dealsByStage ?? []}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="value" fill="hsl(168, 60%, 48%)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Pie chart */}
         <div className="rounded-xl border border-border bg-card card-shadow p-5">
           <h3 className="text-sm font-semibold text-foreground mb-4">Distribuição do Pipeline</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={metrics?.dealsByStage ?? []}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={90}
-                paddingAngle={3}
-                dataKey="value"
-                label={({ name, value }) => `${name}: ${value}`}
-              >
-                {(metrics?.dealsByStage ?? []).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {metricsLoading ? (
+            <div className="flex items-center justify-center h-[250px]">
+              <Loader2 size={24} className="animate-spin text-muted-foreground" />
+            </div>
+          ) : (metrics?.dealsByStage ?? []).length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground gap-2">
+              <BarChart2 size={32} className="opacity-30" />
+              <p className="text-sm">Nenhum negócio para distribuir</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={metrics?.dealsByStage ?? []}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                  label={({ name, value }: { name: string; value: number }) => `${name}: ${value}`}
+                >
+                  {(metrics?.dealsByStage ?? []).map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

@@ -2,8 +2,23 @@ import { useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Check, CheckCheck, Download, FileText, ChevronDown, Bot, Reply } from 'lucide-react';
 
+interface Message {
+  id?: string;
+  body?: string | null;
+  media_url?: string | null;
+  created_at: string;
+  delivery_status?: string | null;
+  processed_by_bot?: boolean;
+  sent_by?: string | null;
+  sender_name?: string | null;
+  sender?: { name?: string | null } | null;
+  reply_to_message_id?: string | null;
+  server_timestamp?: string | null;
+  client_timestamp?: string | null;
+}
+
 interface MessageBubbleProps {
-  msg: any;
+  msg: Message;
   isOutgoing: boolean;
   contactName: string;
   contactAvatarUrl?: string | null;

@@ -43,33 +43,44 @@ export default function InboxPage() {
     if (effectiveSelectedId) {
       markRead.mutate(effectiveSelectedId);
     }
+    // markRead is a stable mutation ref from React Query — intentionally omitted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveSelectedId]);
 
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
   };
 
+  const hasSelection = !!effectiveSelectedId;
+
   return (
     <div className="flex h-[calc(100vh-7rem)] gap-0 -mt-2 rounded-xl border border-border bg-card card-shadow overflow-hidden">
-      <ConversationList
-        conversations={conversations}
-        loading={listLoading}
-        selectedId={effectiveSelectedId}
-        onSelect={setSelectedId}
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        unreadCounts={unreadCounts ?? {}}
-        hasMore={!!hasNextPage}
-        onLoadMore={() => fetchNextPage()}
-        loadingMore={isFetchingNextPage}
-      />
+      {/* Conversation list — hidden on mobile when a chat is open */}
+      <div className={hasSelection ? 'hidden md:flex shrink-0' : 'flex w-full md:w-auto shrink-0'}>
+        <ConversationList
+          conversations={conversations}
+          loading={listLoading}
+          selectedId={effectiveSelectedId}
+          onSelect={setSelectedId}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          unreadCounts={unreadCounts ?? {}}
+          hasMore={!!hasNextPage}
+          onLoadMore={() => fetchNextPage()}
+          loadingMore={isFetchingNextPage}
+        />
+      </div>
 
-      <ChatPanel
-        conversation={effectiveSelectedId ? (detail ?? null) : null}
-        loading={detailLoading && !!effectiveSelectedId}
-        onToggleProfile={() => setProfileOpen((p) => !p)}
-        profileOpen={profileOpen}
-      />
+      {/* Chat panel — hidden on mobile when no chat is selected */}
+      <div className={`${hasSelection ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
+        <ChatPanel
+          conversation={effectiveSelectedId ? (detail ?? null) : null}
+          loading={detailLoading && !!effectiveSelectedId}
+          onToggleProfile={() => setProfileOpen((p) => !p)}
+          profileOpen={profileOpen}
+          onBack={() => setSelectedId(null)}
+        />
+      </div>
 
       {profileOpen && detail && (
         <ContactProfilePanel

@@ -168,7 +168,7 @@ export async function listConversations(
   }
   if (filters?.tag) {
     results = results.filter((c) => {
-      const tags = ((c.contact as any).tags as string[]) || [];
+      const tags = (c.contact.tags as string[]) || [];
       return tags.includes(filters.tag!);
     });
   }
@@ -304,7 +304,7 @@ export async function listContacts(
 
   const total = count ?? 0;
   return {
-    data: results as any,
+    data: results as (Contact & { responsible: { id: string; name: string } | null })[],
     total,
     page,
     totalPages: Math.ceil(total / limit),

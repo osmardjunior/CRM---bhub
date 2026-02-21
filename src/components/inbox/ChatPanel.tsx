@@ -8,6 +8,7 @@ import {
   PanelRightOpen,
   Smile,
   ChevronDown,
+  ChevronLeft,
   Users,
   Lock,
   StickyNote,
@@ -58,15 +59,19 @@ const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import type { ConversationDetail, Annotation } from '@/services/api';
+import type { ConversationDetail, Annotation, MessageWithSender } from '@/services/api';
 import { listAnnotations } from '@/services/api';
+
+type MergedItem =
+  | (MessageWithSender & { _type: 'message' })
+  | (Annotation & { _type: 'annotation' });
 import AIChatAssistDrawer from '@/components/ai/AIChatAssistDrawer';
 import AIAnnotationHelper from '@/components/ai/AIAnnotationHelper';
 import { useChatStore } from '@/store/chatStore';
 
-function groupMessagesByDate(items: any[]) {
-  const groups: { date: string; messages: any[] }[] = [];
-  let current: { date: string; messages: any[] } | null = null;
+function groupMessagesByDate(items: MergedItem[]) {
+  const groups: { date: string; messages: MergedItem[] }[] = [];
+  let current: { date: string; messages: MergedItem[] } | null = null;
 
   for (const msg of items) {
     const d = new Date(msg.created_at);
@@ -85,9 +90,10 @@ interface Props {
   loading: boolean;
   onToggleProfile: () => void;
   profileOpen: boolean;
+  onBack?: () => void;
 }
 
-export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen }: Props) {
+export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen, onBack }: Props) {
   const [input, setInput] = useState('');
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
@@ -119,7 +125,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   });
 
   // Merge messages and annotations by created_at — memoized to avoid re-sorting on every render
-  const messages = conversation?.messages ?? [];
+  const messages = useMemo(() => conversation?.messages ?? [], [conversation?.messages]);
   const mergedItems = useMemo(
     () =>
       [
@@ -402,6 +408,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     <div className="flex flex-1 flex-col min-w-0">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 bg-card">
+        {onBack && (
+          <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 shrink-0" onClick={onBack}>
+            <ChevronLeft size={18} />
+          </Button>
+        )}
         <Avatar className="h-9 w-9 shrink-0">
           <AvatarImage src={contactAvatarUrl ?? undefined} />
           <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conversation.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>

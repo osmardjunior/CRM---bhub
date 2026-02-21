@@ -87,7 +87,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone },
     { to: '/tags', label: 'Tags', icon: Tag },
     { to: '/nps', label: 'NPS', icon: Star },
-    { to: '/contatos', label: 'Usuários', icon: Users },
+    { to: '/contatos', label: 'Contatos', icon: Users },
     { to: '/arquivos', label: 'Arquivos', icon: Archive },
     { to: '/modulos', label: 'Módulos', icon: Puzzle },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },

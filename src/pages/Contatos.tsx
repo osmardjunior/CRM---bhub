@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Users, Search, Plus, Download, Upload } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { Users, Search, Plus, Download, Upload, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,7 @@ export default function ContatosPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(0);
   const { companyId } = useAuth();
 
@@ -51,7 +52,7 @@ export default function ContatosPage() {
 
   const { data: result, isLoading } = useContacts(filters);
 
-  const contacts = result?.data ?? [];
+  const contacts = useMemo(() => result?.data ?? [], [result?.data]);
   const totalPages = result?.totalPages ?? 1;
 
   const allTags = useMemo(() => {
@@ -60,20 +61,25 @@ export default function ContatosPage() {
 
   const selectedContact = contacts.find((c) => c.id === selectedId) || null;
 
-  const handleExport = () => {
+  const handleExport = useCallback(async () => {
     if (!contacts.length) return;
-    const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Tags', 'Último contato'];
-    const rows = contacts.map((c) => ({
-      Nome: c.name,
-      Telefone: c.phone ?? '',
-      Email: c.email ?? '',
-      Origem: c.source ?? '',
-      Tags: ((c.tags as string[]) || []).join('; '),
-      'Último contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
-    }));
-    const csv = generateCSV(headers, rows);
-    downloadCSV('contatos.csv', csv);
-  };
+    setExporting(true);
+    try {
+      const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Tags', 'Último contato'];
+      const rows = contacts.map((c) => ({
+        Nome: c.name,
+        Telefone: c.phone ?? '',
+        Email: c.email ?? '',
+        Origem: c.source ?? '',
+        Tags: ((c.tags as string[]) || []).join('; '),
+        'Último contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
+      }));
+      const csv = generateCSV(headers, rows);
+      downloadCSV('contatos.csv', csv);
+    } finally {
+      setExporting(false);
+    }
+  }, [contacts]);
 
   return (
     <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
@@ -118,8 +124,8 @@ export default function ContatosPage() {
             <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => setImportOpen(true)}>
               <Upload size={14} /> Importar
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleExport} disabled={contacts.length === 0}>
-              <Download size={14} /> Exportar
+            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleExport} disabled={contacts.length === 0 || exporting}>
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Exportar
             </Button>
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setModalOpen(true)}>
               <Plus size={15} /> Novo contato
@@ -152,7 +158,7 @@ export default function ContatosPage() {
               <tbody>
                 {contacts.map((contact) => {
                   const tags = (contact.tags as string[]) || [];
-                  const responsible = (contact as any).responsible;
+                  const responsible = contact.responsible;
                   return (
                     <tr
                       key={contact.id}
