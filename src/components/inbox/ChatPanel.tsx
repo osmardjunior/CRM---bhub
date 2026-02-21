@@ -347,7 +347,10 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       }
     }
     queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
     queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    // Deselect so the conversation leaves the current tab view
+    if (onBack) onBack();
   };
 
   const handleAssignAgent = async (userId: string) => {
