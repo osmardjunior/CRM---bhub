@@ -15,6 +15,10 @@ import {
   X,
   Loader2,
   Sparkles,
+  MoreVertical,
+  RefreshCw,
+  BellOff,
+  Bot,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -517,6 +521,32 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={onToggleProfile}>
           {profileOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </Button>
+
+        {/* Mais Opções */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8">
+              <MoreVertical size={16} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] })}>
+              <RefreshCw size={13} /> Recarregar mensagens
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => setIsAnnotationMode(true)}>
+              <StickyNote size={13} /> Escrever uma anotação
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => setAIDrawerOpen(true)}>
+              <Bot size={13} /> Executar Diálogo / Chatbot
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
+              await supabase.from('conversations').update({ last_message_at: new Date(0).toISOString() }).eq('id', conversation.id);
+              queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            }}>
+              <BellOff size={13} /> Marcar como não lido
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* AI Chat Assist Drawer */}
@@ -664,6 +694,28 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             {isAnnotationMode && conversation && (
               <AIAnnotationHelper conversation={conversation} onInsert={(text) => setInput(text)} />
             )}
+            {/* Emoji picker */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                  <Smile size={17} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-2" align="start" side="top">
+                <div className="grid grid-cols-8 gap-0.5">
+                  {['😀','😂','🥰','😍','🤩','😎','🥳','😊','👍','👏','🙌','🤝','❤️','🔥','⭐','✅','🎉','🎊','💪','🙏','😅','😭','😡','😱','🤔','💡','📢','📌','📅','📋','💰','💳','🛒','🏆','🎯','✨','🌟','💫','📱','💻','📧','📞','🕐','⏰','🗓️','📊','📈','📉','🔒','🔓','⚠️','✔️','❌','➕','➖','➡️','⬅️','🔄','💬','📩','📤','📥'].map((emoji) => (
+                    <button
+                      key={emoji}
+                      className="h-8 w-8 flex items-center justify-center text-lg hover:bg-accent rounded transition-colors"
+                      onClick={() => setInput((prev) => prev + emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+
             <Popover open={quickReplyOpen && !input.startsWith('/')} onOpenChange={(open) => { setQuickReplyOpen(open); if (!open) setQuickReplyFilter(''); }}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">

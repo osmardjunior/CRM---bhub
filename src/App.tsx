@@ -25,6 +25,10 @@ import Relatorios from "./pages/Relatorios";
 import RespostasRapidas from "./pages/RespostasRapidas";
 import Chatbot from "./pages/Chatbot";
 import Campanhas from "./pages/Campanhas";
+import NPS from "./pages/NPS";
+import Arquivos from "./pages/Arquivos";
+import Modulos from "./pages/Modulos";
+import Suporte from "./pages/Suporte";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +59,10 @@ const App = () => (
               <Route path="/chatbot" element={<ProtectedRoute><AppLayout><Chatbot /></AppLayout></ProtectedRoute>} />
               <Route path="/campanhas" element={<ProtectedRoute><AppLayout><Campanhas /></AppLayout></ProtectedRoute>} />
               <Route path="/perfil" element={<ProtectedRoute><AppLayout><MeuPerfil /></AppLayout></ProtectedRoute>} />
+              <Route path="/nps" element={<ProtectedRoute><AppLayout><NPS /></AppLayout></ProtectedRoute>} />
+              <Route path="/arquivos" element={<ProtectedRoute><AppLayout><Arquivos /></AppLayout></ProtectedRoute>} />
+              <Route path="/modulos" element={<ProtectedRoute><AppLayout><Modulos /></AppLayout></ProtectedRoute>} />
+              <Route path="/suporte" element={<ProtectedRoute><AppLayout><Suporte /></AppLayout></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </FunnelProvider>

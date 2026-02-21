@@ -29,8 +29,8 @@ import { useTags } from '@/hooks/useTags';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 
 const statusTabs: { label: string; value: Enums<'conversation_status'> }[] = [
-  { label: 'Abertas', value: 'open' },
-  { label: 'Pendentes', value: 'pending' },
+  { label: 'Em Atend.', value: 'open' },
+  { label: 'Aguardando', value: 'pending' },
   { label: 'Fechadas', value: 'closed' },
 ];
 
@@ -86,12 +86,14 @@ export default function ConversationList({
 
   const activeStatus = filters.status ?? 'open';
   // Always show only individual chats (groups hidden)
+  const [onlyUnread, setOnlyUnread] = useState(false);
 
   const filtered = useMemo(
     () =>
       conversations.filter((c) => {
         const isGroup = isGroupChat(c.contact.phone);
         if (isGroup) return false;
+        if (onlyUnread && !(unreadCounts[c.id] > 0)) return false;
         if (search) {
           const q = search.toLowerCase();
           return (
@@ -101,7 +103,7 @@ export default function ConversationList({
         }
         return true;
       }),
-    [conversations, search],
+    [conversations, search, onlyUnread, unreadCounts],
   );
 
   function handleApplyFilters() {
@@ -349,7 +351,18 @@ export default function ConversationList({
         ))}
       </div>
 
-      {/* Groups are hidden — only individual chats shown */}
+      {/* Quick filters */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-secondary/10 shrink-0">
+        <button
+          onClick={() => setOnlyUnread(!onlyUnread)}
+          className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
+            onlyUnread ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Não Lidas
+          {onlyUnread && <X size={9} />}
+        </button>
+      </div>
 
       {/* Count */}
       {!loading && filtered.length > 0 && (
