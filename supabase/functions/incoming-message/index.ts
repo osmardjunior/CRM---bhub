@@ -356,22 +356,93 @@ serve(async (req) => {
     // ── Update contact metadata ────────────────────────
     const contactUpdates: Record<string, any> = {};
 
-    // Update avatar only for individual contacts (not groups)
-    if (profile_picture_url && !is_group) {
-      contactUpdates.avatar_url = profile_picture_url;
-    }
-
     // Set is_group flag if not already set
     if (is_group && !contact.is_group) {
       contactUpdates.is_group = true;
     }
 
-    // For groups: update name only if we have a group subject and current name looks like a person's name
-    // (i.e., the name was incorrectly set from pushName)
+    // Update avatar only for individual contacts (not groups)
+    if (profile_picture_url && !is_group) {
+      contactUpdates.avatar_url = profile_picture_url;
+    }
+
+    // For groups: update name only if we have a group subject
     if (is_group && from_name && from_name !== from_phone && from_name !== contact.name) {
-      // Only update if from_name is a group subject (not pushName)
-      // from_name for groups is set to groupSubject in parseEvolutionPayload
       contactUpdates.name = from_name;
+    }
+
+    // ── Fetch missing data from Evolution API ──────────
+    if (evolution.isEvolution && evolution.instance_name) {
+      // Look up Evolution API credentials
+      const { data: evoInteg } = await supabase
+        .from("integrations")
+        .select("config")
+        .eq("company_id", company_id)
+        .eq("provider", "evolution")
+        .limit(1)
+        .maybeSingle();
+
+      if (evoInteg) {
+        const evoConfig = evoInteg.config as any;
+        let evoBaseUrl = (evoConfig?.api_url || "").trim().replace(/\/+$/, "");
+        if (evoBaseUrl && !/^https?:\/\//i.test(evoBaseUrl)) {
+          evoBaseUrl = `https://${evoBaseUrl}`;
+        }
+        evoBaseUrl = evoBaseUrl.replace(/\/(manager|api)\/?$/i, "");
+        const evoApiKey = evoConfig?.api_key || "";
+        const instName = evolution.instance_name;
+
+        // Fetch profile picture if contact has none
+        if (!contact.avatar_url && !profile_picture_url && evoBaseUrl && evoApiKey) {
+          try {
+            const remoteJid = is_group
+              ? `${from_phone}@g.us`
+              : `${from_phone}@s.whatsapp.net`;
+            const picResp = await fetch(
+              `${evoBaseUrl}/chat/fetchProfilePictureUrl/${instName}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiKey },
+                body: JSON.stringify({ number: remoteJid }),
+              },
+            );
+            if (picResp.ok) {
+              const picData = await picResp.json();
+              const picUrl = picData?.profilePictureUrl || picData?.picture || picData?.url || null;
+              if (picUrl) {
+                contactUpdates.avatar_url = picUrl;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to fetch profile picture:", e);
+          }
+        }
+
+        // Fetch group name if it looks like a JID/number
+        const nameIsJid = contact.name && /^\d{10,}$/.test(contact.name.replace(/\D/g, ""));
+        if (is_group && nameIsJid && evoBaseUrl && evoApiKey) {
+          try {
+            const groupJid = `${from_phone}@g.us`;
+            const grpResp = await fetch(
+              `${evoBaseUrl}/group/findGroupInfos/${instName}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiKey },
+                body: JSON.stringify({ groupJid }),
+              },
+            );
+            if (grpResp.ok) {
+              const grpData = await grpResp.json();
+              const subject = grpData?.subject || grpData?.name || null;
+              if (subject) {
+                contactUpdates.name = subject;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to fetch group info:", e);
+          }
+        }
+      }
     }
 
     if (Object.keys(contactUpdates).length > 0) {
