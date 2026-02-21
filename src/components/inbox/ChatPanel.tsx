@@ -46,6 +46,7 @@ import StatusBadge from '@/components/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
 import MessageBubble from '@/components/inbox/MessageBubble';
+import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import AudioRecorder from '@/components/inbox/AudioRecorder';
 import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
@@ -403,6 +404,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   };
 
   const contactAvatarUrl = (conversation.contact as { avatar_url?: string | null }).avatar_url;
+  const isGroup = isGroupChat(conversation.contact.phone);
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
@@ -413,22 +415,24 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <ChevronLeft size={18} />
           </Button>
         )}
-        <Avatar className="h-9 w-9 shrink-0">
-          <AvatarImage src={contactAvatarUrl ?? undefined} />
-          <AvatarFallback className={`text-sm font-semibold ${isGroupChat(conversation.contact.phone) ? 'bg-accent text-accent-foreground' : 'bg-primary/10 text-primary'}`}>
-            {isGroupChat(conversation.contact.phone) ? <Users size={16} /> : conversation.contact.name[0]}
-          </AvatarFallback>
-        </Avatar>
+        <ConversationAvatar
+          name={conversation.contact.name}
+          avatarUrl={contactAvatarUrl}
+          isGroup={isGroup}
+          size="md"
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-semibold text-foreground">{conversation.contact.name}</span>
-            {isGroupChat(conversation.contact.phone) && (
+            {isGroup && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">
                 Grupo
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">{conversation.contact.phone}</p>
+          <p className="text-xs text-muted-foreground">
+            {isGroup ? 'Conversa em grupo' : conversation.contact.phone}
+          </p>
         </div>
 
         {/* Status dropdown */}
@@ -539,32 +543,45 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                   {group.date}
                 </span>
               </div>
-              {group.messages.map((item) =>
-                item._type === 'annotation' ? (
-                  <div key={item.id} className="flex justify-center my-2">
-                    <div className="max-w-[80%] rounded-xl px-3.5 py-2 bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 shadow-sm">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Lock size={10} className="text-amber-600 dark:text-amber-400" />
-                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
-                          {item.author?.name ?? 'Agente'} · Anotação interna
-                        </span>
+              {group.messages.map((item, idx) => {
+                if (item._type === 'annotation') {
+                  return (
+                    <div key={item.id} className="flex justify-center my-2">
+                      <div className="max-w-[80%] rounded-xl px-3.5 py-2 bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 shadow-sm">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Lock size={10} className="text-amber-600 dark:text-amber-400" />
+                          <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                            {item.author?.name ?? 'Agente'} · Anotação interna
+                          </span>
+                        </div>
+                        <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{item.body}</p>
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400 text-right mt-0.5">
+                          {new Date(item.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
                       </div>
-                      <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{item.body}</p>
-                      <p className="text-[10px] text-amber-600 dark:text-amber-400 text-right mt-0.5">
-                        {new Date(item.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
                     </div>
-                  </div>
-                ) : (
+                  );
+                }
+                // Determine if we should show sender header (first msg or different sender from previous)
+                const prevItem = idx > 0 ? group.messages[idx - 1] : null;
+                const currentSender = item.sender_name ?? item.sender?.name ?? '';
+                const prevSender = prevItem && prevItem._type === 'message'
+                  ? (prevItem.sender_name ?? prevItem.sender?.name ?? '')
+                  : null;
+                const showSenderHeader = !prevSender || prevSender !== currentSender || prevItem?._type === 'annotation';
+
+                return (
                   <MessageBubble
                     key={item.id}
                     msg={item}
                     isOutgoing={item.sender_type === 'agent'}
                     contactName={conversation.contact.name}
                     contactAvatarUrl={contactAvatarUrl}
+                    isGroup={isGroup}
+                    showSenderHeader={showSenderHeader}
                   />
-                ),
-              )}
+                );
+              })}
             </div>
           ))
         )}
