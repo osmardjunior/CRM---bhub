@@ -152,14 +152,9 @@ function ScheduleMessageButton({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-              <Clock size={15} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top"><p className="text-xs">Agendar mensagem</p></TooltipContent>
-        </Tooltip>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Agendar mensagem">
+          <Clock size={15} />
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-3" align="end" side="top">
         <div className="space-y-3">

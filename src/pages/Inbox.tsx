@@ -17,7 +17,7 @@ export default function InboxPage() {
   const initialId = searchParams.get('id');
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
-  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({ status: 'open' });
 
   const {
     data: infiniteData,

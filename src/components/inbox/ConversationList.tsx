@@ -114,6 +114,8 @@ export default function ConversationList({
     if (localOrder) newFilters.sort = localOrder as 'recent' | 'oldest' | 'name';
     if (localStatus && localStatus !== 'todos') {
       newFilters.status = localStatus as Enums<'conversation_status'>;
+    } else {
+      newFilters.status = activeStatus as Enums<'conversation_status'>;
     }
     onFilterChange(newFilters);
   }
