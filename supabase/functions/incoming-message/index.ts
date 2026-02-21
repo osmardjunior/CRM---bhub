@@ -7,6 +7,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-webhook-secret",
 };
 
+/** Detect if a phone/JID is a group */
+function isGroupJid(phone: string): boolean {
+  if (phone.includes("@g.us")) return true;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("120363")) return true;
+  if (digits.length >= 18) return true;
+  return false;
+}
+
 /**
  * Parse Evolution API v2 webhook payload into our internal format.
  * Evolution sends different event types; we only care about MESSAGES_UPSERT.
@@ -19,11 +28,15 @@ function parseEvolutionPayload(body: any): {
   external_message_id?: string;
   from_phone?: string;
   from_name?: string;
+  sender_name?: string;
+  participant_phone?: string;
   body?: string;
   media_url?: string;
   profile_picture_url?: string;
   timestamp?: string;
   instance_name?: string;
+  is_group?: boolean;
+  group_subject?: string;
 } {
   // Evolution API v2 sends: { event, instance, data, ... }
   if (body.event && body.instance) {
@@ -40,9 +53,16 @@ function parseEvolutionPayload(body: any): {
         return { isEvolution: true, event: "skip_from_me" };
       }
 
-      // Extract phone from remoteJid (format: 5531XXXX@s.whatsapp.net)
+      // Extract phone from remoteJid (format: 5531XXXX@s.whatsapp.net or ...@g.us)
       const remoteJid = key.remoteJid || "";
       const fromPhone = remoteJid.replace(/@.*$/, "");
+
+      // Detect group
+      const isGroup = isGroupJid(remoteJid);
+
+      // For groups, participant is the actual sender's JID
+      const participant = key.participant || data.participant || "";
+      const participantPhone = participant ? participant.replace(/@.*$/, "") : "";
 
       // Extract message body
       const messageBody =
@@ -61,6 +81,9 @@ function parseEvolutionPayload(body: any): {
       const pushName = data.pushName || key.pushName || fromPhone;
       const profilePictureUrl = data.profilePictureUrl || null;
 
+      // Group subject (group name) — Evolution may send this
+      const groupSubject = data.groupSubject || data.subject || message.groupSubject || null;
+
       // Message ID
       const messageId = key.id || data.messageId || `evo_${Date.now()}`;
 
@@ -75,12 +98,16 @@ function parseEvolutionPayload(body: any): {
         channel: "whatsapp",
         external_message_id: messageId,
         from_phone: fromPhone,
-        from_name: pushName,
+        from_name: isGroup ? (groupSubject || undefined) : pushName,
+        sender_name: isGroup ? pushName : undefined,
+        participant_phone: isGroup ? participantPhone : undefined,
         body: messageBody,
         media_url: mediaUrl,
-        profile_picture_url: profilePictureUrl,
+        profile_picture_url: isGroup ? null : profilePictureUrl,
         timestamp: ts,
         instance_name: instanceName,
+        is_group: isGroup,
+        group_subject: groupSubject || undefined,
       };
     }
 
@@ -133,6 +160,8 @@ serve(async (req) => {
     let media_url: string | null;
     let profile_picture_url: string | null = null;
     let timestamp: string | undefined;
+    let sender_name: string | undefined;
+    let is_group = false;
 
     if (evolution.isEvolution) {
       // Skip non-message events
@@ -168,7 +197,6 @@ serve(async (req) => {
       }
 
       if (!foundCompanyId) {
-        // Fallback: try finding any integration with matching instance name in config
         console.error(`No integration found for instance: ${evolution.instance_name}`);
         return new Response(
           JSON.stringify({ error: "No integration found for this instance" }),
@@ -185,6 +213,8 @@ serve(async (req) => {
       media_url = evolution.media_url || null;
       profile_picture_url = evolution.profile_picture_url || null;
       timestamp = evolution.timestamp;
+      sender_name = evolution.sender_name;
+      is_group = evolution.is_group || false;
 
       if (!messageBody && !media_url) {
         return new Response(
@@ -202,6 +232,8 @@ serve(async (req) => {
       messageBody = rawBody.body;
       media_url = rawBody.media_url || null;
       timestamp = rawBody.timestamp;
+      sender_name = rawBody.sender_name;
+      is_group = rawBody.is_group || false;
     }
 
     // ── Validation ─────────────────────────────────────
@@ -283,7 +315,7 @@ serve(async (req) => {
 
     let { data: contact } = await supabase
       .from("contacts")
-      .select("id")
+      .select("id, name, is_group")
       .eq("company_id", company_id)
       .eq("phone", from_phone)
       .maybeSingle();
@@ -292,7 +324,7 @@ serve(async (req) => {
       // Try normalized match
       const { data: contacts } = await supabase
         .from("contacts")
-        .select("id, phone")
+        .select("id, name, phone, is_group")
         .eq("company_id", company_id);
 
       const match = (contacts ?? []).find(
@@ -310,9 +342,10 @@ serve(async (req) => {
             phone: from_phone,
             source: channel,
             tags: [],
-            avatar_url: profile_picture_url,
+            is_group: is_group,
+            avatar_url: is_group ? null : (profile_picture_url || null),
           })
-          .select("id")
+          .select("id, name, is_group")
           .single();
 
         if (contactErr) throw contactErr;
@@ -320,11 +353,31 @@ serve(async (req) => {
       }
     }
 
-    // ── Update avatar_url if we have a new one ─────────
-    if (profile_picture_url) {
+    // ── Update contact metadata ────────────────────────
+    const contactUpdates: Record<string, any> = {};
+
+    // Update avatar only for individual contacts (not groups)
+    if (profile_picture_url && !is_group) {
+      contactUpdates.avatar_url = profile_picture_url;
+    }
+
+    // Set is_group flag if not already set
+    if (is_group && !contact.is_group) {
+      contactUpdates.is_group = true;
+    }
+
+    // For groups: update name only if we have a group subject and current name looks like a person's name
+    // (i.e., the name was incorrectly set from pushName)
+    if (is_group && from_name && from_name !== from_phone && from_name !== contact.name) {
+      // Only update if from_name is a group subject (not pushName)
+      // from_name for groups is set to groupSubject in parseEvolutionPayload
+      contactUpdates.name = from_name;
+    }
+
+    if (Object.keys(contactUpdates).length > 0) {
       await supabase
         .from("contacts")
-        .update({ avatar_url: profile_picture_url })
+        .update(contactUpdates)
         .eq("id", contact.id);
     }
 
@@ -369,12 +422,13 @@ serve(async (req) => {
       conversation = newConv;
     }
 
-    // ── Insert message ─────────────────────────────────
+    // ── Insert message (with sender_name for groups) ───
     const { error: msgErr } = await supabase.from("messages").insert({
       company_id,
       conversation_id: conversation.id,
       sender_type: "user",
       sender_id: null,
+      sender_name: sender_name || null,
       body: messageBody,
       media_url: media_url || null,
       external_message_id,
