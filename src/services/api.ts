@@ -145,27 +145,39 @@ export async function listConversations(
   }
   // default is already 'recent' (desc) set above
 
+  // Apply name/phone filters at the DB level via contact_id subquery
+  if (filters?.name || filters?.phone || filters?.search) {
+    // We need to filter by contact fields — use a separate contacts query approach
+    // Since Supabase doesn't support .ilike on joined columns directly in the main query,
+    // we fetch contact IDs first, then filter conversations
+    let contactQuery = supabase.from('contacts').select('id');
+    
+    if (filters?.name) {
+      contactQuery = contactQuery.ilike('name', `%${filters.name}%`);
+    }
+    if (filters?.phone) {
+      contactQuery = contactQuery.ilike('phone', `%${filters.phone}%`);
+    }
+    if (filters?.search) {
+      contactQuery = contactQuery.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+    }
+    
+    const { data: matchingContacts } = await contactQuery;
+    if (matchingContacts && matchingContacts.length > 0) {
+      const contactIds = matchingContacts.map((c) => c.id);
+      query = query.in('contact_id', contactIds);
+    } else {
+      // No contacts match — return empty
+      return [];
+    }
+  }
+
   const { data, error } = await query;
   if (error) handleError(error);
 
   let results = (data ?? []) as ConversationWithRelations[];
 
-  // Client-side filters for joined fields
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    results = results.filter(
-      (c) =>
-        c.contact.name.toLowerCase().includes(q) ||
-        (c.contact.phone ?? '').includes(q),
-    );
-  }
-  if (filters?.name) {
-    const q = filters.name.toLowerCase();
-    results = results.filter((c) => c.contact.name.toLowerCase().includes(q));
-  }
-  if (filters?.phone) {
-    results = results.filter((c) => (c.contact.phone ?? '').includes(filters.phone!));
-  }
+  // Client-side filter for tags (JSON field, can't easily query in DB)
   if (filters?.tag) {
     results = results.filter((c) => {
       const tags = (c.contact.tags as string[]) || [];

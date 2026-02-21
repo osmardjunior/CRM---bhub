@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
-  Mail, Monitor, Wifi, Star, Clock, User, Users,
+  Star, Clock,
 } from 'lucide-react';
 import { isGroupChat } from '@/services/api';
 import ConversationAvatar from '@/components/inbox/ConversationAvatar';
@@ -85,15 +85,11 @@ export default function ConversationList({
   const { data: teamMembers = [] } = useTeamProfiles();
 
   const activeStatus = filters.status ?? 'open';
-  // Always show only individual chats (groups hidden)
-  const [onlyUnread, setOnlyUnread] = useState(false);
-
   const filtered = useMemo(
     () =>
       conversations.filter((c) => {
         const isGroup = isGroupChat(c.contact.phone);
         if (isGroup) return false;
-        if (onlyUnread && !(unreadCounts[c.id] > 0)) return false;
         if (search) {
           const q = search.toLowerCase();
           return (
@@ -103,7 +99,7 @@ export default function ConversationList({
         }
         return true;
       }),
-    [conversations, search, onlyUnread, unreadCounts],
+    [conversations, search],
   );
 
   function handleApplyFilters() {
@@ -116,6 +112,9 @@ export default function ConversationList({
     if (localTag && localTag !== 'qualquer') newFilters.tag = localTag;
     if (localUser && localUser !== 'qualquer') newFilters.assigned_user_id = localUser;
     if (localOrder) newFilters.sort = localOrder as 'recent' | 'oldest' | 'name';
+    if (localStatus && localStatus !== 'todos') {
+      newFilters.status = localStatus as Enums<'conversation_status'>;
+    }
     onFilterChange(newFilters);
   }
 
@@ -127,15 +126,12 @@ export default function ConversationList({
     setLocalStatus('');
     setLocalOrder('');
     setLocalChannel('');
-    onFilterChange({ channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
+    onFilterChange({ status: 'open', channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
   }
 
   const channelIcons = [
-    { id: 'email', icon: Mail, label: 'E-mail' },
-    { id: 'webchat', icon: Monitor, label: 'Webchat' },
-    { id: 'whatsapp', icon: Wifi, label: 'WhatsApp' },
     { id: 'star', icon: Star, label: 'Favoritos' },
-    { id: 'pending', icon: Clock, label: 'Aguardando' },
+    { id: 'pending', icon: Clock, label: 'Agendados' },
   ];
 
   return (
@@ -351,18 +347,6 @@ export default function ConversationList({
         ))}
       </div>
 
-      {/* Quick filters */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-secondary/10 shrink-0">
-        <button
-          onClick={() => setOnlyUnread(!onlyUnread)}
-          className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
-            onlyUnread ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Não Lidas
-          {onlyUnread && <X size={9} />}
-        </button>
-      </div>
 
       {/* Count */}
       {!loading && filtered.length > 0 && (
