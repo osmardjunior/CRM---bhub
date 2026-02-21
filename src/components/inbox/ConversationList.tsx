@@ -360,23 +360,23 @@ export default function ConversationList({
       </div>
 
       {/* Quick filter chips */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border bg-secondary/10">
+      <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-border overflow-x-auto scrollbar-none">
         {([
-          { key: 'all' as const, label: 'Todos', icon: null },
-          { key: 'favorites' as const, label: 'Favoritos', icon: Star },
-          { key: 'unread' as const, label: 'Não Lidas', icon: MailWarning },
-          { key: 'scheduled' as const, label: 'Agendados', icon: Clock },
-        ] as const).map(({ key, label, icon: Icon }) => (
+          { key: 'all' as const, label: 'Todos', icon: null, activeColor: 'bg-primary text-primary-foreground shadow-sm' },
+          { key: 'favorites' as const, label: 'Favoritos', icon: Star, activeColor: 'bg-amber-500/15 text-amber-600 border-amber-500/30 dark:text-amber-400' },
+          { key: 'unread' as const, label: 'Não lidas', icon: MailWarning, activeColor: 'bg-info/15 text-info border-info/30' },
+          { key: 'scheduled' as const, label: 'Agendados', icon: Clock, activeColor: 'bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400' },
+        ] as const).map(({ key, label, icon: Icon, activeColor }) => (
           <button
             key={key}
             onClick={() => setQuickFilter(quickFilter === key ? 'all' : key)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border whitespace-nowrap transition-all duration-150 shrink-0 ${
               quickFilter === key
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-accent'
+                ? activeColor
+                : 'border-transparent bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-accent/60'
             }`}
           >
-            {Icon && <Icon size={11} />}
+            {Icon && <Icon size={11} className={quickFilter === key ? '' : 'opacity-50'} />}
             {label}
           </button>
         ))}
