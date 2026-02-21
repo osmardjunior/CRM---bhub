@@ -32,6 +32,7 @@ function parseEvolutionPayload(body: any): {
   participant_phone?: string;
   body?: string;
   media_url?: string;
+  media_type?: string;
   profile_picture_url?: string;
   timestamp?: string;
   instance_name?: string;
@@ -74,8 +75,29 @@ function parseEvolutionPayload(body: any): {
         data.body ||
         "";
 
-      // Extract media URL if present
-      const mediaUrl = data.media?.url || null;
+      // Extract media URL — Evolution may place it in different locations
+      const mediaUrl =
+        data.media?.url ||
+        data.message?.mediaUrl ||
+        data.message?.imageMessage?.url ||
+        data.message?.audioMessage?.url ||
+        data.message?.videoMessage?.url ||
+        data.message?.documentMessage?.url ||
+        data.message?.stickerMessage?.url ||
+        null;
+
+      // Detect message type for proper rendering
+      const hasAudio = !!(message.audioMessage || data.message?.audioMessage);
+      const hasImage = !!(message.imageMessage || data.message?.imageMessage);
+      const hasVideo = !!(message.videoMessage || data.message?.videoMessage);
+      const hasDocument = !!(message.documentMessage || data.message?.documentMessage);
+      const hasSticker = !!(message.stickerMessage || data.message?.stickerMessage);
+      const detectedType = hasAudio ? "audio" : hasImage ? "image" : hasVideo ? "video" : hasDocument ? "document" : hasSticker ? "sticker" : "text";
+
+      // Log media details for debugging
+      if (hasAudio || hasImage || hasVideo || hasDocument || hasSticker) {
+        console.log(`Media message detected — type: ${detectedType}, mediaUrl: ${mediaUrl}, keys: ${JSON.stringify(Object.keys(data.media || {}))}, messageKeys: ${JSON.stringify(Object.keys(message))}`);
+      }
 
       // Extract contact name and profile picture
       const pushName = data.pushName || key.pushName || fromPhone;
@@ -101,8 +123,9 @@ function parseEvolutionPayload(body: any): {
         from_name: isGroup ? (groupSubject || undefined) : pushName,
         sender_name: isGroup ? pushName : undefined,
         participant_phone: isGroup ? participantPhone : undefined,
-        body: messageBody,
+        body: messageBody || (mediaUrl ? "" : ""),
         media_url: mediaUrl,
+        media_type: detectedType,
         profile_picture_url: isGroup ? null : profilePictureUrl,
         timestamp: ts,
         instance_name: instanceName,
@@ -162,6 +185,7 @@ serve(async (req) => {
     let timestamp: string | undefined;
     let sender_name: string | undefined;
     let is_group = false;
+    let media_type = "text";
 
     if (evolution.isEvolution) {
       // Skip non-message events
@@ -215,6 +239,19 @@ serve(async (req) => {
       timestamp = evolution.timestamp;
       sender_name = evolution.sender_name;
       is_group = evolution.is_group || false;
+      media_type = evolution.media_type || "text";
+
+      // For media messages without body, set a descriptive placeholder
+      if (!messageBody && media_url) {
+        const typeLabels: Record<string, string> = {
+          audio: "🎤 Áudio",
+          image: "📷 Imagem",
+          video: "🎬 Vídeo",
+          document: "📄 Documento",
+          sticker: "🏷️ Figurinha",
+        };
+        messageBody = typeLabels[media_type] || "📎 Mídia";
+      }
 
       if (!messageBody && !media_url) {
         return new Response(
@@ -502,6 +539,7 @@ serve(async (req) => {
       sender_name: sender_name || null,
       body: messageBody,
       media_url: media_url || null,
+      type: media_type !== "text" ? media_type : "text",
       external_message_id,
       created_at: timestamp || new Date().toISOString(),
     });
