@@ -8,7 +8,7 @@ interface Message {
   media_url?: string | null;
   created_at: string;
   delivery_status?: string | null;
-  processed_by_bot?: boolean;
+  processed_by_bot?: boolean | null;
   sent_by?: string | null;
   sender_name?: string | null;
   sender?: { name?: string | null } | null;
@@ -136,7 +136,7 @@ export default function MessageBubble({ msg, isOutgoing, contactName, contactAva
             </div>
           )}
 
-          {hasMedia && <MediaContent url={msg.media_url} />}
+          {hasMedia && msg.media_url && <MediaContent url={msg.media_url} />}
 
           {hasBody && (
             <p className={`text-sm leading-relaxed whitespace-pre-wrap ${hasMedia ? 'mt-1.5' : ''}`}>

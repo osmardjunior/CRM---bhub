@@ -5,17 +5,17 @@ import {
   Mail,
   Plus,
   CheckCircle,
-  Briefcase,
-  User,
-  Tag,
   Calendar,
   Info,
   GitBranch,
+  Star,
+  Archive,
+  Bot,
+  UserPlus,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -36,12 +36,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import TaskModal from '@/components/tarefas/TaskModal';
-import { useCreateDeal } from '@/hooks/useDeals';
+import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { updateContact } from '@/services/api';
+import { supabase } from '@/integrations/supabase/client';
 import { useTags } from '@/hooks/useTags';
 import { useContactTags, useAddContactTag, useRemoveContactTag } from '@/hooks/useContactTags';
 import { closeConversation } from '@/services/api';
@@ -103,15 +102,64 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     setSelectedStageId('');
   };
 
-  const [taskModalOpen, setTaskModalOpen] = useState(false);
-  const [dealModalOpen, setDealModalOpen] = useState(false);
-  const createDeal = useCreateDeal();
-  const [dealForm, setDealForm] = useState({ title: '', value: 0, notes: '' });
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closeReason, setCloseReason] = useState('resolvido');
   const [closing, setClosing] = useState(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
 
+  // Team for delegation
+  const { data: teamMembers = [] } = useTeamProfiles();
+  const [delegatePopoverOpen, setDelegatePopoverOpen] = useState(false);
+
+  const handleDelegate = async (userId: string) => {
+    try {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ assigned_user_id: userId })
+        .eq('id', conversation.id);
+      if (error) throw error;
+      toast.success('Conversa delegada!');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      setDelegatePopoverOpen(false);
+    } catch {
+      toast.error('Erro ao delegar conversa');
+    }
+  };
+
+  const handleToggleArchive = async () => {
+    try {
+      await updateContact(contact.id, { is_archived: !contact.is_archived });
+      toast.success(contact.is_archived ? 'Contato desarquivado' : 'Contato arquivado');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    } catch {
+      toast.error('Erro ao arquivar contato');
+    }
+  };
+
+  const handleToggleFavorite = async () => {
+    try {
+      await updateContact(contact.id, { is_favorite: !contact.is_favorite });
+      toast.success(contact.is_favorite ? 'Removido dos favoritos' : 'Adicionado aos favoritos');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    } catch {
+      toast.error('Erro ao favoritar contato');
+    }
+  };
+
+  const handleToggleChatbot = async () => {
+    const newVal = !(contact.chatbot_enabled ?? true);
+    try {
+      await updateContact(contact.id, { chatbot_enabled: newVal });
+      toast.success(newVal ? 'Chatbot ativado' : 'Chatbot desativado');
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    } catch {
+      toast.error('Erro ao alterar chatbot');
+    }
+  };
   const contactTagIds = contactTags.map((ct) => ct.tag_id);
 
   const handleToggleTag = (tagId: string) => {
@@ -124,22 +172,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
 
   const handleRemoveTag = (tagId: string) => {
     removeTag.mutate({ contactId: contact.id, tagId });
-  };
-
-  const handleCreateDeal = () => {
-    if (!dealForm.title.trim()) {
-      toast.error('Título é obrigatório');
-      return;
-    }
-    createDeal.mutate(
-      { title: dealForm.title, contact_id: contact.id, value: dealForm.value, notes: dealForm.notes },
-      {
-        onSuccess: () => {
-          setDealModalOpen(false);
-          setDealForm({ title: '', value: 0, notes: '' });
-        },
-      },
-    );
   };
 
   const handleCloseConversation = async () => {
@@ -207,23 +239,62 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         <div className="px-3 py-3 border-b border-border">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Ações rápidas</p>
           <div className="grid grid-cols-2 gap-1.5">
+            <Popover open={delegatePopoverOpen} onOpenChange={setDelegatePopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs justify-start">
+                  <UserPlus size={12} />
+                  Delegar
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-52 p-2" align="start">
+                <p className="text-xs font-semibold mb-2">Delegar para</p>
+                <ScrollArea className="max-h-40">
+                  <div className="space-y-0.5">
+                    {teamMembers.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleDelegate(m.id)}
+                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left"
+                      >
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="text-[9px] bg-primary/10 text-primary">{m.name[0]}</AvatarFallback>
+                        </Avatar>
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
+
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 text-xs justify-start"
-              onClick={() => setTaskModalOpen(true)}
+              className={`h-8 gap-1.5 text-xs justify-start ${contact.is_favorite ? 'bg-amber-500/10 border-amber-500/30 text-amber-600' : ''}`}
+              onClick={handleToggleFavorite}
             >
-              <Plus size={12} />
-              Tarefa
+              <Star size={12} className={contact.is_favorite ? 'fill-amber-500' : ''} />
+              {contact.is_favorite ? 'Favorito' : 'Favoritar'}
             </Button>
+
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 text-xs justify-start"
-              onClick={() => setDealModalOpen(true)}
+              className={`h-8 gap-1.5 text-xs justify-start ${contact.is_archived ? 'bg-muted text-muted-foreground' : ''}`}
+              onClick={handleToggleArchive}
             >
-              <Briefcase size={12} />
-              Negócio
+              <Archive size={12} />
+              {contact.is_archived ? 'Desarquivar' : 'Arquivar'}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-8 gap-1.5 text-xs justify-start ${(contact.chatbot_enabled ?? true) ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600' : ''}`}
+              onClick={handleToggleChatbot}
+            >
+              <Bot size={12} />
+              {(contact.chatbot_enabled ?? true) ? 'Bot On' : 'Bot Off'}
             </Button>
           </div>
           {conversation.status !== 'closed' && (
@@ -407,61 +478,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         )}
       </div>
 
-      {/* Task Modal */}
-      <TaskModal
-        open={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
-        defaultContactId={contact.id}
-        defaultContactName={contact.name}
-      />
-
-      {/* Deal Modal */}
-      <Dialog open={dealModalOpen} onOpenChange={setDealModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Novo Negócio</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label className="text-xs">Título *</Label>
-              <Input
-                value={dealForm.title}
-                onChange={(e) => setDealForm({ ...dealForm, title: e.target.value })}
-                placeholder="Ex: Plano Enterprise"
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Contato</Label>
-              <Input value={contact.name} disabled className="mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Valor (R$)</Label>
-              <Input
-                type="number"
-                value={dealForm.value}
-                onChange={(e) => setDealForm({ ...dealForm, value: Number(e.target.value) })}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Observações</Label>
-              <Textarea
-                value={dealForm.notes}
-                onChange={(e) => setDealForm({ ...dealForm, notes: e.target.value })}
-                placeholder="Notas sobre o negócio..."
-                className="mt-1 min-h-[60px]"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDealModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleCreateDeal} disabled={createDeal.isPending}>Criar Negócio</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Close Conversation Modal */}
       <Dialog open={closeModalOpen} onOpenChange={setCloseModalOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
