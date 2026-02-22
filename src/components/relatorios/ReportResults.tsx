@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -8,7 +9,34 @@ import {
   PaginationNext, PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Download } from 'lucide-react';
 import type { ReportType } from '@/hooks/useReportBuilder';
+
+function exportCSV(rows: any[], reportType: ReportType) {
+  const isChat = reportType === 'chats';
+  const headers = ['Nome', 'Telefone', 'Cadastro', ...(isChat ? ['Canal', 'Status'] : []), 'Última interação', 'Tags'];
+  const csvRows = rows.map(row => {
+    const contact = isChat ? row.contact : row;
+    const tags = Array.isArray(contact?.tags) ? contact.tags.join('; ') : '';
+    const lastContact = isChat ? row.last_message_at : contact?.last_contact_at;
+    return [
+      contact?.name ?? '',
+      contact?.phone ?? '',
+      contact?.created_at ? format(new Date(contact.created_at), 'dd/MM/yyyy') : '',
+      ...(isChat ? [row.channel ?? '', row.status ?? ''] : []),
+      lastContact ? format(new Date(lastContact), 'dd/MM/yyyy HH:mm') : '',
+      tags,
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  });
+  const csv = [headers.join(','), ...csvRows].join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `relatorio-${reportType}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface Props {
   reportType: ReportType;
@@ -46,10 +74,13 @@ export default function ReportResults({ reportType, rows, total, page, onPageCha
 
   return (
     <div className="rounded-xl border border-border bg-card card-shadow">
-      <div className="p-4 border-b border-border">
+      <div className="p-4 border-b border-border flex items-center justify-between">
         <span className="text-sm text-muted-foreground">
           {total} resultado{total !== 1 ? 's' : ''} encontrado{total !== 1 ? 's' : ''}
         </span>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => exportCSV(rows, reportType)}>
+          <Download size={13} /> Exportar CSV
+        </Button>
       </div>
 
       <Table>

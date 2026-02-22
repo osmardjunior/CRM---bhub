@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Building2, Users, Save, Plus, ImageIcon,
-  Shield, Eye, Headphones, Lock,
+  Shield, Eye, Headphones, Lock, Trash2, Tag as TagIcon, Layers,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,8 @@ import StatusBadge from '@/components/StatusBadge';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { useCompany, useUpdateCompany } from '@/hooks/useCompany';
+import { useDepartments, useCreateDepartment, useDeleteDepartment } from '@/hooks/useDepartments';
+import { useTags, useCreateTag, useDeleteTag, useUpdateTag } from '@/hooks/useTags';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -26,6 +28,11 @@ const roleDescriptions = [
   { role: 'Admin', icon: Shield, desc: 'Acesso total ao sistema. Gerencia usuários, configurações e todas as áreas.' },
   { role: 'Supervisor', icon: Eye, desc: 'Visualiza relatórios, gerencia equipe e monitora conversas em tempo real.' },
   { role: 'Agente', icon: Headphones, desc: 'Atende conversas, gerencia contatos atribuídos e cria tarefas.' },
+];
+
+const TAG_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
+  '#3b82f6', '#8b5cf6', '#ec4899', '#64748b', '#06b6d4',
 ];
 
 export default function ConfiguracoesPage() {
@@ -44,6 +51,21 @@ export default function ConfiguracoesPage() {
   const { data: teamMembers, isLoading: loadingTeam } = useTeamProfiles();
   const { data: company, isLoading: loadingCompany } = useCompany();
   const updateCompany = useUpdateCompany();
+
+  // Departments
+  const { data: departments = [], isLoading: loadingDepts } = useDepartments();
+  const createDept = useCreateDepartment();
+  const deleteDept = useDeleteDepartment();
+  const [newDeptName, setNewDeptName] = useState('');
+
+  // Tags
+  const { data: tags = [], isLoading: loadingTags } = useTags();
+  const createTag = useCreateTag();
+  const deleteTag = useDeleteTag();
+  const updateTag = useUpdateTag();
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
+  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string } | null>(null);
 
   const [companyName, setCompanyName] = useState('');
   useEffect(() => {
@@ -86,6 +108,25 @@ export default function ConfiguracoesPage() {
     updateCompany.mutate({ name: companyName.trim() });
   };
 
+  const handleCreateDept = () => {
+    if (!newDeptName.trim()) return;
+    createDept.mutate(newDeptName.trim(), { onSuccess: () => setNewDeptName('') });
+  };
+
+  const handleCreateTag = () => {
+    if (!newTagName.trim()) return;
+    createTag.mutate({ name: newTagName.trim(), color: newTagColor }, {
+      onSuccess: () => { setNewTagName(''); setNewTagColor(TAG_COLORS[0]); },
+    });
+  };
+
+  const handleSaveTagEdit = () => {
+    if (!editingTag) return;
+    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color }, {
+      onSuccess: () => setEditingTag(null),
+    });
+  };
+
   return (
     <div className="mx-auto max-w-4xl h-[calc(100vh-7rem)] -m-4 lg:-m-6 flex flex-col">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
@@ -97,10 +138,17 @@ export default function ConfiguracoesPage() {
             <TabsTrigger value="usuarios" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
               <Users size={14} /> Usuários
             </TabsTrigger>
+            <TabsTrigger value="departamentos" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
+              <Layers size={14} /> Departamentos
+            </TabsTrigger>
+            <TabsTrigger value="tags" className="gap-1.5 data-[state=active]:bg-secondary rounded-lg px-3 py-2 text-xs">
+              <TagIcon size={14} /> Tags
+            </TabsTrigger>
           </TabsList>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 lg:p-6">
+
           {/* ===== EMPRESA ===== */}
           <TabsContent value="empresa" className="mt-0 space-y-6">
             <div className="rounded-xl border border-border bg-card card-shadow p-6">
@@ -208,6 +256,156 @@ export default function ConfiguracoesPage() {
               </div>
             </div>
           </TabsContent>
+
+          {/* ===== DEPARTAMENTOS ===== */}
+          <TabsContent value="departamentos" className="mt-0 space-y-6">
+            <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">Departamentos</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Organize sua equipe em departamentos para roteamento de chats.</p>
+                </div>
+              </div>
+
+              {/* Create form */}
+              <div className="px-4 py-3 border-b border-border bg-secondary/20">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Nome do departamento (ex: Vendas, Suporte, Financeiro)"
+                    value={newDeptName}
+                    onChange={e => setNewDeptName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleCreateDept()}
+                    className="flex-1 bg-background border-border h-8 text-sm"
+                  />
+                  <Button size="sm" className="h-8 gap-1.5" onClick={handleCreateDept} disabled={!newDeptName.trim() || createDept.isPending}>
+                    <Plus size={14} /> Criar
+                  </Button>
+                </div>
+              </div>
+
+              {/* List */}
+              {loadingDepts ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : departments.length === 0 ? (
+                <div className="p-10 text-center text-sm text-muted-foreground">
+                  Nenhum departamento criado ainda.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {departments.map(d => (
+                    <div key={d.id} className="flex items-center justify-between px-4 py-3 hover:bg-accent/20 transition-colors">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Layers size={14} className="text-primary" />
+                        </div>
+                        <span className="text-sm font-medium text-foreground">{d.name}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => deleteDept.mutate(d.id)}
+                        disabled={deleteDept.isPending}
+                      >
+                        <Trash2 size={13} />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ===== TAGS ===== */}
+          <TabsContent value="tags" className="mt-0 space-y-6">
+            <div className="rounded-xl border border-border bg-card card-shadow overflow-hidden">
+              <div className="border-b border-border px-4 py-3">
+                <h2 className="text-base font-semibold text-foreground">Tags</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Crie tags coloridas para categorizar contatos e conversas.</p>
+              </div>
+
+              {/* Create form */}
+              <div className="px-4 py-3 border-b border-border bg-secondary/20 space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Nome da tag"
+                    value={newTagName}
+                    onChange={e => setNewTagName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleCreateTag()}
+                    className="flex-1 bg-background border-border h-8 text-sm"
+                  />
+                  <Button size="sm" className="h-8 gap-1.5" onClick={handleCreateTag} disabled={!newTagName.trim() || createTag.isPending}>
+                    <Plus size={14} /> Criar
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {TAG_COLORS.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setNewTagColor(c)}
+                      className="h-6 w-6 rounded-full border-2 transition-all"
+                      style={{
+                        backgroundColor: c,
+                        borderColor: newTagColor === c ? '#fff' : 'transparent',
+                        boxShadow: newTagColor === c ? `0 0 0 2px ${c}` : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* List */}
+              {loadingTags ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : tags.length === 0 ? (
+                <div className="p-10 text-center text-sm text-muted-foreground">
+                  Nenhuma tag criada ainda.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {tags.map(t => (
+                    <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-accent/20 transition-colors">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                        <span className="text-sm font-medium text-foreground">{t.name}</span>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0"
+                          style={{ backgroundColor: t.color + '20', borderColor: t.color + '60', color: t.color }}
+                        >
+                          {t.name}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-muted-foreground"
+                          onClick={() => setEditingTag({ id: t.id, name: t.name, color: t.color })}
+                        >
+                          Editar
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => deleteTag.mutate(t.id)}
+                          disabled={deleteTag.isPending}
+                        >
+                          <Trash2 size={13} />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
         </div>
       </Tabs>
 
@@ -246,6 +444,46 @@ export default function ConfiguracoesPage() {
             <Button onClick={handleInvite} disabled={inviting}>
               {inviting ? 'Enviando...' : 'Enviar Convite'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Tag modal */}
+      <Dialog open={!!editingTag} onOpenChange={() => setEditingTag(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Editar Tag</DialogTitle></DialogHeader>
+          {editingTag && (
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-xs">Nome</Label>
+                <Input
+                  value={editingTag.name}
+                  onChange={e => setEditingTag({ ...editingTag, name: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs mb-2 block">Cor</Label>
+                <div className="flex gap-2 flex-wrap">
+                  {TAG_COLORS.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setEditingTag({ ...editingTag, color: c })}
+                      className="h-7 w-7 rounded-full border-2 transition-all"
+                      style={{
+                        backgroundColor: c,
+                        borderColor: editingTag.color === c ? '#fff' : 'transparent',
+                        boxShadow: editingTag.color === c ? `0 0 0 2px ${c}` : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingTag(null)}>Cancelar</Button>
+            <Button onClick={handleSaveTagEdit} disabled={updateTag.isPending}>Salvar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
