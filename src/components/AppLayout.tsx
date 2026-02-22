@@ -77,24 +77,52 @@ export default function AppLayout({ children }: AppLayoutProps) {
     return () => document.removeEventListener('keydown', handleKey);
   }, []);
 
-  const navItems = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
-    { to: '/chats', label: 'Chats Geral', icon: Kanban },
-    { to: '/contatos', label: 'Contatos', icon: Users },
-    { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
-    { to: '/pipeline', label: 'Funil', icon: Filter },
-    { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
-    { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot },
-    { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
-    { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
-    { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone },
-    { to: '/nps', label: 'NPS', icon: Star },
-    { to: '/arquivos', label: 'Arquivos', icon: Archive },
-    { to: '/modulos', label: 'Módulos', icon: Puzzle },
-    { to: '/configuracoes', label: 'Configurações', icon: Settings },
-    { to: '/suporte', label: 'Suporte', icon: Headphones },
+  const navGroups = [
+    {
+      label: null,
+      items: [
+        { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      ],
+    },
+    {
+      label: 'Atendimento',
+      items: [
+        { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
+        { to: '/chats', label: 'Chats Geral', icon: Kanban },
+        { to: '/contatos', label: 'Contatos', icon: Users },
+        { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
+        { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
+      ],
+    },
+    {
+      label: 'Automação',
+      items: [
+        { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot },
+        { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
+        { to: '/pipeline', label: 'Funil', icon: Filter },
+      ],
+    },
+    {
+      label: 'Dados',
+      items: [
+        { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
+        { to: '/nps', label: 'NPS', icon: Star },
+        { to: '/arquivos', label: 'Arquivos', icon: Archive },
+      ],
+    },
+    {
+      label: 'Sistema',
+      items: [
+        { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone },
+        { to: '/modulos', label: 'Módulos', icon: Puzzle },
+        { to: '/configuracoes', label: 'Configurações', icon: Settings },
+        { to: '/suporte', label: 'Suporte', icon: Headphones },
+      ],
+    },
   ];
+
+  // Flat list for header title lookup
+  const navItems = navGroups.flatMap(g => g.items);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -110,25 +138,36 @@ export default function AppLayout({ children }: AppLayoutProps) {
           <button onClick={() => setSidebarOpen(false)} className="ml-auto text-sidebar-muted hover:text-sidebar-foreground lg:hidden"><X size={20} /></button>
         </div>
 
-        <nav className="flex-1 space-y-1 px-2 py-4">
-          {navItems.map(item => {
-            const isActive = location.pathname === item.to;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                onClick={() => setSidebarOpen(false)}
-                title={collapsed ? item.label : undefined}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'} ${collapsed ? 'justify-center px-0' : ''}`}
-              >
-                <item.icon size={18} className="shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
-                {!collapsed && item.badge ? (
-                  <Badge className="ml-auto bg-sidebar-primary text-sidebar-primary-foreground text-xs px-1.5 py-0 min-w-[20px] justify-center">{item.badge}</Badge>
-                ) : null}
-              </NavLink>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-3">
+          {navGroups.map((group, gi) => (
+            <div key={gi}>
+              {group.label && !collapsed && (
+                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted/70">
+                  {group.label}
+                </p>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map(item => {
+                  const isActive = location.pathname === item.to;
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      onClick={() => setSidebarOpen(false)}
+                      title={collapsed ? item.label : undefined}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'} ${collapsed ? 'justify-center px-0' : ''}`}
+                    >
+                      <item.icon size={17} className="shrink-0" />
+                      {!collapsed && <span>{item.label}</span>}
+                      {!collapsed && (item as { badge?: number }).badge ? (
+                        <Badge className="ml-auto bg-sidebar-primary text-sidebar-primary-foreground text-xs px-1.5 py-0 min-w-[20px] justify-center">{(item as { badge?: number }).badge}</Badge>
+                      ) : null}
+                    </NavLink>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className="hidden lg:flex justify-center border-t border-sidebar-border py-2">

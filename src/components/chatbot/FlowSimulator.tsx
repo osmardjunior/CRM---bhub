@@ -79,13 +79,14 @@ export default function FlowSimulator({ flow, nodes, open, onClose }: FlowSimula
     const config = node.config || {};
 
     switch (node.node_type) {
-      case 'message':
+      case 'message': {
         addMsg('bot', config.text || '(mensagem vazia)');
         await delay(500);
         const nextAfterMsg = getNextIndex(nodeIdx);
         if (nextAfterMsg !== null) processNode(nextAfterMsg, null);
         else { addMsg('system', '✅ Fluxo finalizado.'); setFinished(true); }
         break;
+      }
 
       case 'menu': {
         const options = (config.options || []) as { label: string; next_position?: number | null }[];
@@ -99,10 +100,13 @@ export default function FlowSimulator({ flow, nodes, open, onClose }: FlowSimula
             if (chosen.next_position != null) {
               const jumpIdx = nodes.findIndex(n => n.position === chosen.next_position);
               if (jumpIdx >= 0) processNode(jumpIdx, null);
-              else { const ni = getNextIndex(nodeIdx); ni !== null ? processNode(ni, null) : (addMsg('system', '✅ Fluxo finalizado.'), setFinished(true)); }
+              else {
+                const ni = getNextIndex(nodeIdx);
+                if (ni !== null) { processNode(ni, null); } else { addMsg('system', '✅ Fluxo finalizado.'); setFinished(true); }
+              }
             } else {
               const ni = getNextIndex(nodeIdx);
-              ni !== null ? processNode(ni, null) : (addMsg('system', '✅ Fluxo finalizado.'), setFinished(true));
+              if (ni !== null) { processNode(ni, null); } else { addMsg('system', '✅ Fluxo finalizado.'); setFinished(true); }
             }
           } else {
             addMsg('bot', '❌ Opção inválida. Tente novamente.');

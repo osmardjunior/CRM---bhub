@@ -332,10 +332,10 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
           </div>
         );
 
-      case 'apply_tag' as any:
+      case 'apply_tag':
         return renderApplyTag();
 
-      case 'move_to_funnel' as any:
+      case 'move_to_funnel':
         return (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -363,10 +363,10 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
           </div>
         );
 
-      case 'delegate' as any:
+      case 'delegate':
         return renderDelegate();
 
-      case 'delay' as any:
+      case 'delay':
         return (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
@@ -396,7 +396,7 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
           </div>
         );
 
-      case 'close_chat' as any:
+      case 'close_chat':
         return (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -421,7 +421,7 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
           </div>
         );
 
-      case 'webhook' as any:
+      case 'webhook':
         return (
           <div className="space-y-4">
             <div className="space-y-2">

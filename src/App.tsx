@@ -42,7 +42,7 @@ const App = () => (
         <AuthProvider>
           <FunnelProvider>
             <Routes>
-              <Route path="/" element={<Navigate to="/chats" replace />} />
+              <Route path="/" element={<Navigate to="/inbox" replace />} />
               <Route path="/login" element={<Login />} />
               <Route path="/chats" element={<ProtectedRoute><AppLayout><ChatsOverview /></AppLayout></ProtectedRoute>} />
               <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
