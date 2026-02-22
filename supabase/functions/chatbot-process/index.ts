@@ -278,6 +278,82 @@ serve(async (req) => {
           break;
         }
 
+        case "smart_router": {
+          const srMode: string = config.mode || "rules";
+          const srRoutes: any[] = config.routes || [];
+          const srDefaultRoute: any = config.default_route || {};
+          const srAiPrompt: string = config.ai_prompt || "";
+
+          let matchedRoute: any = null;
+
+          // ── Rules matching ───────────────────────────────────────────────
+          if (srMode === "rules" || srMode === "both") {
+            const msgLower = (message_body || "").toLowerCase();
+            for (const route of srRoutes) {
+              const keywords: string[] = route.keywords || [];
+              if (keywords.some((kw: string) => kw.trim() && msgLower.includes(kw.trim().toLowerCase()))) {
+                matchedRoute = route;
+                break;
+              }
+            }
+          }
+
+          // ── AI matching (fallback when no rule matched) ───────────────────
+          if (!matchedRoute && (srMode === "ai" || srMode === "both") && srRoutes.length > 0) {
+            const routeDescriptions = srRoutes
+              .map((r: any) => `${r.label}: ${r.ai_intent_description || r.label}`)
+              .join("\n");
+            const aiContext = `Rotas disponíveis:\n${routeDescriptions}\n\nResponda com APENAS o nome exato de uma das rotas listadas acima.`;
+            try {
+              const aiDecision = await callAI(
+                srAiPrompt || "Você é um classificador de intenções de mensagens de clientes. Classifique a mensagem em uma das rotas fornecidas.",
+                aiContext,
+                message_body || "",
+              );
+              const aiLower = aiDecision.toLowerCase();
+              matchedRoute = srRoutes.find((r: any) => aiLower.includes(r.label.toLowerCase())) || null;
+            } catch (e) {
+              console.warn("smart_router AI classification failed:", e);
+            }
+          }
+
+          // ── Execute matched route or default ─────────────────────────────
+          const activeRoute: any = matchedRoute || srDefaultRoute;
+
+          if (activeRoute.response) {
+            responses.push(activeRoute.response);
+          }
+
+          // Apply tags by ID (stored directly as UUIDs)
+          const routeTagIds: string[] = activeRoute.tag_ids || [];
+          if (routeTagIds.length > 0 && contact_id) {
+            for (const tagId of routeTagIds) {
+              await supabase
+                .from("contact_tags")
+                .upsert(
+                  { contact_id, tag_id: tagId, company_id },
+                  { onConflict: "contact_id,tag_id" },
+                );
+            }
+          }
+
+          // Move to funnel stage
+          const routeFunnelId: string = activeRoute.funnel_id || "";
+          const routeStageId: string = activeRoute.stage_id || "";
+          if (routeFunnelId && routeStageId && contact_id) {
+            await supabase
+              .from("contact_funnel_stages")
+              .upsert(
+                { contact_id, funnel_id: routeFunnelId, stage_id: routeStageId, company_id },
+                { onConflict: "contact_id,funnel_id" },
+              );
+          }
+
+          // Smart router is terminal — flow ends after executing the route
+          nextNode = null;
+          break;
+        }
+
         default: {
           // Unknown node type — skip to next
           nextNode = getNextNode(nodes, nextNode.position);

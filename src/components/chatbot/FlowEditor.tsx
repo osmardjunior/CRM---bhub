@@ -40,6 +40,7 @@ const NODE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'delay', label: 'Aguardar (Delay)' },
   { value: 'close_chat', label: 'Encerrar Chat' },
   { value: 'webhook', label: 'Webhook' },
+  { value: 'smart_router', label: 'Roteador Inteligente' },
 ];
 
 interface FlowEditorProps {

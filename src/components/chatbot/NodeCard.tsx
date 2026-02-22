@@ -1,4 +1,4 @@
-import { MessageSquare, List, FileInput, Brain, UserCheck, Clock, Tag, GitBranch, Users, Trash2, Timer, XCircle, Webhook } from 'lucide-react';
+import { MessageSquare, List, FileInput, Brain, UserCheck, Clock, Tag, GitBranch, Users, Trash2, Timer, XCircle, Webhook, Route } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ const NODE_META: Record<string, { label: string; icon: typeof MessageSquare; bad
   delay: { label: 'Aguardar', icon: Timer, badgeClass: 'bg-orange-500/15 text-orange-600 border-orange-500/30' },
   close_chat: { label: 'Encerrar Chat', icon: XCircle, badgeClass: 'bg-destructive/15 text-destructive border-destructive/30' },
   webhook: { label: 'Webhook', icon: Webhook, badgeClass: 'bg-cyan-500/15 text-cyan-600 border-cyan-500/30' },
+  smart_router: { label: 'Roteador Inteligente', icon: Route, badgeClass: 'bg-violet-500/15 text-violet-600 border-violet-500/30' },
 };
 
 function getPreview(node: ChatbotNode): string {
@@ -29,6 +30,11 @@ function getPreview(node: ChatbotNode): string {
     case 'delay': return c.seconds ? `${c.seconds}s de espera` : c.minutes ? `${c.minutes}min de espera` : '';
     case 'webhook': return c.url ? c.url.slice(0, 40) : '';
     case 'close_chat': return c.reason || 'Encerrar atendimento';
+    case 'smart_router': {
+      const mode = c.mode as string | undefined;
+      const routeCount = (c.routes as unknown[] | undefined)?.length ?? 0;
+      return mode ? `Modo: ${mode} | ${routeCount} rota(s)` : '';
+    }
     default: return '';
   }
 }

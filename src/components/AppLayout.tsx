@@ -90,6 +90,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
         { to: '/chats', label: 'Chats Geral', icon: Kanban },
         { to: '/contatos', label: 'Contatos', icon: Users },
+        { to: '/tags', label: 'Tags', icon: Tag },
         { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
         { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
       ],
