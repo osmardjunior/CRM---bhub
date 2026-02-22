@@ -266,15 +266,15 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
         )}
         <div className="space-y-1">
           <Label className="text-xs">Mover para Funil (opcional)</Label>
-          <Select value={funnelId} onValueChange={v => onUpdate({ funnel_id: v, stage_id: '' })}>
+          <Select value={funnelId || '_none'} onValueChange={v => onUpdate({ funnel_id: v === '_none' ? '' : v, stage_id: '' })}>
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Nenhum funil" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Nenhum</SelectItem>
+              <SelectItem value="_none">Nenhum</SelectItem>
               {funnels.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
-        {funnelId && (
+        {funnelId && funnelId !== '_none' && (
           <div className="space-y-1">
             <Label className="text-xs">Etapa</Label>
             <Select value={stageId} onValueChange={v => onUpdate({ stage_id: v })}>
