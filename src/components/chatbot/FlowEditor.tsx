@@ -58,10 +58,10 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showSimulator, setShowSimulator] = useState(false);
   const [addType, setAddType] = useState<string>('');
-  const [channels, setChannels] = useState<Record<string, unknown>>({});
+  const [channels, setChannels] = useState<Record<string, { enabled: boolean; mode: 'manual' | 'automatic' }>>({});
 
   useEffect(() => {
-    setChannels((flow as { channels?: Record<string, unknown> }).channels ?? {});
+    setChannels(((flow as any).channels ?? {}) as Record<string, { enabled: boolean; mode: 'manual' | 'automatic' }>);
   }, [flow]);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
@@ -73,7 +73,7 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
     setAddType('');
   };
 
-  const handleChannelsChange = (newChannels: Record<string, unknown>) => {
+  const handleChannelsChange = (newChannels: Record<string, { enabled: boolean; mode: 'manual' | 'automatic' }>) => {
     setChannels(newChannels);
     onUpdateFlow?.({ id: flow.id, channels: newChannels });
   };
