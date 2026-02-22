@@ -711,6 +711,102 @@ serve(async (req) => {
       }
     }
 
+    // ── Chatbot processing ──────────────────────────────────────────────────
+    // Only process incoming messages (not messages sent by agents/system)
+    if (!from_me) {
+      try {
+        // Skip chatbot if contact has it disabled
+        const { data: contactData } = await supabase
+          .from("contacts")
+          .select("chatbot_enabled")
+          .eq("id", contact.id)
+          .single();
+
+        const chatbotEnabled = contactData?.chatbot_enabled !== false;
+
+        if (chatbotEnabled) {
+          // Get the company's active chatbot flow
+          const { data: activeFlow } = await supabase
+            .from("chatbot_flows")
+            .select("id, business_hours")
+            .eq("company_id", company_id)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (activeFlow) {
+            // Get current conversation chatbot state
+            const { data: convState } = await supabase
+              .from("conversations")
+              .select("chatbot_active, chatbot_current_node")
+              .eq("id", conversation.id)
+              .single();
+
+            let shouldRun = false;
+
+            if (convState?.chatbot_active === true) {
+              // Chatbot is already active and waiting for user input — always continue
+              shouldRun = true;
+            } else {
+              // Evaluate the trigger condition to decide whether to start the flow
+              const bh = (activeFlow.business_hours || {}) as Record<string, any>;
+              const triggerType: string = bh._trigger?.type || "none";
+              const triggerKeyword: string = bh._trigger?.keyword || "";
+
+              switch (triggerType) {
+                case "any_message":
+                  shouldRun = true;
+                  break;
+
+                case "first_message": {
+                  // Only start if this is the very first user message in this conversation
+                  const { count } = await supabase
+                    .from("messages")
+                    .select("id", { count: "exact", head: true })
+                    .eq("conversation_id", conversation.id)
+                    .eq("sender_type", "user");
+                  shouldRun = (count ?? 0) <= 1;
+                  break;
+                }
+
+                case "keyword": {
+                  // Check if any keyword matches the message body
+                  const keywords = triggerKeyword
+                    .split(",")
+                    .map((k: string) => k.trim().toLowerCase())
+                    .filter(Boolean);
+                  const msgLower = messageBody.toLowerCase();
+                  shouldRun = keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
+                  break;
+                }
+
+                case "none":
+                default:
+                  shouldRun = false;
+              }
+            }
+
+            if (shouldRun) {
+              // Invoke chatbot-process asynchronously (fire-and-forget)
+              // We don't await so the webhook responds quickly
+              supabase.functions.invoke("chatbot-process", {
+                body: {
+                  conversation_id: conversation.id,
+                  message_body: messageBody,
+                  company_id,
+                  contact_id: contact.id,
+                },
+              }).catch((e: unknown) =>
+                console.warn("chatbot-process invoke failed:", e instanceof Error ? e.message : e)
+              );
+            }
+          }
+        }
+      } catch (chatbotErr) {
+        // Chatbot errors are non-fatal — the message was already saved
+        console.warn("Chatbot trigger check failed (non-fatal):", chatbotErr);
+      }
+    }
+
     return new Response(
       JSON.stringify({ ok: true, conversation_id: conversation.id }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
