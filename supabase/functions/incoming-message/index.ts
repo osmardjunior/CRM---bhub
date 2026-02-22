@@ -243,14 +243,18 @@ serve(async (req) => {
       media_type = evolution.media_type || "text";
       from_me = evolution.from_me || false;
 
-      // ── Filter invalid JIDs (status broadcasts, newsletters, invalid phones) ──
+      // ── Filter invalid JIDs (status broadcasts, newsletters, communities, invalid phones) ──
       const phoneDigits = from_phone.replace(/\D/g, "");
+      const looksLikeGroupJid = /^\d+-\d+$/.test(from_phone); // e.g. 553183022054-1632608644
+      const looksLikeCommunity = phoneDigits.startsWith("120363");
       if (
         phoneDigits.length > 15 ||
         phoneDigits.length < 8 ||
         from_phone.includes("status") ||
         from_phone.includes("newsletter") ||
-        from_phone === "0"
+        from_phone === "0" ||
+        looksLikeCommunity ||
+        (looksLikeGroupJid && !is_group)
       ) {
         console.log(`Skipping invalid JID: ${from_phone}`);
         return new Response(
