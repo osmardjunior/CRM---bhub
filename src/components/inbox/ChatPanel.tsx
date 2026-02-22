@@ -641,8 +641,13 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               <Bot size={13} /> Executar Diálogo / Chatbot
             </DropdownMenuItem>
             <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
-              await supabase.from('conversations').update({ last_message_at: new Date(0).toISOString() }).eq('id', conversation.id);
+              const { error } = await supabase.from('conversations').update({ has_unread: true }).eq('id', conversation.id);
+              if (error) { toast.error('Erro ao marcar como não lido'); return; }
               queryClient.invalidateQueries({ queryKey: ['conversations'] });
+              queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+              queryClient.invalidateQueries({ queryKey: ['unread-counts'] });
+              toast.success('Conversa marcada como não lida');
+              if (onBack) onBack();
             }}>
               <BellOff size={13} /> Marcar como não lido
             </DropdownMenuItem>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Plus } from 'lucide-react';
+import { ArrowLeft, Play, Plus, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import NodeCard from './NodeCard';
@@ -9,6 +10,22 @@ import ChannelPanel from './ChannelPanel';
 import FlowSimulator from './FlowSimulator';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import type { ChatbotFlow, ChatbotNode } from '@/hooks/useChatbotFlows';
+
+const TRIGGER_LABELS: Record<string, string> = {
+  none: 'Manual',
+  first_message: 'Primeira mensagem',
+  any_message: 'Qualquer mensagem',
+  keyword: 'Palavra-chave',
+  status_resolved: 'Status: Resolvido',
+  status_opened: 'Status: Em Atend.',
+  new_contact: 'Novo contato',
+};
+
+function getTriggerLabel(flow: ChatbotFlow): string {
+  const bh = (flow.business_hours as Record<string, unknown> | null) ?? {};
+  const type = (bh._trigger as { type?: string } | undefined)?.type ?? 'none';
+  return TRIGGER_LABELS[type] ?? 'Manual';
+}
 
 const NODE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'message', label: 'Mensagem' },
@@ -30,10 +47,10 @@ interface FlowEditorProps {
   nodes: ChatbotNode[];
   isLoading: boolean;
   onBack: () => void;
-  onAddNode: (data: { flow_id: string; position: number; node_type: ChatbotNode['node_type']; config: Record<string, any> }) => void;
-  onUpdateNode: (data: { id: string; node_type?: ChatbotNode['node_type']; config?: Record<string, any> }) => void;
+  onAddNode: (data: { flow_id: string; position: number; node_type: ChatbotNode['node_type']; config: Record<string, unknown> }) => void;
+  onUpdateNode: (data: { id: string; node_type?: ChatbotNode['node_type']; config?: Record<string, unknown> }) => void;
   onDeleteNode: (id: string) => void;
-  onUpdateFlow?: (data: { id: string; channels?: Record<string, any> }) => void;
+  onUpdateFlow?: (data: { id: string; channels?: Record<string, unknown> }) => void;
 }
 
 export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, onUpdateNode, onDeleteNode, onUpdateFlow }: FlowEditorProps) {
@@ -41,10 +58,10 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showSimulator, setShowSimulator] = useState(false);
   const [addType, setAddType] = useState<string>('');
-  const [channels, setChannels] = useState<Record<string, any>>({});
+  const [channels, setChannels] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
-    setChannels((flow as any).channels || {});
+    setChannels((flow as { channels?: Record<string, unknown> }).channels ?? {});
   }, [flow]);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
@@ -56,7 +73,7 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
     setAddType('');
   };
 
-  const handleChannelsChange = (newChannels: Record<string, any>) => {
+  const handleChannelsChange = (newChannels: Record<string, unknown>) => {
     setChannels(newChannels);
     onUpdateFlow?.({ id: flow.id, channels: newChannels });
   };
@@ -66,8 +83,16 @@ export default function FlowEditor({ flow, nodes, isLoading, onBack, onAddNode, 
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={onBack}><ArrowLeft size={18} /></Button>
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold text-foreground">{flow.name}</h2>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-semibold text-foreground">{flow.name}</h2>
+            {getTriggerLabel(flow) !== 'Manual' && (
+              <Badge variant="secondary" className="text-[10px] gap-1 shrink-0">
+                <Zap size={10} className="text-primary" />
+                {getTriggerLabel(flow)}
+              </Badge>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">Editor de fluxo</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowSimulator(true)} disabled={nodes.length === 0}>

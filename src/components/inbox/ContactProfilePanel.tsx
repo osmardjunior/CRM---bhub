@@ -12,6 +12,8 @@ import {
   Archive,
   Bot,
   UserPlus,
+  MessageSquare,
+  type LucideIcon,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import ConversationAvatar from '@/components/inbox/ConversationAvatar';
@@ -49,7 +51,7 @@ import { closeConversation } from '@/services/api';
 import { useFunnels } from '@/contexts/FunnelContext';
 import { useContactFunnelsByContact, useAddContactToStage, useRemoveContactFromStage } from '@/hooks/useContactFunnelStages';
 import { toast } from 'sonner';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
 
 interface Props {
@@ -64,7 +66,7 @@ const closeReasons = [
   { value: 'outro', label: 'Outro' },
 ];
 
-function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="flex items-start gap-2.5 py-2 border-b border-border/50 last:border-0">
       <Icon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
@@ -103,6 +105,22 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     setSelectedFunnelId('');
     setSelectedStageId('');
   };
+
+  // Conversation history for this contact
+  const { data: contactConversations = [] } = useQuery({
+    queryKey: ['contact-conversations', contact.id],
+    enabled: !!contact.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('id, status, created_at, last_message_at')
+        .eq('contact_id', contact.id)
+        .order('last_message_at', { ascending: false })
+        .limit(8);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
 
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [closeReason, setCloseReason] = useState('resolvido');
@@ -184,8 +202,8 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
       setCloseModalOpen(false);
-    } catch (err: any) {
-      toast.error(err.message ?? 'Erro ao fechar conversa');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao fechar conversa');
     } finally {
       setClosing(false);
     }
@@ -199,7 +217,7 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     minute: '2-digit',
   });
 
-  const contactAvatarUrl = (contact as any).avatar_url;
+  const contactAvatarUrl = (contact as { avatar_url?: string | null }).avatar_url;
 
   return (
     <div className="flex w-72 min-w-[272px] flex-col border-l border-border bg-card">
@@ -475,11 +493,53 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
 
         {/* Notes */}
         {contact.notes && (
-          <div className="px-3 py-3">
+          <div className="px-3 py-3 border-b border-border">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Observações</p>
             <p className="text-xs text-muted-foreground leading-relaxed">{contact.notes}</p>
           </div>
         )}
+
+        {/* Conversation history */}
+        <div className="px-3 py-3">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+            <MessageSquare size={11} />
+            Histórico de conversas
+          </p>
+          {contactConversations.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">Nenhuma conversa anterior</p>
+          ) : (
+            <div className="space-y-1">
+              {contactConversations.map((conv) => {
+                const statusColors: Record<string, string> = {
+                  open: 'bg-success/15 text-success',
+                  pending: 'bg-warning/15 text-warning',
+                  closed: 'bg-muted text-muted-foreground',
+                };
+                const statusLabels: Record<string, string> = {
+                  open: 'Em Atend.',
+                  pending: 'Aguardando',
+                  closed: 'Fechada',
+                };
+                const dateStr = new Date(conv.last_message_at ?? conv.created_at).toLocaleDateString('pt-BR', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: '2-digit',
+                });
+                return (
+                  <div
+                    key={conv.id}
+                    className={`flex items-center justify-between rounded px-2 py-1.5 ${conv.id === conversation.id ? 'bg-primary/10 border border-primary/20' : 'bg-secondary/40'}`}
+                  >
+                    <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[conv.status] ?? 'bg-muted text-muted-foreground'}`}>
+                      {conv.id === conversation.id ? '● Atual' : (statusLabels[conv.status] ?? conv.status)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <Dialog open={closeModalOpen} onOpenChange={setCloseModalOpen}>
