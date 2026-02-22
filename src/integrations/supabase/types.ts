@@ -1597,6 +1597,9 @@ export type Database = {
         | "apply_tag"
         | "move_to_funnel"
         | "delegate"
+        | "close_chat"
+        | "delay"
+        | "webhook"
       conversation_channel: "whatsapp" | "instagram" | "webchat"
       conversation_status: "open" | "pending" | "closed"
       deal_stage:
@@ -1747,6 +1750,9 @@ export const Constants = {
         "apply_tag",
         "move_to_funnel",
         "delegate",
+        "close_chat",
+        "delay",
+        "webhook",
       ],
       conversation_channel: ["whatsapp", "instagram", "webchat"],
       conversation_status: ["open", "pending", "closed"],

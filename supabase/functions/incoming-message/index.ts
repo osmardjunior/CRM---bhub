@@ -243,6 +243,22 @@ serve(async (req) => {
       media_type = evolution.media_type || "text";
       from_me = evolution.from_me || false;
 
+      // ── Filter invalid JIDs (status broadcasts, newsletters, invalid phones) ──
+      const phoneDigits = from_phone.replace(/\D/g, "");
+      if (
+        phoneDigits.length > 15 ||
+        phoneDigits.length < 8 ||
+        from_phone.includes("status") ||
+        from_phone.includes("newsletter") ||
+        from_phone === "0"
+      ) {
+        console.log(`Skipping invalid JID: ${from_phone}`);
+        return new Response(
+          JSON.stringify({ ok: true, skipped: true, reason: "invalid_jid" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       // For media messages without body, set a descriptive placeholder
       if (!messageBody && media_url) {
         const typeLabels: Record<string, string> = {
@@ -375,15 +391,18 @@ serve(async (req) => {
       } else {
         const { data: newContact, error: contactErr } = await supabase
           .from("contacts")
-          .insert({
-            company_id,
-            name: from_name || from_phone,
-            phone: from_phone,
-            source: channel,
-            tags: [],
-            is_group: is_group,
-            avatar_url: is_group ? null : (profile_picture_url || null),
-          })
+          .upsert(
+            {
+              company_id,
+              name: from_name || from_phone,
+              phone: from_phone,
+              source: channel,
+              tags: [],
+              is_group: is_group,
+              avatar_url: is_group ? null : (profile_picture_url || null),
+            },
+            { onConflict: "company_id,phone" }
+          )
           .select("id, name, is_group")
           .single();
 
@@ -610,6 +629,36 @@ serve(async (req) => {
       } catch (mediaErr: any) {
         console.warn("Media download/upload failed:", mediaErr.message);
         // Continue with original URL as fallback
+      }
+    }
+
+    // ── Deduplication for fromMe messages ────────────
+    // Messages sent from the phone (fromMe) may already exist in the DB
+    // if they were sent via the CRM (without external_message_id).
+    if (from_me) {
+      const recentCutoff = new Date(Date.now() - 60000).toISOString();
+      const { data: recentMatch } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", conversation.id)
+        .eq("body", messageBody)
+        .eq("sender_type", "agent")
+        .gte("created_at", recentCutoff)
+        .limit(1)
+        .maybeSingle();
+
+      if (recentMatch) {
+        // Update the existing message with the external_message_id and skip insertion
+        await supabase
+          .from("messages")
+          .update({ external_message_id })
+          .eq("id", recentMatch.id);
+        
+        console.log(`Deduplicated fromMe message: ${external_message_id}`);
+        return new Response(
+          JSON.stringify({ ok: true, conversation_id: conversation.id, deduplicated: true }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
     }
 
