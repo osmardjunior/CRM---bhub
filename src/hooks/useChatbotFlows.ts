@@ -149,7 +149,7 @@ export function useChatbotNodes(flowId: string | null) {
 
   const updateNode = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<ChatbotNode> & { id: string }) => {
-      const { error } = await supabase.from('chatbot_nodes').update(updates).eq('id', id);
+      const { error } = await supabase.from('chatbot_nodes').update(updates as any).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chatbot-nodes'] }),

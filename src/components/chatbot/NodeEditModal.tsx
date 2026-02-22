@@ -29,6 +29,9 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   apply_tag: 'Aplicar Tag',
   move_to_funnel: 'Mover para Funil',
   delegate: 'Delegar Chat',
+  close_chat: 'Encerrar Chat',
+  delay: 'Atraso / Espera',
+  webhook: 'Webhook',
 };
 
 export default function NodeEditModal({ open, onOpenChange, node, onSave, isNew }: NodeEditModalProps) {
