@@ -124,24 +124,22 @@ function CreateFunnelModal({
             />
           </div>
 
-          {departments.length > 0 && (
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
-                Departamento
-              </label>
-              <Select value={funnelDeptId || '_none'} onValueChange={v => setFunnelDeptId(v === '_none' ? '' : v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todos os departamentos" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">Todos os departamentos</SelectItem>
-                  {departments.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
+              Departamento
+            </label>
+            <Select value={funnelDeptId || '_none'} onValueChange={v => setFunnelDeptId(v === '_none' ? '' : v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos os departamentos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">Todos os departamentos</SelectItem>
+                {departments.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
