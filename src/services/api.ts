@@ -224,6 +224,10 @@ export async function getConversation(
   };
 }
 
+// Cache para perfil do usuário (reduz latência)
+let cachedProfile: { id: string; company_id: string } | null = null;
+let cachedProfileUserId: string | null = null;
+
 export async function sendMessage(
   conversationId: string,
   body: string,
@@ -231,13 +235,22 @@ export async function sendMessage(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('company_id')
-    .eq('id', user.id)
-    .maybeSingle();
+  // Usar cache de perfil para reduzir queries
+  let profile = cachedProfileUserId === user.id ? cachedProfile : null;
+  
+  if (!profile) {
+    const { data: fetchedProfile } = await supabase
+      .from('profiles')
+      .select('id, company_id')
+      .eq('id', user.id)
+      .maybeSingle();
 
-  if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+    if (!fetchedProfile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+    
+    profile = fetchedProfile;
+    cachedProfile = profile;
+    cachedProfileUserId = user.id;
+  }
 
   const { data: msg, error: msgErr } = await supabase
     .from('messages')
@@ -264,8 +277,11 @@ export async function sendMessage(
     console.warn('[api] Erro ao atualizar last_message_at:', convErr);
   }
 
-  // Try to send via WhatsApp API (best-effort, don't block)
-  sendViaWhatsApp(conversationId, body);
+  // Try to send via WhatsApp API (best-effort, don't block) com retry automático
+  sendViaWhatsApp(conversationId, body).catch(() => {
+    // Retry após 1 segundo se falhar
+    setTimeout(() => sendViaWhatsApp(conversationId, body), 1000);
+  });
 
   return msg;
 }
