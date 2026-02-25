@@ -57,6 +57,7 @@ function initActions(campaign?: Campaign | null): CampaignAction[] {
 export default function CampaignForm({ campaign, onSave, onCancel, saving }: Props) {
   const [name, setName] = useState(campaign?.name ?? '');
   const [description, setDescription] = useState(campaign?.description ?? '');
+  const [campaignDeptId, setCampaignDeptId] = useState((campaign as any)?.department_id ?? '');
   const [actions, setActions] = useState<CampaignAction[]>(() => initActions(campaign));
   const [scheduleAt, setScheduleAt] = useState(campaign?.schedule_at ? campaign.schedule_at.slice(0, 16) : '');
   const [deadlineAt, setDeadlineAt] = useState(campaign?.deadline_at ? campaign.deadline_at.slice(0, 16) : '');
@@ -111,7 +112,8 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
       skip_weekends: skipWeekends,
       send_window: sendWindowStart || sendWindowEnd ? { start: sendWindowStart, end: sendWindowEnd } : {},
       status,
-    });
+      ...(campaignDeptId ? { department_id: campaignDeptId } : {}),
+    } as any);
   };
 
   return (
@@ -143,6 +145,23 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
                 <Label>Descrição</Label>
                 <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Descreva o objetivo desta campanha..." rows={3} />
               </div>
+              {departments.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Departamento</Label>
+                  <Select value={campaignDeptId || '_none'} onValueChange={v => setCampaignDeptId(v === '_none' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todos os departamentos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Todos os departamentos</SelectItem>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">Define qual departamento é responsável por esta campanha.</p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Agendado para</Label>

@@ -7,6 +7,7 @@ export interface Tag {
   company_id: string;
   name: string;
   color: string;
+  department_id: string | null;
   created_at: string;
 }
 
@@ -27,7 +28,7 @@ export function useTags() {
 export function useCreateTag() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { name: string; color: string }) => {
+    mutationFn: async (payload: { name: string; color: string; department_id: string }) => {
       const { error } = await supabase
         .from('tags')
         .insert(payload as any);
@@ -44,7 +45,7 @@ export function useCreateTag() {
 export function useUpdateTag() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string; name?: string; color?: string }) => {
+    mutationFn: async ({ id, ...updates }: { id: string; name?: string; color?: string; department_id?: string }) => {
       const { error } = await supabase
         .from('tags')
         .update(updates as any)

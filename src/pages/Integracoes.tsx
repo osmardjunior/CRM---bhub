@@ -4,10 +4,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
+import { useDepartments } from '@/hooks/useDepartments';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import PageHeader from '@/components/shared/PageHeader';
@@ -179,6 +181,7 @@ function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect
 export default function IntegracoesPage() {
   const permissions = usePermissions();
   const { data: integrations, isLoading } = useIntegrations();
+  const { data: departments = [] } = useDepartments();
   const addDevice = useAddDevice();
   const updateDevice = useUpdateDevice();
   const disconnectDevice = useDisconnectDevice();
@@ -205,6 +208,7 @@ export default function IntegracoesPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [provider, setProvider] = useState('');
   const [config, setConfig] = useState<Record<string, string>>({});
+  const [deptId, setDeptId] = useState('');
 
   // edit form state
   const [editName, setEditName] = useState('');
@@ -258,6 +262,7 @@ export default function IntegracoesPage() {
     setPhoneNumber('');
     setProvider('');
     setConfig({});
+    setDeptId('');
   };
 
   const openEdit = (device: Integration) => {
@@ -286,6 +291,7 @@ export default function IntegracoesPage() {
       config,
       phone_number: needsPhone ? phoneNumber : '',
       device_name: deviceName,
+      department_id: deptId || null,
     }, {
       onSuccess: (_, variables) => {
         setAddOpen(false);
@@ -551,6 +557,22 @@ export default function IntegracoesPage() {
                 <Input className="mt-1" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="Ex: Vendas - Principal" />
                 <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na sua equipe</p>
               </div>
+              {departments.length > 0 && (
+                <div>
+                  <Label className="text-xs">Departamento *</Label>
+                  <Select value={deptId} onValueChange={setDeptId}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Selecione o departamento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">Conversas recebidas neste número ficarão visíveis apenas para este departamento</p>
+                </div>
+              )}
               {/* Para Evolution API, o número é detectado automaticamente ao escanear o QR Code */}
               {provider !== 'evolution' && (
                 <div>
@@ -607,6 +629,7 @@ export default function IntegracoesPage() {
                   if (step === 1 && !provider) { toast.error('Selecione um provedor'); return; }
                   if (step === 2 && !deviceName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
                   if (step === 2 && provider !== 'evolution' && !phoneNumber.trim()) { toast.error('Preencha o número de telefone'); return; }
+                  if (step === 2 && departments.length > 0 && !deptId) { toast.error('Selecione um departamento'); return; }
                   setStep(s => s + 1);
                 }}
               >

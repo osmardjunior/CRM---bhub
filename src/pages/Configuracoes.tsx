@@ -133,6 +133,16 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<EditableUser>({ ...user });
   const { data: integrations = [] } = useIntegrations();
+  const { data: departments = [] } = useDepartments();
+  const [userDeptIds, setUserDeptIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from('profile_departments')
+      .select('department_id')
+      .eq('profile_id', user.id)
+      .then(({ data }) => setUserDeptIds((data ?? []).map(r => r.department_id)));
+  }, [user.id]);
 
   const allSelected = ALL_PERMISSION_KEYS.every(k => form.custom_permissions[k]);
 
@@ -220,6 +230,18 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
         .insert({ user_id: form.id, role: form.role as 'admin' | 'supervisor' | 'agent' });
       if (roleInsErr) throw roleInsErr;
 
+      // Save profile_departments — delete all then re-insert selected
+      const { error: deptDelErr } = await supabase.from('profile_departments' as any)
+        .delete()
+        .eq('profile_id', form.id);
+      if (deptDelErr) throw deptDelErr;
+
+      if (userDeptIds.length > 0) {
+        const { error: deptInsErr } = await supabase.from('profile_departments' as any)
+          .insert(userDeptIds.map(did => ({ profile_id: form.id, department_id: did })));
+        if (deptInsErr) throw deptInsErr;
+      }
+
       toast.success('Usuário atualizado com sucesso!');
       onSaved();
       onClose();
@@ -280,6 +302,30 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
                 </SelectContent>
               </Select>
             </div>
+            {/* Departamentos */}
+            {departments.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Departamentos</Label>
+                <p className="text-[11px] text-muted-foreground">Sem seleção = Admin vê tudo. Supervisores/Agentes devem ter ao menos um departamento.</p>
+                <div className="space-y-1.5">
+                  {departments.map(dept => (
+                    <div key={dept.id} className="flex items-center gap-2.5">
+                      <Checkbox
+                        id={`dept-${dept.id}`}
+                        checked={userDeptIds.includes(dept.id)}
+                        onCheckedChange={(c) => {
+                          setUserDeptIds(prev =>
+                            c ? [...prev, dept.id] : prev.filter(id => id !== dept.id)
+                          );
+                        }}
+                      />
+                      <label htmlFor={`dept-${dept.id}`} className="text-sm cursor-pointer select-none">{dept.name}</label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Números de WhatsApp permitidos */}
             {integrations.length > 0 && (
               <div className="space-y-2">
@@ -586,7 +632,8 @@ export default function ConfiguracoesPage() {
   const updateTag = useUpdateTag();
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
-  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string } | null>(null);
+  const [newTagDeptId, setNewTagDeptId] = useState<string>('');
+  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string } | null>(null);
 
   const [companyName, setCompanyName] = useState('');
   const [roundRobinMode, setRoundRobinMode] = useState<'weight' | 'percentage'>('weight');
@@ -639,14 +686,18 @@ export default function ConfiguracoesPage() {
 
   const handleCreateTag = () => {
     if (!newTagName.trim()) return;
-    createTag.mutate({ name: newTagName.trim(), color: newTagColor }, {
-      onSuccess: () => { setNewTagName(''); setNewTagColor(TAG_COLORS[0]); },
+    if (departments.length > 0 && !newTagDeptId) {
+      toast.error('Selecione um departamento para a tag');
+      return;
+    }
+    createTag.mutate({ name: newTagName.trim(), color: newTagColor, department_id: newTagDeptId || null as any }, {
+      onSuccess: () => { setNewTagName(''); setNewTagColor(TAG_COLORS[0]); setNewTagDeptId(''); },
     });
   };
 
   const handleSaveTagEdit = () => {
     if (!editingTag) return;
-    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color }, {
+    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color, department_id: editingTag.department_id }, {
       onSuccess: () => setEditingTag(null),
     });
   };
@@ -1007,6 +1058,18 @@ export default function ConfiguracoesPage() {
                     <Plus size={14} /> Criar
                   </Button>
                 </div>
+                {departments.length > 0 && (
+                  <Select value={newTagDeptId} onValueChange={setNewTagDeptId}>
+                    <SelectTrigger className="h-8 text-xs bg-background border-border">
+                      <SelectValue placeholder="Departamento *" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {TAG_COLORS.map(c => (
                     <button
@@ -1045,6 +1108,11 @@ export default function ConfiguracoesPage() {
                         >
                           {t.name}
                         </Badge>
+                        {t.department_id && (
+                          <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                            {departments.find(d => d.id === t.department_id)?.name ?? '—'}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         <Button
@@ -1159,6 +1227,25 @@ export default function ConfiguracoesPage() {
                   className="mt-1"
                 />
               </div>
+              {departments.length > 0 && (
+                <div>
+                  <Label className="text-xs">Departamento</Label>
+                  <Select
+                    value={editingTag.department_id || '_none'}
+                    onValueChange={v => setEditingTag({ ...editingTag, department_id: v === '_none' ? undefined : v })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Sem departamento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Sem departamento</SelectItem>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div>
                 <Label className="text-xs mb-2 block">Cor</Label>
                 <div className="flex gap-2 flex-wrap">

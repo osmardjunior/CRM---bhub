@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Download, Trash2, X, GripVertical, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useFunnels, Funnel } from '@/contexts/FunnelContext';
+import { useDepartments } from '@/hooks/useDepartments';
 
 // ── Wave SVG ──────────────────────────────────────────────
 function FunnelWave({ stages }: { stages: { label: string; count: number }[] }) {
@@ -77,10 +79,12 @@ function CreateFunnelModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: { name: string; stages: { label: string; count: number }[] }) => void;
+  onCreate: (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null }) => void;
 }) {
   const [name, setName] = useState('');
   const [stages, setStages] = useState<string[]>(['ENTRADA DO LEAD', '']);
+  const [funnelDeptId, setFunnelDeptId] = useState('');
+  const { data: departments = [] } = useDepartments();
 
   const addStage = () => setStages((s) => [...s, '']);
   const removeStage = (idx: number) => setStages((s) => s.filter((_, i) => i !== idx));
@@ -93,9 +97,11 @@ function CreateFunnelModal({
     onCreate({
       name: name.trim(),
       stages: validStages.map((label) => ({ label: label.trim(), count: 0 })),
+      department_id: funnelDeptId || null,
     });
     setName('');
     setStages(['ENTRADA DO LEAD', '']);
+    setFunnelDeptId('');
     onClose();
   };
 
@@ -117,6 +123,25 @@ function CreateFunnelModal({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+
+          {departments.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
+                Departamento
+              </label>
+              <Select value={funnelDeptId || '_none'} onValueChange={v => setFunnelDeptId(v === '_none' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos os departamentos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Todos os departamentos</SelectItem>
+                  {departments.map(d => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">

@@ -39,6 +39,7 @@ export function useAddDevice() {
       config: Record<string, string>;
       phone_number: string;
       device_name: string;
+      department_id?: string | null;
     }) => {
       const { error } = await supabase
         .from('integrations')
@@ -48,6 +49,7 @@ export function useAddDevice() {
           config: payload.config as any,
           phone_number: payload.phone_number,
           device_name: payload.device_name,
+          department_id: payload.department_id || null,
           status: 'connected',
         } as any);
       if (error) throw error;
