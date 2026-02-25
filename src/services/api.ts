@@ -14,12 +14,29 @@ export type ConversationWithRelations = Conversation & {
   assigned_user: Profile | null;
 };
 
+export type ReplyToMessage = {
+  id: string;
+  body: string | null;
+  sender_type: string;
+  sender_name: string | null;
+};
+
 export type MessageWithSender = Message & {
   sender: Profile | null;
+  reply_to?: ReplyToMessage | null;
+};
+
+export type IntegrationSummary = {
+  id: string;
+  device_name: string;
+  phone_number: string | null;
+  status: string;
+  provider: string;
 };
 
 export type ConversationDetail = ConversationWithRelations & {
   messages: MessageWithSender[];
+  integration: IntegrationSummary | null;
 };
 
 // ── Error helper ───────────────────────────────────────
@@ -52,11 +69,11 @@ export async function sendViaWhatsApp(
   conversationId: string,
   body: string,
   mediaUrl?: string,
-): Promise<void> {
+): Promise<{ delivered: boolean; messageId?: string; error?: string; reason?: string }> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return;
-    fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+    if (!session?.access_token) return { delivered: false, reason: 'not_authenticated' };
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -64,11 +81,18 @@ export async function sendViaWhatsApp(
         apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       },
       body: JSON.stringify({ conversation_id: conversationId, body, ...(mediaUrl ? { media_url: mediaUrl } : {}) }),
-    }).catch(() => {
-      // Best-effort: WhatsApp delivery failure is non-fatal
-    });
-  } catch {
-    // Session fetch failed — non-fatal
+    }).catch(() => null);
+    if (!res) return { delivered: false, reason: 'network_error' };
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { delivered: false, error: data?.error ?? `http_${res.status}` };
+    return {
+      delivered: data?.delivered === true,
+      messageId: data?.message_id ?? undefined,
+      error: data?.error ?? undefined,
+      reason: data?.reason ?? undefined,
+    };
+  } catch (e: any) {
+    return { delivered: false, error: e?.message ?? 'exception' };
   }
 }
 
@@ -199,7 +223,8 @@ export async function getConversation(
     .select(`
       *,
       contact:contacts!conversations_contact_id_fkey(*),
-      assigned_user:profiles!conversations_assigned_user_id_fkey(*)
+      assigned_user:profiles!conversations_assigned_user_id_fkey(*),
+      integration:integrations!conversations_integration_id_fkey(id,device_name,phone_number,status,provider)
     `)
     .eq('id', conversationId)
     .maybeSingle();
@@ -218,56 +243,86 @@ export async function getConversation(
 
   if (msgErr) handleError(msgErr);
 
+  // Build a map of id → message for resolving reply_to context client-side
+  const msgList = (msgs ?? []) as MessageWithSender[];
+  const msgMap = new Map(msgList.map((m) => [m.id, m]));
+  const messagesWithReply = msgList.map((m) => {
+    if (m.reply_to_id) {
+      const parent = msgMap.get(m.reply_to_id);
+      if (parent) {
+        return {
+          ...m,
+          reply_to: {
+            id: parent.id!,
+            body: parent.body ?? null,
+            sender_type: parent.sender_type,
+            sender_name: parent.sender_name ?? parent.sender?.name ?? null,
+          },
+        };
+      }
+    }
+    return m;
+  });
+
   return {
     ...(conv as ConversationWithRelations),
-    messages: (msgs ?? []) as MessageWithSender[],
+    messages: messagesWithReply,
+    integration: (conv as any).integration ?? null,
   };
 }
 
 export async function sendMessage(
   conversationId: string,
   body: string,
+  replyToId?: string | null,
+  opts?: { userId: string; companyId: string },
 ): Promise<Message> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+  // Use provided opts (from AuthContext) to skip 2 extra DB roundtrips
+  let userId = opts?.userId;
+  let companyId = opts?.companyId;
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('company_id')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+  if (!userId || !companyId) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+    userId = user.id;
+    if (!companyId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+      companyId = profile.company_id;
+    }
+  }
 
   const { data: msg, error: msgErr } = await supabase
     .from('messages')
     .insert({
       conversation_id: conversationId,
-      company_id: profile.company_id,
+      company_id: companyId,
       sender_type: 'agent',
-      sender_id: user.id,
+      sender_id: userId,
       body,
+      ...(replyToId ? { reply_to_id: replyToId } : {}),
     })
     .select()
     .single();
 
   if (msgErr) handleError(msgErr);
 
-  // Update last_message_at
-  const { error: convErr } = await supabase
+  // Auto-move conversation from "new" (Aberto) → "open" (Em Atendimento)
+  // when an agent sends the first reply. Only changes if still "new".
+  await supabase
     .from('conversations')
-    .update({ last_message_at: new Date().toISOString() })
-    .eq('id', conversationId);
+    .update({ status: 'open' })
+    .eq('id', conversationId)
+    .eq('status', 'new');
 
-  // Non-critical: update timestamp. Log in dev only.
-  if (convErr && import.meta.env.DEV) {
-    console.warn('[api] Erro ao atualizar last_message_at:', convErr);
-  }
+  // last_message_at is now updated by DB trigger — no extra UPDATE needed.
+  // WhatsApp delivery is handled by the caller (useSendMessage) to enable toast feedback.
 
-  // Try to send via WhatsApp API (best-effort, don't block)
-  sendViaWhatsApp(conversationId, body);
-
-  return msg;
+  return msg!;
 }
 
 // ── Contacts ───────────────────────────────────────────
@@ -277,6 +332,8 @@ export interface ContactFilters {
   source?: string;
   page?: number;
   limit?: number;
+  /** When set, only contacts with a conversation assigned to this user_id are returned */
+  assigned_user_id?: string;
 }
 
 export async function listContacts(
@@ -298,6 +355,19 @@ export async function listContacts(
 
   if (filters?.search) {
     query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+  }
+
+  // Agents only see contacts with conversations assigned to them
+  if (filters?.assigned_user_id) {
+    const { data: convContacts } = await supabase
+      .from('conversations')
+      .select('contact_id')
+      .eq('assigned_user_id', filters.assigned_user_id);
+    const contactIds = Array.from(new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)));
+    if (contactIds.length === 0) {
+      return { data: [], total: 0, page, totalPages: 0 };
+    }
+    query = query.in('id', contactIds);
   }
 
   query = query.range(from, to);
@@ -352,6 +422,15 @@ export async function updateContact(
   return data;
 }
 
+export async function deleteContact(contactId: string): Promise<void> {
+  const { error } = await supabase
+    .from('contacts')
+    .delete()
+    .eq('id', contactId);
+
+  if (error) handleError(error);
+}
+
 // ── Team members ───────────────────────────────────────
 export async function listTeamMembers(): Promise<Pick<Profile, 'id' | 'name' | 'email' | 'status'>[]> {
   const { data, error } = await supabase
@@ -378,24 +457,32 @@ export async function getConversationReads(): Promise<ConversationRead[]> {
   return (data ?? []) as ConversationRead[];
 }
 
-export async function markConversationRead(conversationId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+export async function markConversationRead(
+  conversationId: string,
+  opts?: { userId: string; companyId: string },
+): Promise<void> {
+  let userId = opts?.userId;
+  let companyId = opts?.companyId;
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('company_id')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
-
-  const now = new Date().toISOString();
+  if (!userId || !companyId) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+    userId = user.id;
+    if (!companyId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!profile) throw new ApiError('Perfil não encontrado.', 'NOT_FOUND');
+      companyId = profile.company_id;
+    }
+  }
 
   const { error } = await supabase
     .from('conversation_reads')
     .upsert(
-      [{ conversation_id: conversationId, user_id: user.id, last_read_at: now, company_id: profile.company_id }],
+      [{ conversation_id: conversationId, user_id: userId, last_read_at: new Date().toISOString(), company_id: companyId }],
       { onConflict: 'conversation_id,user_id' },
     );
 
@@ -404,34 +491,24 @@ export async function markConversationRead(conversationId: string): Promise<void
 
 export async function getUnreadCounts(
   conversationIds: string[],
-  reads: ConversationRead[],
+  userId: string,
 ): Promise<Record<string, number>> {
   if (conversationIds.length === 0) return {};
 
+  const { data, error } = await supabase.rpc('get_unread_counts', {
+    p_user_id: userId,
+    p_conversation_ids: conversationIds,
+  });
+
+  if (error) {
+    console.warn('[api] get_unread_counts RPC failed:', error.message);
+    return {};
+  }
+
   const counts: Record<string, number> = {};
-  const readMap: Record<string, string> = {};
-  for (const r of reads) {
-    readMap[r.conversation_id] = r.last_read_at;
+  for (const row of (data ?? []) as { conversation_id: string; unread_count: number }[]) {
+    counts[row.conversation_id] = Number(row.unread_count);
   }
-
-  for (const convId of conversationIds) {
-    const lastRead = readMap[convId];
-    let query = supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('conversation_id', convId)
-      .eq('sender_type', 'user');
-
-    if (lastRead) {
-      query = query.gt('created_at', lastRead);
-    }
-
-    const { count, error } = await query;
-    if (!error) {
-      counts[convId] = count ?? 0;
-    }
-  }
-
   return counts;
 }
 
@@ -481,6 +558,28 @@ export async function listAnnotations(conversationId: string): Promise<Annotatio
 
   if (error) handleError(error);
   return (data ?? []) as unknown as Annotation[];
+}
+
+// ── Message deletion (soft-delete) ────────────────────
+export async function deleteMessage(messageId: string): Promise<void> {
+  const { error } = await supabase
+    .from('messages')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', messageId);
+  if (error) handleError(error);
+}
+
+// ── Mark conversation as unread ────────────────────────
+export async function markConversationUnread(conversationId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new ApiError('Usuário não autenticado.', 'AUTH');
+  // Deleting the read record makes it count as "never read" → unread badge appears
+  const { error } = await supabase
+    .from('conversation_reads')
+    .delete()
+    .eq('conversation_id', conversationId)
+    .eq('user_id', user.id);
+  if (error) handleError(error);
 }
 
 export async function createAnnotation(conversationId: string, body: string): Promise<Annotation> {

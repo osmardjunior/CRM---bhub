@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  normalizeWhatsAppNumber,
+  extractRemoteJid,
+  normalizeE164BR,
+  brMaybeAddNinthDigit,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,17 +32,25 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: { user }, error: authErr } = await supabaseUser.auth.getUser();
-    if (authErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Allow internal service-to-service calls (e.g. process-scheduled-messages)
+    // by bypassing user JWT verification when the caller presents the service role key.
+    const authToken = authHeader.replace(/^Bearer\s+/i, "");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const isServiceRoleCall = serviceRoleKey.length > 0 && authToken === serviceRoleKey;
+
+    if (!isServiceRoleCall) {
+      const supabaseUser = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } },
+      );
+      const { data: { user }, error: authErr } = await supabaseUser.auth.getUser();
+      if (authErr || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const { conversation_id, body: messageBody, media_url } = await req.json();
@@ -50,7 +64,7 @@ serve(async (req) => {
 
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("*, contact:contacts!conversations_contact_id_fkey(phone)")
+      .select("*, contact:contacts!conversations_contact_id_fkey(id,phone,phone_e164,wa_identifier_raw), integration:integrations!conversations_integration_id_fkey(id,provider,channel,status,config,phone_number)")
       .eq("id", conversation_id)
       .single();
 
@@ -61,28 +75,83 @@ serve(async (req) => {
       );
     }
 
-    const phone = conv.contact?.phone;
-    if (!phone) {
+    // LID contacts: wa_identifier_raw is set but phone/phone_e164 are null
+    if (!conv.contact?.phone && !conv.contact?.phone_e164 && conv.contact?.wa_identifier_raw) {
       return new Response(
-        JSON.stringify({ error: "Contact has no phone number" }),
+        JSON.stringify({
+          ok: false,
+          delivered: false,
+          error: "Contato identificado por LID do WhatsApp (sem número de telefone). Adicione o número de telefone ao contato para responder.",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Prioridade: phone_e164 (já normalizado) > phone (bruto)
+    const rawPhone = conv.contact?.phone_e164 ?? conv.contact?.phone;
+    if (!rawPhone) {
+      return new Response(
+        JSON.stringify({ error: "Contato sem número de telefone" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Get active integration — try matching by phone_number first, fallback to first available
-    const { data: integrations } = await supabase
-      .from("integrations")
-      .select("*")
-      .eq("company_id", conv.company_id)
-      .eq("channel", conv.channel)
-      .eq("status", "connected");
+    // Normalize to E.164 (+55...). Returns 422 for unparseable numbers so the UI
+    // can show a meaningful error instead of getting a cryptic 400 from Evolution.
+    // normalizeE164BR rejeita explicitamente LIDs e IDs longos com mensagem clara.
+    let phone: string;
+    try {
+      phone = normalizeE164BR(rawPhone);
+    } catch (normErr: any) {
+      const { jidRaw, kind } = extractRemoteJid(rawPhone);
+      console.error(
+        `[send-whatsapp] Número inválido — jidRaw=${jidRaw} kind=${kind}: ${normErr.message}`,
+      );
+      return new Response(
+        JSON.stringify({ ok: false, delivered: false, error: normErr.message }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
-    let integration = null;
-    if (integrations && integrations.length > 0) {
-      const normalizedPhone = phone.replace(/\D/g, "");
-      integration = integrations.find((i: any) =>
-        i.phone_number && i.phone_number.replace(/\D/g, "") === normalizedPhone
-      ) || integrations[0];
+    // For Evolution API: groups need the @g.us JID; individuals use E.164 and
+    // let Evolution resolve the correct JID internally. This avoids exists:false
+    // errors that happen when we construct the wrong JID format ourselves.
+    const isGroupPhone =
+      rawPhone.includes("@g.us") ||
+      rawPhone.replace(/@.*$/, "").replace(/:.*$/, "").startsWith("120363");
+
+    // The destination we pass to Evolution's `number` field:
+    //   - Group:      "120363xxxx@g.us" (JID format, required for groups)
+    //   - Individual: "+5511999999999"  (E.164 — Evolution resolves JID internally)
+    const evolutionDest = isGroupPhone
+      ? rawPhone.replace(/@.*$/, "").replace(/:.*$/, "") + "@g.us"
+      : phone; // E.164 with +
+
+    console.log(
+      `[send-whatsapp] jidRaw=${rawPhone} → e164=${phone} → evolutionDest=${evolutionDest}`,
+    );
+
+    // Resolve integration: prefer the one stored on the conversation (integration_id),
+    // fall back to first connected integration for the company+channel.
+    // IMPORTANT: do NOT gate on status === "connected" here — DB status can be stale.
+    let integration: any = null;
+    const linkedInteg = (conv as any).integration;
+    if (linkedInteg) {
+      integration = linkedInteg;
+      console.log(`Using linked integration ${linkedInteg.id} for conversation ${conversation_id}`);
+    } else {
+      const { data: integrations } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("company_id", conv.company_id)
+        .eq("channel", conv.channel)
+        .eq("status", "connected")
+        .order("created_at", { ascending: true })
+        .limit(1);
+      integration = integrations?.[0] ?? null;
+      if (integration) {
+        console.log(`Fallback: using integration ${integration.id} for conversation ${conversation_id}`);
+      }
     }
 
     if (!integration) {
@@ -96,6 +165,7 @@ serve(async (req) => {
     const provider = integration.provider;
     let delivered = false;
     let externalError: string | null = null;
+    let evolutionMessageId: string | null = null;
 
     try {
       if (provider === "meta" || provider === "Meta Cloud API") {
@@ -172,7 +242,7 @@ serve(async (req) => {
           throw new Error(`360dialog API error: ${err}`);
         }
         delivered = true;
-    } else if (provider === "gupshup" || provider === "Gupshup") {
+      } else if (provider === "gupshup" || provider === "Gupshup") {
         const apiKey = config.api_key;
         const appName = config.app_name;
         const fromNumber = (integration as any).phone_number || config.from_number;
@@ -207,7 +277,7 @@ serve(async (req) => {
         const instanceName = config.instance_name as string;
         if (!apiKey || !apiUrl || !instanceName) throw new Error("Evolution config missing api_key, api_url or instance_name");
 
-          if (media_url) {
+        if (media_url) {
           // Detect media type from URL
           const lower = media_url.toLowerCase();
           let mediaType = "document";
@@ -215,84 +285,84 @@ serve(async (req) => {
           else if (/\.(ogg|mp3|m4a|opus|aac|wav|webm)(\?|$)/.test(lower) || lower.includes("audio") || lower.includes("ptt")) mediaType = "audio";
           else if (/\.(mp4|3gp|mov|avi)(\?|$)/.test(lower) || lower.includes("video")) mediaType = "video";
 
-          const destNumber = phone.replace(/\D/g, "");
-
           if (mediaType === "audio") {
-            // Use sendWhatsAppAudio for voice/audio messages (PTT)
-            const audioPayload = {
-              number: destNumber,
-              audio: media_url,
-            };
-            console.log("Evolution sendWhatsAppAudio payload:", JSON.stringify(audioPayload));
-            const res = await fetch(
-              `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  apikey: apiKey,
-                },
-                body: JSON.stringify(audioPayload),
-              },
-            );
+            const res = await fetch(`${apiUrl}/message/sendWhatsAppAudio/${instanceName}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              body: JSON.stringify({ number: evolutionDest, audio: media_url }),
+            });
             const resBody = await res.text();
             console.log("Evolution sendWhatsAppAudio response:", res.status, resBody);
-            if (!res.ok) {
-              throw new Error(`Evolution API audio error: ${resBody}`);
-            }
+            if (!res.ok) throw new Error(`Evolution API audio error: ${resBody}`);
             delivered = true;
           } else {
-            // Use sendMedia for image, video, document
-            const bodyPayload: Record<string, any> = {
-              number: destNumber,
+            const payload: Record<string, any> = {
+              number: evolutionDest,
               mediatype: mediaType,
               media: media_url,
             };
-            if (messageBody) bodyPayload.caption = messageBody;
+            if (messageBody) payload.caption = messageBody;
             if (mediaType === "document") {
-              const fileName = media_url.split("/").pop()?.split("?")[0] || "document";
-              bodyPayload.fileName = fileName;
+              payload.fileName = media_url.split("/").pop()?.split("?")[0] || "document";
             }
-
-            const res = await fetch(
-              `${apiUrl}/message/sendMedia/${instanceName}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  apikey: apiKey,
-                },
-                body: JSON.stringify(bodyPayload),
-              },
-            );
+            const res = await fetch(`${apiUrl}/message/sendMedia/${instanceName}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              body: JSON.stringify(payload),
+            });
             const resBody = await res.text();
             console.log("Evolution sendMedia response:", res.status, resBody);
-            if (!res.ok) {
-              throw new Error(`Evolution API media error: ${resBody}`);
-            }
+            if (!res.ok) throw new Error(`Evolution API media error: ${resBody}`);
             delivered = true;
           }
         } else {
-          // Evolution API v2 send text message
-          const res = await fetch(
-            `${apiUrl}/message/sendText/${instanceName}`,
-            {
+          // Evolution API v2 sendText com retry de 9.º dígito.
+          // Para números BR de 12 dígitos (sem 9.º dígito), Evolution pode retornar
+          // exists:false. Nesse caso, tentamos com a variante de 13 dígitos (+9).
+          const candidates = isGroupPhone ? [evolutionDest] : brMaybeAddNinthDigit(phone);
+          let lastResBody = "";
+          let lastResOk = false;
+          let successPhone: string | null = null;
+
+          for (let i = 0; i < candidates.length; i++) {
+            const candidateDest = isGroupPhone ? evolutionDest : candidates[i];
+            const res = await fetch(`${apiUrl}/message/sendText/${instanceName}`, {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                apikey: apiKey,
-              },
-              body: JSON.stringify({
-                number: phone.replace(/\D/g, ""),
-                text: messageBody,
-              }),
-            },
-          );
-          if (!res.ok) {
-            const err = await res.text();
-            throw new Error(`Evolution API error: ${err}`);
+              headers: { "Content-Type": "application/json", apikey: apiKey },
+              body: JSON.stringify({ number: candidateDest, text: messageBody }),
+            });
+            lastResBody = await res.text();
+            lastResOk = res.ok;
+            console.log(`Evolution sendText [${candidateDest}] ${res.status}:`, lastResBody);
+
+            if (res.ok) {
+              successPhone = candidates[i];
+              delivered = true;
+              try {
+                const resData = JSON.parse(lastResBody);
+                evolutionMessageId = resData?.key?.id || resData?.id || null;
+              } catch { /* ignore parse errors */ }
+              break;
+            }
+
+            // Só tentar próximo candidato se foi exists:false (número desconhecido)
+            const isExistsFalse = lastResBody.includes('"exists":false') || lastResBody.includes('"exists": false');
+            if (!isExistsFalse || i === candidates.length - 1) {
+              break;
+            }
+            console.log(`[send-whatsapp] exists:false para ${candidates[i]}, tentando variante com 9.º dígito`);
           }
-          delivered = true;
+
+          if (!delivered) throw new Error(`Evolution API error: ${lastResBody}`);
+
+          // Se sucesso foi com variante do 9.º dígito, salvar phone_e164 correto no contato
+          if (successPhone && successPhone !== phone && conv.contact?.id) {
+            await supabase
+              .from("contacts")
+              .update({ phone_e164: successPhone })
+              .eq("id", conv.contact.id);
+            console.log(`[send-whatsapp] Atualizado phone_e164=${successPhone} após retry 9.º dígito`);
+          }
         }
       } else {
         externalError = `Unknown provider: ${provider}`;
@@ -303,7 +373,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, delivered, error: externalError }),
+      JSON.stringify({ ok: true, delivered, error: externalError, message_id: evolutionMessageId }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {

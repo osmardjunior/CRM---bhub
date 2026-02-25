@@ -317,8 +317,14 @@ serve(async (req) => {
             }
           }
 
-          // ── Execute matched route or default ─────────────────────────────
-          const activeRoute: any = matchedRoute || srDefaultRoute;
+          // ── Execute matched route (no default fallback) ──────────────────
+          const activeRoute: any = matchedRoute;
+
+          if (!activeRoute) {
+            // No route matched and no default — router is terminal, do nothing
+            nextNode = null;
+            break;
+          }
 
           if (activeRoute.response) {
             responses.push(activeRoute.response);
@@ -347,6 +353,34 @@ serve(async (req) => {
                 { contact_id, funnel_id: routeFunnelId, stage_id: routeStageId, company_id },
                 { onConflict: "contact_id,funnel_id" },
               );
+          }
+
+          // Delegate to user by weighted percentage
+          const userAssignments: Array<{ user_id: string; percentage: number }> = activeRoute.delegate_assignments || [];
+          if (userAssignments.length > 0) {
+            const chosenUserId = weightedRandomPick(
+              userAssignments.map((a: any) => ({ id: a.user_id, weight: a.percentage || 0 }))
+            );
+            if (chosenUserId) {
+              await supabase
+                .from("conversations")
+                .update({ assigned_user_id: chosenUserId })
+                .eq("id", conversation_id);
+            }
+          }
+
+          // Delegate to department by weighted percentage
+          const deptAssignments: Array<{ department_id: string; percentage: number }> = activeRoute.delegate_dept_assignments || [];
+          if (deptAssignments.length > 0) {
+            const chosenDeptId = weightedRandomPick(
+              deptAssignments.map((a: any) => ({ id: a.department_id, weight: a.percentage || 0 }))
+            );
+            if (chosenDeptId) {
+              await supabase
+                .from("conversations")
+                .update({ department_id: chosenDeptId })
+                .eq("id", conversation_id);
+            }
           }
 
           // Smart router is terminal — flow ends after executing the route
@@ -421,6 +455,19 @@ serve(async (req) => {
 
 function getNextNode(nodes: any[], currentPosition: number): any | null {
   return nodes.find((n: any) => n.position > currentPosition) ?? null;
+}
+
+/** Pick an ID from a weighted list. Returns null if list empty or all weights zero. */
+function weightedRandomPick(items: Array<{ id: string; weight: number }>): string | null {
+  const valid = items.filter(i => i.id && i.weight > 0);
+  if (valid.length === 0) return null;
+  const total = valid.reduce((s, i) => s + i.weight, 0);
+  let rand = Math.random() * total;
+  for (const item of valid) {
+    rand -= item.weight;
+    if (rand <= 0) return item.id;
+  }
+  return valid[valid.length - 1].id;
 }
 
 function checkBusinessHours(businessHours: any): boolean {
@@ -508,27 +555,37 @@ async function sendViaWhatsApp(
   messageBody: string,
 ): Promise<void> {
   try {
-    // Get contact phone from conversation
+    // Get contact phone and integration_id from conversation
     const { data: conv } = await supabase
       .from("conversations")
-      .select("contact:contacts!conversations_contact_id_fkey(phone)")
+      .select("integration_id, contact:contacts!conversations_contact_id_fkey(phone, phone_e164)")
       .eq("id", conversation_id)
       .single();
 
-    const phone: string | undefined = conv?.contact?.phone;
+    const phone: string | undefined = conv?.contact?.phone_e164 || conv?.contact?.phone;
     if (!phone) return;
 
-    // Get the first connected WhatsApp integration
-    const { data: integrations } = await supabase
-      .from("integrations")
-      .select("*")
-      .eq("company_id", company_id)
-      .eq("channel", "whatsapp")
-      .eq("status", "connected");
+    // Use the conversation's own integration_id, fallback to first connected
+    let integration: any = null;
+    if (conv?.integration_id) {
+      const { data: intData } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("id", conv.integration_id)
+        .single();
+      if (intData?.status === "connected") integration = intData;
+    }
 
-    if (!integrations || integrations.length === 0) return;
-
-    const integration = integrations[0];
+    if (!integration) {
+      const { data: integrations } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("company_id", company_id)
+        .eq("channel", "whatsapp")
+        .eq("status", "connected");
+      if (!integrations || integrations.length === 0) return;
+      integration = integrations[0];
+    }
     const config = integration.config as Record<string, any>;
     const provider: string = integration.provider || "";
 

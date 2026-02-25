@@ -565,6 +565,9 @@ export type Database = {
           notes: string | null
           origin_device_id: string | null
           phone: string | null
+          phone_e164: string | null
+          remote_jid_raw: string | null
+          wa_identifier_raw: string | null
           responsible_user_id: string | null
           source: string | null
           tags: Json | null
@@ -587,6 +590,9 @@ export type Database = {
           notes?: string | null
           origin_device_id?: string | null
           phone?: string | null
+          phone_e164?: string | null
+          remote_jid_raw?: string | null
+          wa_identifier_raw?: string | null
           responsible_user_id?: string | null
           source?: string | null
           tags?: Json | null
@@ -609,6 +615,9 @@ export type Database = {
           notes?: string | null
           origin_device_id?: string | null
           phone?: string | null
+          phone_e164?: string | null
+          remote_jid_raw?: string | null
+          wa_identifier_raw?: string | null
           responsible_user_id?: string | null
           source?: string | null
           tags?: Json | null
@@ -627,6 +636,58 @@ export type Database = {
             columns: ["responsible_user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversation_events: {
+        Row: {
+          actor_id: string | null
+          company_id: string
+          conversation_id: string
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json | null
+        }
+        Insert: {
+          actor_id?: string | null
+          company_id: string
+          conversation_id: string
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json | null
+        }
+        Update: {
+          actor_id?: string | null
+          company_id?: string
+          conversation_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -1126,6 +1187,7 @@ export type Database = {
           company_id: string
           conversation_id: string
           created_at: string
+          deleted_at: string | null
           delivery_status: string | null
           direction: string | null
           external_message_id: string | null
@@ -1134,6 +1196,7 @@ export type Database = {
           media_file_id: string | null
           media_url: string | null
           processed_by_bot: boolean | null
+          reply_to_id: string | null
           reply_to_message_id: string | null
           sender_id: string | null
           sender_name: string | null
@@ -1148,6 +1211,7 @@ export type Database = {
           company_id: string
           conversation_id: string
           created_at?: string
+          deleted_at?: string | null
           delivery_status?: string | null
           direction?: string | null
           external_message_id?: string | null
@@ -1156,6 +1220,7 @@ export type Database = {
           media_file_id?: string | null
           media_url?: string | null
           processed_by_bot?: boolean | null
+          reply_to_id?: string | null
           reply_to_message_id?: string | null
           sender_id?: string | null
           sender_name?: string | null
@@ -1170,6 +1235,7 @@ export type Database = {
           company_id?: string
           conversation_id?: string
           created_at?: string
+          deleted_at?: string | null
           delivery_status?: string | null
           direction?: string | null
           external_message_id?: string | null
@@ -1178,6 +1244,7 @@ export type Database = {
           media_file_id?: string | null
           media_url?: string | null
           processed_by_bot?: boolean | null
+          reply_to_id?: string | null
           reply_to_message_id?: string | null
           sender_id?: string | null
           sender_name?: string | null
@@ -1202,6 +1269,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "messages_reply_to_id_fkey"
+            columns: ["reply_to_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "messages_sender_id_fkey"
             columns: ["sender_id"]
             isOneToOne: false
@@ -1215,9 +1289,17 @@ export type Database = {
           avatar_url: string | null
           company_id: string
           created_at: string
+          allowed_integration_ids: string[] | null
+          custom_permissions: Record<string, boolean>
+          display_name: string | null
           email: string
           id: string
+          is_active: boolean
+          last_seen_at: string | null
           name: string
+          round_robin_weight: number
+          spy_mode: boolean
+          access_hours: { enabled: boolean; intervals: { start: string; end: string }[]; blocked_days: number[] }
           status: string
           updated_at: string
         }
@@ -1225,19 +1307,35 @@ export type Database = {
           avatar_url?: string | null
           company_id: string
           created_at?: string
+          allowed_integration_ids?: string[] | null
+          custom_permissions?: Record<string, boolean>
+          display_name?: string | null
           email: string
           id: string
+          is_active?: boolean
+          last_seen_at?: string | null
           name: string
+          round_robin_weight?: number
+          spy_mode?: boolean
+          access_hours?: { enabled: boolean; intervals: { start: string; end: string }[]; blocked_days: number[] }
           status?: string
           updated_at?: string
         }
         Update: {
+          allowed_integration_ids?: string[] | null
           avatar_url?: string | null
           company_id?: string
           created_at?: string
+          custom_permissions?: Record<string, boolean>
+          display_name?: string | null
           email?: string
           id?: string
+          is_active?: boolean
+          last_seen_at?: string | null
           name?: string
+          round_robin_weight?: number
+          spy_mode?: boolean
+          access_hours?: { enabled: boolean; intervals: { start: string; end: string }[]; blocked_days: number[] }
           status?: string
           updated_at?: string
         }
@@ -1600,8 +1698,9 @@ export type Database = {
         | "close_chat"
         | "delay"
         | "webhook"
+        | "smart_router"
       conversation_channel: "whatsapp" | "instagram" | "webchat"
-      conversation_status: "open" | "pending" | "closed"
+      conversation_status: "open" | "pending" | "closed" | "new" | "resolved"
       deal_stage:
         | "novo_lead"
         | "em_contato"
@@ -1753,9 +1852,10 @@ export const Constants = {
         "close_chat",
         "delay",
         "webhook",
+        "smart_router",
       ],
       conversation_channel: ["whatsapp", "instagram", "webchat"],
-      conversation_status: ["open", "pending", "closed"],
+      conversation_status: ["open", "pending", "closed", "new", "resolved"],
       deal_stage: [
         "novo_lead",
         "em_contato",

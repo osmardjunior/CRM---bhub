@@ -8,7 +8,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Pause, Play, Pencil, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pause, Play, Pencil, Trash2, Rocket, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -33,9 +33,11 @@ interface Props {
   onEdit: (c: Campaign) => void;
   onDelete: (id: string) => void;
   onTogglePause: (c: Campaign) => void;
+  onRun: (id: string) => void;
+  runningId: string | null;
 }
 
-export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePause }: Props) {
+export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePause, onRun, runningId }: Props) {
   if (campaigns.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -70,12 +72,18 @@ export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePaus
                 <Badge variant={st.variant}>{st.label}</Badge>
               </TableCell>
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <Progress value={pct} className="h-2 w-20" />
-                  <span className="text-xs text-muted-foreground">{pct}%</span>
-                </div>
+                {c.status === 'completed' && c.total_contacts === 0 ? (
+                  <span className="text-xs text-amber-500">Nenhum contato encontrado</span>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Progress value={pct} className="h-2 w-20" />
+                    <span className="text-xs text-muted-foreground">{pct}%</span>
+                  </div>
+                )}
               </TableCell>
-              <TableCell className="text-sm">{c.total_contacts}</TableCell>
+              <TableCell className="text-sm">
+                {c.status === 'completed' ? `${c.processed} / ${c.total_contacts}` : c.total_contacts}
+              </TableCell>
               <TableCell className="text-sm text-muted-foreground">
                 {format(new Date(c.created_at), 'dd/MM/yyyy')}
               </TableCell>
@@ -87,6 +95,13 @@ export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePaus
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {(c.status === 'draft' || c.status === 'scheduled') && (
+                      <DropdownMenuItem onClick={() => onRun(c.id)} disabled={runningId === c.id}>
+                        {runningId === c.id
+                          ? <><Loader2 size={14} className="mr-2 animate-spin" /> Executando...</>
+                          : <><Rocket size={14} className="mr-2" /> Executar Agora</>}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem onClick={() => onEdit(c)}>
                       <Pencil size={14} className="mr-2" /> Editar
                     </DropdownMenuItem>

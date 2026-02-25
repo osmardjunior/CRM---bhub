@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ComponentType } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebarStats } from '@/hooks/useSidebarStats';
@@ -7,7 +7,6 @@ import {
   MessageSquare,
   Users,
   Kanban,
-  CheckSquare,
   Settings,
   Menu,
   X,
@@ -19,8 +18,6 @@ import {
   Building2,
   LogOut,
   User,
-  LayoutDashboard,
-  Wifi,
   Tag,
   BarChart3,
   Filter,
@@ -77,50 +74,55 @@ export default function AppLayout({ children }: AppLayoutProps) {
     return () => document.removeEventListener('keydown', handleKey);
   }, []);
 
-  const navGroups = [
-    {
-      label: null,
-      items: [
-        { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      ],
-    },
+  type NavItem = { to: string; label: string; icon: ComponentType<{ size?: number; className?: string }>; badge?: number; roles?: string[] };
+  type NavGroup = { label: string | null; items: NavItem[] };
+
+  const allNavGroups: NavGroup[] = [
     {
       label: 'Atendimento',
       items: [
         { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
-        { to: '/chats', label: 'Chats Geral', icon: Kanban },
+        { to: '/chats', label: 'Chats Geral', icon: Kanban, roles: ['admin', 'supervisor'] },
         { to: '/contatos', label: 'Contatos', icon: Users },
-        { to: '/tags', label: 'Tags', icon: Tag },
-        { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
+        { to: '/tags', label: 'Tags', icon: Tag, roles: ['admin', 'supervisor'] },
         { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
       ],
     },
     {
       label: 'Automação',
       items: [
-        { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot },
-        { to: '/campanhas', label: 'Campanhas', icon: Megaphone },
+        { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot, roles: ['admin', 'supervisor'] },
+        { to: '/campanhas', label: 'Campanhas', icon: Megaphone, roles: ['admin', 'supervisor'] },
         { to: '/pipeline', label: 'Funil', icon: Filter },
       ],
     },
     {
       label: 'Dados',
       items: [
-        { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
-        { to: '/nps', label: 'NPS', icon: Star },
-        { to: '/arquivos', label: 'Arquivos', icon: Archive },
+        { to: '/relatorios', label: 'Relatórios', icon: BarChart3, roles: ['admin', 'supervisor'] },
+        { to: '/nps', label: 'NPS', icon: Star, roles: ['admin', 'supervisor'] },
+        { to: '/arquivos', label: 'Arquivos', icon: Archive, roles: ['admin', 'supervisor'] },
       ],
     },
     {
       label: 'Sistema',
       items: [
-        { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone },
-        { to: '/modulos', label: 'Módulos', icon: Puzzle },
-        { to: '/configuracoes', label: 'Configurações', icon: Settings },
+        { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone, roles: ['admin'] },
+        { to: '/modulos', label: 'Módulos', icon: Puzzle, roles: ['admin'] },
+        { to: '/configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
         { to: '/suporte', label: 'Suporte', icon: Headphones },
       ],
     },
   ];
+
+  // Filter nav items by current user role (no role = agent)
+  const currentRole = role ?? 'agent';
+  const navGroups = allNavGroups
+    .map(g => ({
+      ...g,
+      items: g.items.filter(item => !item.roles || item.roles.includes(currentRole)),
+    }))
+    .filter(g => g.items.length > 0);
 
   // Flat list for header title lookup
   const navItems = navGroups.flatMap(g => g.items);

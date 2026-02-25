@@ -50,13 +50,28 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { data: stagesData, error: sErr } = await supabase
-        .from('funnel_stages')
-        .select('*')
-        .in('funnel_id', funnelsData.map((f) => f.id))
-        .order('position', { ascending: true });
+      const funnelIds = funnelsData.map((f) => f.id);
+
+      const [{ data: stagesData, error: sErr }, { data: countsData }] = await Promise.all([
+        supabase
+          .from('funnel_stages')
+          .select('*')
+          .in('funnel_id', funnelIds)
+          .order('position', { ascending: true }),
+        // Count contacts per stage from contact_funnel_stages
+        supabase
+          .from('contact_funnel_stages')
+          .select('stage_id')
+          .in('funnel_id', funnelIds),
+      ]);
 
       if (sErr) throw sErr;
+
+      // Build a count map: stage_id → number of contacts
+      const countMap: Record<string, number> = {};
+      for (const row of countsData ?? []) {
+        countMap[row.stage_id] = (countMap[row.stage_id] ?? 0) + 1;
+      }
 
       const mapped: Funnel[] = funnelsData.map((f) => ({
         id: f.id,
@@ -64,7 +79,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
         expanded: true,
         stages: (stagesData || [])
           .filter((s) => s.funnel_id === f.id)
-          .map((s) => ({ id: s.id, label: s.label, position: s.position, count: 0 })),
+          .map((s) => ({ id: s.id, label: s.label, position: s.position, count: countMap[s.id] ?? 0 })),
       }));
 
       setFunnels(mapped);

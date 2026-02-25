@@ -8,11 +8,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Plus, Trash2, Save, Check, Users, Building2, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, Save, Check, Users, Building2, RotateCcw, UserCheck } from 'lucide-react';
 import { useTags } from '@/hooks/useTags';
 import { useFunnels } from '@/contexts/FunnelContext';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { useDepartments } from '@/hooks/useDepartments';
+import { cn } from '@/lib/utils';
 import type { ChatbotNode } from '@/hooks/useChatbotFlows';
 
 type NodeType = ChatbotNode['node_type'];
@@ -40,17 +41,23 @@ interface NodeConfigPanelProps {
 
 export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) {
   const [config, setConfig] = useState<Record<string, any>>({});
+  const [saved, setSaved] = useState(false);
   const { data: tags = [] } = useTags();
   const { funnels } = useFunnels();
   const { data: team = [] } = useTeamProfiles();
   const { data: departments = [] } = useDepartments();
 
+  // Só resetar ao mudar de nó — NÃO depender de node.config para evitar
+  // que o polling do React Query (3s) sobrescreva edições em andamento.
   useEffect(() => {
     setConfig({ ...node.config });
-  }, [node.id, node.config]);
+    setSaved(false);
+  }, [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = () => {
     onSave({ id: node.id, config });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
   };
 
   const renderApplyTag = () => (
@@ -218,16 +225,55 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
     );
   };
 
+  // Actions shared per smart-router route: response, tags, funnel, delegate with %
   const renderSmartRouteActions = (
-    routeConfig: { response?: string; tag_ids?: string[]; funnel_id?: string; stage_id?: string },
-    onUpdate: (updates: Partial<{ response: string; tag_ids: string[]; funnel_id: string; stage_id: string }>) => void,
+    routeConfig: {
+      response?: string;
+      tag_ids?: string[];
+      funnel_id?: string;
+      stage_id?: string;
+      delegate_assignments?: Array<{ user_id: string; percentage: number }>;
+      delegate_dept_assignments?: Array<{ department_id: string; percentage: number }>;
+    },
+    onUpdate: (updates: Partial<typeof routeConfig>) => void,
     keyPrefix: string,
   ) => {
     const tagIds = (routeConfig.tag_ids || []) as string[];
     const funnelId = routeConfig.funnel_id || '';
     const stageId = routeConfig.stage_id || '';
+    const userAssignments: Array<{ user_id: string; percentage: number }> = routeConfig.delegate_assignments || [];
+    const deptAssignments: Array<{ department_id: string; percentage: number }> = routeConfig.delegate_dept_assignments || [];
+
+    const userTotal = userAssignments.reduce((s, a) => s + (a.percentage || 0), 0);
+    const deptTotal = deptAssignments.reduce((s, a) => s + (a.percentage || 0), 0);
+
+    const addUserAssignment = () => {
+      onUpdate({ delegate_assignments: [...userAssignments, { user_id: '', percentage: 100 - userTotal > 0 ? 100 - userTotal : 0 }] });
+    };
+    const removeUserAssignment = (i: number) => {
+      onUpdate({ delegate_assignments: userAssignments.filter((_, idx) => idx !== i) });
+    };
+    const updateUserAssignment = (i: number, field: 'user_id' | 'percentage', value: string | number) => {
+      const updated = [...userAssignments];
+      updated[i] = { ...updated[i], [field]: value };
+      onUpdate({ delegate_assignments: updated });
+    };
+
+    const addDeptAssignment = () => {
+      onUpdate({ delegate_dept_assignments: [...deptAssignments, { department_id: '', percentage: 100 - deptTotal > 0 ? 100 - deptTotal : 0 }] });
+    };
+    const removeDeptAssignment = (i: number) => {
+      onUpdate({ delegate_dept_assignments: deptAssignments.filter((_, idx) => idx !== i) });
+    };
+    const updateDeptAssignment = (i: number, field: 'department_id' | 'percentage', value: string | number) => {
+      const updated = [...deptAssignments];
+      updated[i] = { ...updated[i], [field]: value };
+      onUpdate({ delegate_dept_assignments: updated });
+    };
+
     return (
       <div className="space-y-3 mt-2 pl-3 border-l-2 border-border">
+        {/* Resposta */}
         <div className="space-y-1">
           <Label className="text-xs">Resposta (opcional)</Label>
           <Textarea
@@ -237,6 +283,8 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
             rows={2}
           />
         </div>
+
+        {/* Tags */}
         {tags.length > 0 && (
           <div className="space-y-1">
             <Label className="text-xs">Tags a aplicar</Label>
@@ -264,6 +312,8 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
             </div>
           </div>
         )}
+
+        {/* Funil */}
         <div className="space-y-1">
           <Label className="text-xs">Mover para Funil (opcional)</Label>
           <Select value={funnelId || '_none'} onValueChange={v => onUpdate({ funnel_id: v === '_none' ? '' : v, stage_id: '' })}>
@@ -287,6 +337,110 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
             </Select>
           </div>
         )}
+
+        {/* Delegação por usuário com % */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <UserCheck size={12} className="text-muted-foreground" />
+              <Label className="text-xs">Delegar para usuário(s)</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'text-[10px] font-semibold',
+                userTotal === 100 ? 'text-green-600' : userTotal > 100 ? 'text-red-500' : 'text-muted-foreground'
+              )}>
+                {userTotal}%{userTotal === 100 ? ' ✓' : userTotal > 100 ? ' excede 100%' : ' / 100%'}
+              </span>
+              <Button variant="outline" size="sm" className="h-5 text-[10px] px-1.5 gap-0.5" onClick={addUserAssignment}>
+                <Plus size={9} /> Usuário
+              </Button>
+            </div>
+          </div>
+          {userAssignments.length === 0 && (
+            <p className="text-[11px] text-muted-foreground pl-1">Nenhum usuário. Clique em "+ Usuário" para adicionar.</p>
+          )}
+          {userAssignments.map((assignment, i) => (
+            <div key={`${keyPrefix}-ua-${i}`} className="flex items-center gap-1.5">
+              <Select
+                value={assignment.user_id || '_none'}
+                onValueChange={v => updateUserAssignment(i, 'user_id', v === '_none' ? '' : v)}
+              >
+                <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Selecione...</SelectItem>
+                  {team.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={assignment.percentage}
+                  onChange={e => updateUserAssignment(i, 'percentage', Math.min(100, Math.max(0, Number(e.target.value))))}
+                  className="h-7 text-xs w-14 text-center"
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive shrink-0" onClick={() => removeUserAssignment(i)}>
+                <Trash2 size={12} />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        {/* Delegação por departamento com % */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Building2 size={12} className="text-muted-foreground" />
+              <Label className="text-xs">Delegar para departamento(s)</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'text-[10px] font-semibold',
+                deptTotal === 100 ? 'text-green-600' : deptTotal > 100 ? 'text-red-500' : 'text-muted-foreground'
+              )}>
+                {deptTotal > 0 ? `${deptTotal}%${deptTotal === 100 ? ' ✓' : deptTotal > 100 ? ' excede 100%' : ' / 100%'}` : ''}
+              </span>
+              <Button variant="outline" size="sm" className="h-5 text-[10px] px-1.5 gap-0.5" onClick={addDeptAssignment}>
+                <Plus size={9} /> Dept.
+              </Button>
+            </div>
+          </div>
+          {deptAssignments.length === 0 && (
+            <p className="text-[11px] text-muted-foreground pl-1">Nenhum departamento. Clique em "+ Dept." para adicionar.</p>
+          )}
+          {deptAssignments.map((assignment, i) => (
+            <div key={`${keyPrefix}-da-${i}`} className="flex items-center gap-1.5">
+              <Select
+                value={assignment.department_id || '_none'}
+                onValueChange={v => updateDeptAssignment(i, 'department_id', v === '_none' ? '' : v)}
+              >
+                <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Selecione...</SelectItem>
+                  {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={assignment.percentage}
+                  onChange={e => updateDeptAssignment(i, 'percentage', Math.min(100, Math.max(0, Number(e.target.value))))}
+                  className="h-7 text-xs w-14 text-center"
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive shrink-0" onClick={() => removeDeptAssignment(i)}>
+                <Trash2 size={12} />
+              </Button>
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -294,7 +448,6 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
   const renderSmartRouter = () => {
     const mode = (config.mode as string) || 'rules';
     const routes = (config.routes as any[]) || [];
-    const defaultRoute = (config.default_route as any) || { response: '', tag_ids: [], funnel_id: '', stage_id: '' };
     const showKeywords = mode === 'rules' || mode === 'both';
     const showAI = mode === 'ai' || mode === 'both';
 
@@ -304,12 +457,19 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
       setConfig({ ...config, routes: updated });
     };
 
-    const updateDefaultRoute = (updates: Record<string, any>) => {
-      setConfig({ ...config, default_route: { ...defaultRoute, ...updates } });
-    };
-
     const addRoute = () => {
-      const newRoute = { id: crypto.randomUUID(), label: `Rota ${routes.length + 1}`, keywords: [], ai_intent_description: '', response: '', tag_ids: [], funnel_id: '', stage_id: '' };
+      const newRoute = {
+        id: crypto.randomUUID(),
+        label: `Rota ${routes.length + 1}`,
+        keywords: [],
+        ai_intent_description: '',
+        response: '',
+        tag_ids: [],
+        funnel_id: '',
+        stage_id: '',
+        delegate_assignments: [],
+        delegate_dept_assignments: [],
+      };
       setConfig({ ...config, routes: [...routes, newRoute] });
     };
 
@@ -373,8 +533,12 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
                 <div className="space-y-1">
                   <Label className="text-xs">Palavras-chave (separadas por vírgula)</Label>
                   <Input
-                    value={(route.keywords || []).join(', ')}
-                    onChange={e => updateRoute(i, { keywords: e.target.value.split(',').map((k: string) => k.trim()).filter(Boolean) })}
+                    value={route.keywords_raw !== undefined ? route.keywords_raw : (route.keywords || []).join(', ')}
+                    onChange={e => updateRoute(i, { keywords_raw: e.target.value })}
+                    onBlur={e => {
+                      const parsed = e.target.value.split(',').map((k: string) => k.trim()).filter(Boolean);
+                      updateRoute(i, { keywords: parsed, keywords_raw: undefined });
+                    }}
                     placeholder="preço, quero comprar, quanto custa"
                     className="h-7 text-xs"
                   />
@@ -392,26 +556,19 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
                 </div>
               )}
               {renderSmartRouteActions(
-                { response: route.response, tag_ids: route.tag_ids, funnel_id: route.funnel_id, stage_id: route.stage_id },
+                {
+                  response: route.response,
+                  tag_ids: route.tag_ids,
+                  funnel_id: route.funnel_id,
+                  stage_id: route.stage_id,
+                  delegate_assignments: route.delegate_assignments,
+                  delegate_dept_assignments: route.delegate_dept_assignments,
+                },
                 updates => updateRoute(i, updates),
                 `route-${route.id || i}`,
               )}
             </div>
           ))}
-        </div>
-
-        <Separator />
-
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Rota Padrão (nenhuma correspondência)</Label>
-          <p className="text-xs text-muted-foreground">Executada quando nenhuma rota acima for correspondida.</p>
-          <div className="rounded-lg border border-dashed border-border p-3">
-            {renderSmartRouteActions(
-              { response: defaultRoute.response, tag_ids: defaultRoute.tag_ids, funnel_id: defaultRoute.funnel_id, stage_id: defaultRoute.stage_id },
-              updates => updateDefaultRoute(updates),
-              'default-route',
-            )}
-          </div>
         </div>
       </div>
     );
@@ -664,19 +821,44 @@ export default function NodeConfigPanel({ node, onSave }: NodeConfigPanelProps) 
   };
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div className="flex flex-col">
+      {/* Header com botão Salvar + feedback */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-card z-10">
         <div>
           <h3 className="text-sm font-semibold text-foreground">
             {NODE_TYPE_LABELS[node.node_type] || node.node_type}
           </h3>
           <p className="text-xs text-muted-foreground">Etapa #{node.position + 1}</p>
         </div>
-        <Button size="sm" onClick={handleSave}>
-          <Save size={14} className="mr-1" /> Salvar
+        <Button
+          size="sm"
+          onClick={handleSave}
+          className={cn(
+            'transition-all duration-300 gap-1.5',
+            saved && 'bg-green-600 hover:bg-green-600 text-white',
+          )}
+        >
+          {saved ? (
+            <>
+              <Check size={14} /> Salvo!
+            </>
+          ) : (
+            <>
+              <Save size={14} /> Salvar
+            </>
+          )}
         </Button>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+
+      {/* Feedback bar */}
+      {saved && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-950 border-b border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-xs animate-in fade-in slide-in-from-top-1 duration-200">
+          <Check size={12} />
+          Etapa salva com sucesso!
+        </div>
+      )}
+
+      <div className="p-4">
         {renderFields()}
       </div>
     </div>

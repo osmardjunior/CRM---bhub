@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -86,15 +86,19 @@ function ProviderFields({ provider, config, onChange }: {
 }
 
 // ── Device Card ──────────────────────────────────────
-function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect }: {
+function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect, onSyncPhone, liveStatus }: {
   device: Integration;
   isAdmin: boolean;
   onDisconnect: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (device: Integration) => void;
   onConnect: (device: Integration) => void;
+  onSyncPhone: (device: Integration) => void;
+  liveStatus?: 'checking' | 'connected' | 'disconnected';
 }) {
-  const connected = device.status === 'connected';
+  // Use liveStatus for Evolution devices if available, fall back to DB status
+  const connected = liveStatus ? liveStatus === 'connected' : device.status === 'connected';
+  const isChecking = liveStatus === 'checking';
 
   return (
     <div className="group rounded-xl border border-border bg-card card-shadow p-5 space-y-4 transition-shadow hover:shadow-md">
@@ -112,9 +116,15 @@ function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect
             </div>
           </div>
         </div>
-        <Badge variant="outline" className={`text-[11px] shrink-0 ${connected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
-          {connected ? <><Wifi size={10} className="mr-1" /> Conectado</> : <><WifiOff size={10} className="mr-1" /> Desconectado</>}
-        </Badge>
+        {isChecking ? (
+          <Badge variant="outline" className="text-[11px] shrink-0 bg-amber-500/15 text-amber-600 border-amber-500/20 animate-pulse">
+            <RefreshCw size={10} className="mr-1 animate-spin" /> Verificando...
+          </Badge>
+        ) : (
+          <Badge variant="outline" className={`text-[11px] shrink-0 ${connected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
+            {connected ? <><Wifi size={10} className="mr-1" /> Conectado</> : <><WifiOff size={10} className="mr-1" /> Desconectado</>}
+          </Badge>
+        )}
       </div>
 
       {/* Info rows */}
@@ -144,6 +154,11 @@ function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect
           {device.provider === 'evolution' && !connected && (
             <Button variant="outline" size="sm" className="text-xs gap-1.5 text-primary hover:text-primary" onClick={() => onConnect(device)}>
               <QrCode size={12} /> Conectar
+            </Button>
+          )}
+          {device.provider === 'evolution' && connected && !device.phone_number && (
+            <Button variant="outline" size="sm" className="text-xs gap-1.5 text-primary hover:text-primary" onClick={() => onSyncPhone(device)}>
+              <RefreshCw size={12} /> Sincronizar nº
             </Button>
           )}
           {connected && (
@@ -198,6 +213,46 @@ export default function IntegracoesPage() {
 
   const whatsappDevices = integrations?.filter(i => i.channel === 'whatsapp') ?? [];
 
+  // Live status for Evolution API devices (separate from DB status)
+  const [liveStatus, setLiveStatus] = useState<Record<string, 'checking' | 'connected' | 'disconnected'>>({});
+
+  const checkAllStatuses = useCallback(async () => {
+    const evolutionDevices = whatsappDevices.filter(d => d.provider === 'evolution' && d.config?.api_url);
+    if (!evolutionDevices.length) return;
+
+    setLiveStatus(prev => {
+      const next = { ...prev };
+      evolutionDevices.forEach(d => { next[d.id] = 'checking'; });
+      return next;
+    });
+
+    await Promise.allSettled(
+      evolutionDevices.map(async (d) => {
+        try {
+          const { data } = await supabase.functions.invoke('evolution-api', {
+            body: {
+              action: 'check-status',
+              api_url: d.config.api_url,
+              api_key: d.config.api_key,
+              instance_name: d.config.instance_name,
+              integration_id: d.id,
+            },
+          });
+          setLiveStatus(prev => ({ ...prev, [d.id]: data?.connected ? 'connected' : 'disconnected' }));
+        } catch {
+          setLiveStatus(prev => ({ ...prev, [d.id]: 'disconnected' }));
+        }
+      })
+    );
+  }, [whatsappDevices]);
+
+  // Check on load and every 60s
+  useEffect(() => {
+    if (!isLoading) checkAllStatuses();
+    const timer = setInterval(checkAllStatuses, 60_000);
+    return () => clearInterval(timer);
+  }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const resetForm = () => {
     setDeviceName('');
     setPhoneNumber('');
@@ -213,8 +268,9 @@ export default function IntegracoesPage() {
   };
 
   const handleAdd = () => {
-    if (!deviceName.trim() || !phoneNumber.trim() || !provider) {
-      toast.error('Preencha nome, número e provedor');
+    const needsPhone = provider !== 'evolution';
+    if (!deviceName.trim() || !provider || (needsPhone && !phoneNumber.trim())) {
+      toast.error(needsPhone ? 'Preencha nome, número e provedor' : 'Preencha nome e provedor');
       return;
     }
     const isEvolution = provider === 'evolution';
@@ -224,7 +280,7 @@ export default function IntegracoesPage() {
       channel: 'whatsapp',
       provider,
       config,
-      phone_number: phoneNumber,
+      phone_number: needsPhone ? phoneNumber : '',
       device_name: deviceName,
     }, {
       onSuccess: (_, variables) => {
@@ -274,6 +330,33 @@ export default function IntegracoesPage() {
     });
   };
 
+  const handleSyncPhone = async (device: Integration) => {
+    const cfg = device.config as Record<string, string>;
+    if (!cfg.api_url || !cfg.api_key || !cfg.instance_name) {
+      toast.error('Configuração incompleta para sincronizar o número');
+      return;
+    }
+    toast.loading('Buscando número...', { id: 'sync-phone' });
+    try {
+      const { data } = await supabase.functions.invoke('evolution-api', {
+        body: {
+          action: 'fetch-phone',
+          api_url: cfg.api_url,
+          api_key: cfg.api_key,
+          instance_name: cfg.instance_name,
+          integration_id: device.id,
+        },
+      });
+      if (data?.phone_number) {
+        toast.success(`Número sincronizado: ${data.phone_number}`, { id: 'sync-phone' });
+      } else {
+        toast.error('Número não encontrado. O WhatsApp está conectado neste número?', { id: 'sync-phone' });
+      }
+    } catch {
+      toast.error('Erro ao sincronizar número', { id: 'sync-phone' });
+    }
+  };
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -286,11 +369,16 @@ export default function IntegracoesPage() {
         title="Celulares"
         subtitle="Nesta área estão listados todos os aparelhos da sua conta."
         actions={
-          permissions.isAdmin && (
-            <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
-              <Plus size={14} /> Adicionar Aparelho
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={checkAllStatuses}>
+              <RefreshCw size={14} /> Atualizar Status
             </Button>
-          )
+            {permissions.isAdmin && (
+              <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
+                <Plus size={14} /> Adicionar Aparelho
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -319,6 +407,8 @@ export default function IntegracoesPage() {
               onDisconnect={id => setConfirmId(id)}
               onDelete={id => setDeleteId(id)}
               onEdit={openEdit}
+              onSyncPhone={handleSyncPhone}
+              liveStatus={liveStatus[d.id]}
               onConnect={(dev) => {
                 const cfg = dev.config as Record<string, string>;
                 if (cfg.api_url && cfg.api_key) {
@@ -426,7 +516,19 @@ export default function IntegracoesPage() {
                     <button
                       key={p.value}
                       type="button"
-                      onClick={() => { setProvider(p.value); setConfig({}); }}
+                      onClick={() => {
+                        setProvider(p.value);
+                        if (p.value === 'evolution') {
+                          const existing = integrations?.find(i => i.provider === 'evolution' && i.config?.api_url);
+                          if (existing) {
+                            setConfig({ api_url: existing.config.api_url, api_key: existing.config.api_key ?? '' });
+                          } else {
+                            setConfig({});
+                          }
+                        } else {
+                          setConfig({});
+                        }
+                      }}
                       className={`rounded-lg border p-3 text-left text-xs font-medium transition-all hover:border-primary/50 truncate ${provider === p.value ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card text-foreground'}`}
                     >
                       {p.label}
@@ -445,11 +547,22 @@ export default function IntegracoesPage() {
                 <Input className="mt-1" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="Ex: Vendas - Principal" />
                 <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na sua equipe</p>
               </div>
-              <div>
-                <Label className="text-xs">Número de telefone</Label>
-                <Input className="mt-1" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999999999" />
-                <p className="text-[11px] text-muted-foreground mt-1">Número com código do país (ex: +55 para Brasil)</p>
-              </div>
+              {/* Para Evolution API, o número é detectado automaticamente ao escanear o QR Code */}
+              {provider !== 'evolution' && (
+                <div>
+                  <Label className="text-xs">Número de telefone</Label>
+                  <Input className="mt-1" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999999999" />
+                  <p className="text-[11px] text-muted-foreground mt-1">Número com código do país (ex: +55 para Brasil)</p>
+                </div>
+              )}
+              {provider === 'evolution' && (
+                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                  <p className="text-xs text-primary font-medium">Número detectado automaticamente</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Após escanear o QR Code, o número do WhatsApp será detectado e salvo automaticamente.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -460,6 +573,12 @@ export default function IntegracoesPage() {
                 <p className="text-xs text-muted-foreground mb-1">Provedor selecionado</p>
                 <p className="text-sm font-semibold text-foreground">{providerLabel(provider)}</p>
               </div>
+              {provider === 'evolution' && config.api_url && (
+                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                  <p className="text-xs text-primary font-medium">URL e API Key preenchidas automaticamente</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Basta informar um novo <strong>Nome da instância</strong> para adicionar outro número.</p>
+                </div>
+              )}
               <ProviderFields provider={provider} config={config} onChange={setConfig} />
               <div className="rounded-lg bg-secondary/50 p-3">
                 <p className="text-xs text-muted-foreground mb-1">Webhook URL (copie para o painel do provedor)</p>
@@ -482,7 +601,8 @@ export default function IntegracoesPage() {
               <Button
                 onClick={() => {
                   if (step === 1 && !provider) { toast.error('Selecione um provedor'); return; }
-                  if (step === 2 && (!deviceName.trim() || !phoneNumber.trim())) { toast.error('Preencha nome e número'); return; }
+                  if (step === 2 && !deviceName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
+                  if (step === 2 && provider !== 'evolution' && !phoneNumber.trim()) { toast.error('Preencha o número de telefone'); return; }
                   setStep(s => s + 1);
                 }}
               >

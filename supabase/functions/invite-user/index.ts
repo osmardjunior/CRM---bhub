@@ -73,11 +73,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { name, email, role } = await req.json();
+    const { name, email, role, password, allowed_integration_ids } = await req.json();
 
     if (!name || !email || !role) {
       return new Response(
         JSON.stringify({ error: "Nome, email e cargo são obrigatórios" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    if (password && password.length < 6) {
+      return new Response(
+        JSON.stringify({ error: "A senha deve ter no mínimo 6 caracteres" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -91,7 +101,7 @@ Deno.serve(async (req) => {
     const { data: newUser, error: createError } =
       await adminClient.auth.admin.createUser({
         email,
-        password: crypto.randomUUID().slice(0, 12),
+        password: password || crypto.randomUUID().slice(0, 12),
         email_confirm: true,
         user_metadata: {
           name,
@@ -108,6 +118,13 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    }
+
+    // Persist allowed integrations if provided
+    if (allowed_integration_ids && Array.isArray(allowed_integration_ids) && allowed_integration_ids.length > 0) {
+      await adminClient.from("profiles")
+        .update({ allowed_integration_ids } as any)
+        .eq("id", newUser.user.id);
     }
 
     return new Response(

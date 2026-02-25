@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
-import { useCampaigns, useCreateCampaign, useUpdateCampaign, useDeleteCampaign, Campaign } from '@/hooks/useCampaigns';
+import { useCampaigns, useCreateCampaign, useUpdateCampaign, useDeleteCampaign, useRunCampaign, Campaign } from '@/hooks/useCampaigns';
 import CampaignList from '@/components/campanhas/CampaignList';
 import CampaignForm from '@/components/campanhas/CampaignForm';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
@@ -11,6 +11,7 @@ export default function Campanhas() {
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
   const deleteCampaign = useDeleteCampaign();
+  const runCampaign = useRunCampaign();
 
   const [editing, setEditing] = useState<Campaign | null | 'new'>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -25,10 +26,7 @@ export default function Campanhas() {
   };
 
   const handleTogglePause = (c: Campaign) => {
-    updateCampaign.mutate({
-      id: c.id,
-      status: c.status === 'running' ? 'paused' : 'running',
-    });
+    updateCampaign.mutate({ id: c.id, status: c.status === 'running' ? 'paused' : 'running' });
   };
 
   if (editing) {
@@ -62,6 +60,8 @@ export default function Campanhas() {
           onEdit={c => setEditing(c)}
           onDelete={id => setDeleteId(id)}
           onTogglePause={handleTogglePause}
+          onRun={id => runCampaign.mutate(id)}
+          runningId={runCampaign.isPending ? (runCampaign.variables as string) : null}
         />
       )}
 

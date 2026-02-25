@@ -38,7 +38,7 @@ function useChatsOverview() {
         .from('conversations')
         .select('id, status, assigned_user_id, profiles:assigned_user_id(id, name, email)')
         .eq('company_id', companyId!)
-        .in('status', ['open', 'pending']);
+        .in('status', ['new', 'open', 'pending']);
 
       if (error) throw error;
 
@@ -59,7 +59,9 @@ function useChatsOverview() {
           };
         }
 
-        if (conv.status === 'open') {
+        if (conv.status === 'new') {
+          agentMap[userId].open += 1;
+        } else if (conv.status === 'open') {
           if (conv.assigned_user_id) agentMap[userId].inProgress += 1;
           else agentMap['__unassigned__'].open += 1;
         } else if (conv.status === 'pending') {
@@ -221,7 +223,7 @@ function OverviewTable() {
 export default function ChatsOverview() {
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({ status: 'open' });
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
 
   const {
     data: infiniteData,

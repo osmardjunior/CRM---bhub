@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -101,6 +102,7 @@ export function useChatbotFlows() {
 export function useChatbotNodes(flowId: string | null) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { companyId } = useAuth();
 
   const nodesQuery = useQuery({
     queryKey: ['chatbot-nodes', flowId],
@@ -134,7 +136,7 @@ export function useChatbotNodes(flowId: string | null) {
 
       const { data, error } = await supabase
         .from('chatbot_nodes')
-        .insert([{ flow_id, position, node_type, config }] as any)
+        .insert([{ flow_id, position, node_type, config, company_id: companyId }] as any)
         .select()
         .single();
       if (error) throw error;
@@ -168,5 +170,43 @@ export function useChatbotNodes(flowId: string | null) {
     onError: (e: Error) => toast({ title: 'Erro ao remover etapa', description: e.message, variant: 'destructive' }),
   });
 
-  return { nodes: nodesQuery.data ?? [], isLoading: nodesQuery.isLoading, addNode, updateNode, deleteNode };
+  const reorderNodes = useMutation({
+    mutationFn: async (orderedIds: string[]) => {
+      await Promise.all(
+        orderedIds.map((id, i) =>
+          supabase.from('chatbot_nodes').update({ position: i }).eq('id', id)
+        )
+      );
+    },
+    onMutate: async (orderedIds) => {
+      await queryClient.cancelQueries({ queryKey: ['chatbot-nodes', flowId] });
+      const previous = queryClient.getQueryData(['chatbot-nodes', flowId]);
+      queryClient.setQueryData(['chatbot-nodes', flowId], (old: ChatbotNode[] | undefined) => {
+        if (!old) return old;
+        return orderedIds.map((id, i) => {
+          const node = old.find(n => n.id === id)!;
+          return { ...node, position: i };
+        });
+      });
+      return { previous };
+    },
+    onError: (_: Error, __: string[], context: { previous?: unknown } | undefined) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['chatbot-nodes', flowId], context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['chatbot-nodes', flowId] }),
+  });
+
+  // Salva posição X/Y no campo config sem perder o config existente
+  const updateNodePosition = useCallback(
+    (id: string, x: number, y: number) => {
+      const node = nodesQuery.data?.find(n => n.id === id);
+      if (!node) return;
+      updateNode.mutate({ id, config: { ...node.config, _canvas_x: x, _canvas_y: y } });
+    },
+    [nodesQuery.data, updateNode],
+  );
+
+  return { nodes: nodesQuery.data ?? [], isLoading: nodesQuery.isLoading, addNode, updateNode, updateNodePosition, deleteNode, reorderNodes };
 }

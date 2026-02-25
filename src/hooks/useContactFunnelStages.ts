@@ -13,17 +13,33 @@ export interface FunnelContact {
   contact_avatar: string | null;
 }
 
-export function useContactFunnelStages(funnelId: string | undefined) {
+export function useContactFunnelStages(funnelId: string | undefined, agentUserId?: string) {
   const { companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['contact-funnel-stages', funnelId],
+    queryKey: ['contact-funnel-stages', funnelId, agentUserId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // When agentUserId is set, pre-fetch the contact_ids assigned to that agent
+      let allowedContactIds: string[] | null = null;
+      if (agentUserId) {
+        const { data: convContacts } = await supabase
+          .from('conversations')
+          .select('contact_id')
+          .eq('assigned_user_id', agentUserId);
+        allowedContactIds = Array.from(new Set((convContacts ?? []).map((c: any) => c.contact_id).filter(Boolean)));
+      }
+
+      let query = supabase
         .from('contact_funnel_stages')
         .select('id, contact_id, stage_id, funnel_id, contacts(name, phone, avatar_url)')
         .eq('funnel_id', funnelId!);
 
+      if (allowedContactIds !== null) {
+        if (allowedContactIds.length === 0) return [] as FunnelContact[];
+        query = query.in('contact_id', allowedContactIds);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
       return (data ?? []).map((row: any) => ({
@@ -67,6 +83,11 @@ export function useContactFunnelsByContact(contactId: string | undefined) {
   });
 }
 
+function invalidateFunnelStages(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['contact-funnel-stages'] });
+  qc.invalidateQueries({ queryKey: ['contact-funnel-stages-by-contact'] });
+}
+
 export function useMoveContactStage() {
   const qc = useQueryClient();
   return useMutation({
@@ -77,9 +98,7 @@ export function useMoveContactStage() {
         .eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['contact-funnel-stages'] });
-    },
+    onSuccess: () => invalidateFunnelStages(qc),
     onError: (err: Error) => toast.error(err.message),
   });
 }
@@ -109,7 +128,7 @@ export function useAddContactToStage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['contact-funnel-stages'] });
+      invalidateFunnelStages(qc);
       toast.success('Contato adicionado à etapa');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -127,7 +146,7 @@ export function useRemoveContactFromStage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['contact-funnel-stages'] });
+      invalidateFunnelStages(qc);
       toast.success('Contato removido da etapa');
     },
     onError: (err: Error) => toast.error(err.message),

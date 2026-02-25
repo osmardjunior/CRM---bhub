@@ -30,7 +30,7 @@ export default function Dashboard() {
     queryKey: ['dashboard-metrics', companyId],
     queryFn: async () => {
       const [convOpen, contacts, dealsList, tasksPending, tasksOverdue] = await Promise.all([
-        supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+        supabase.from('conversations').select('id', { count: 'exact', head: true }).in('status', ['new', 'open', 'pending']),
         supabase.from('contacts').select('id', { count: 'exact', head: true }),
         supabase.from('deals').select('stage, value'),
         supabase.from('tasks').select('id', { count: 'exact', head: true }).neq('status', 'concluida'),

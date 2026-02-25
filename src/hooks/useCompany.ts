@@ -26,10 +26,10 @@ export function useUpdateCompany() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (updates: { name: string }) => {
+    mutationFn: async (updates: { name?: string; round_robin_mode?: 'weight' | 'percentage' }) => {
       const { error } = await supabase
         .from('companies')
-        .update(updates)
+        .update(updates as any)
         .eq('id', companyId!);
       if (error) throw error;
     },

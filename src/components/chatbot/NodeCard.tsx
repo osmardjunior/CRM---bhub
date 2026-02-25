@@ -1,7 +1,8 @@
-import { MessageSquare, List, FileInput, Brain, UserCheck, Clock, Tag, GitBranch, Users, Trash2, Timer, XCircle, Webhook, Route } from 'lucide-react';
+import { MessageSquare, List, FileInput, Brain, UserCheck, Clock, Tag, GitBranch, Users, Trash2, Timer, XCircle, Webhook, Route, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import type { DraggableProvidedDragHandleProps } from '@hello-pangea/dnd';
 import type { ChatbotNode } from '@/hooks/useChatbotFlows';
 
 const NODE_META: Record<string, { label: string; icon: typeof MessageSquare; badgeClass: string }> = {
@@ -45,9 +46,11 @@ interface NodeCardProps {
   selected?: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  dragHandleProps?: DraggableProvidedDragHandleProps | null;
+  isDragging?: boolean;
 }
 
-export default function NodeCard({ node, index, selected, onSelect, onDelete }: NodeCardProps) {
+export default function NodeCard({ node, index, selected, onSelect, onDelete, dragHandleProps, isDragging }: NodeCardProps) {
   const meta = NODE_META[node.node_type] || NODE_META.message;
   const Icon = meta.icon;
   const preview = getPreview(node);
@@ -55,14 +58,23 @@ export default function NodeCard({ node, index, selected, onSelect, onDelete }: 
   return (
     <div
       className={cn(
-        'flex items-start gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors border group',
+        'flex items-start gap-1.5 px-2 py-2.5 rounded-lg cursor-pointer transition-colors border group',
         selected
           ? 'bg-accent border-primary/40'
-          : 'border-transparent hover:bg-muted/60'
+          : 'border-transparent hover:bg-muted/60',
+        isDragging && 'shadow-lg border-primary/30 bg-card opacity-90'
       )}
       onClick={onSelect}
     >
-      <span className="text-xs font-bold text-muted-foreground w-5 text-center mt-0.5">{index + 1}</span>
+      {/* Drag handle */}
+      <div
+        {...(dragHandleProps ?? {})}
+        className="shrink-0 mt-0.5 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+        onClick={e => e.stopPropagation()}
+      >
+        <GripVertical size={14} />
+      </div>
+      <span className="text-xs font-bold text-muted-foreground w-4 text-center mt-0.5 shrink-0">{index + 1}</span>
       <div className="flex-1 min-w-0">
         <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0 font-medium', meta.badgeClass)}>
           <Icon size={10} className="mr-1" />

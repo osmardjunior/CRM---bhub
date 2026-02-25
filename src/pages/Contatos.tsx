@@ -40,7 +40,7 @@ export default function ContatosPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(0);
-  const { companyId } = useAuth();
+  const { user, role, companyId } = useAuth();
 
   const filters = useMemo(() => ({
     search: search || undefined,
@@ -48,7 +48,9 @@ export default function ContatosPage() {
     source: sourceFilter,
     page,
     limit: 25,
-  }), [search, tagFilter, sourceFilter, page]);
+    // Agents only see their own leads
+    ...(role === 'agent' && user?.id ? { assigned_user_id: user.id } : {}),
+  }), [search, tagFilter, sourceFilter, page, role, user?.id]);
 
   const { data: result, isLoading } = useContacts(filters);
 

@@ -14,6 +14,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useFunnels } from '@/contexts/FunnelContext';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   useContactFunnelStages, useMoveContactStage, useAddContactToStage, useRemoveContactFromStage,
   type FunnelContact,
@@ -199,13 +200,16 @@ function FunnelNotFound({ onBack }: { onBack: () => void }) {
 export default function FunnelKanban() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user, role } = useAuth();
   const { getFunnel, addStage } = useFunnels();
   const [search, setSearch] = useState('');
   const [addStageOpen, setAddStageOpen] = useState(false);
   const [addContactStageId, setAddContactStageId] = useState<string | null>(null);
 
   const funnel = getFunnel(id ?? '');
-  const { data: funnelContacts = [] } = useContactFunnelStages(id);
+  // Agents only see contacts assigned to them
+  const agentFilter = role === 'agent' && user?.id ? user.id : undefined;
+  const { data: funnelContacts = [] } = useContactFunnelStages(id, agentFilter);
   const moveContact = useMoveContactStage();
   const addContactToStage = useAddContactToStage();
 

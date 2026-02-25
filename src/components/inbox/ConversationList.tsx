@@ -30,21 +30,28 @@ import { ptBR } from 'date-fns/locale';
 import { useTags } from '@/hooks/useTags';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 
-const statusTabs: { label: string; value: Enums<'conversation_status'> }[] = [
-  { label: 'Em Atend.', value: 'open' },
-  { label: 'Aguardando', value: 'pending' },
-  { label: 'Fechadas', value: 'closed' },
+const statusTabs: { label: string; value: Enums<'conversation_status'> | undefined }[] = [
+  { label: 'Todos', value: undefined },
+  { label: 'Aberto', value: 'new' },
+  { label: 'Atend.', value: 'open' },
+  { label: 'Aguard.', value: 'pending' },
+  { label: 'Resolv.', value: 'resolved' },
+  { label: 'Fechado', value: 'closed' },
 ];
 
 const statusColors: Record<string, string> = {
-  open: 'bg-success text-success-foreground',
-  pending: 'bg-warning text-warning-foreground',
-  closed: 'bg-muted text-muted-foreground',
+  new: 'bg-green-600 text-white',
+  open: 'bg-blue-600 text-white',
+  pending: 'bg-amber-500 text-white',
+  resolved: 'bg-purple-600 text-white',
+  closed: 'bg-red-700 text-white',
 };
 
 const statusLabels: Record<string, string> = {
-  open: 'Em Atend.',
-  pending: 'Pendente',
+  new: 'Aberto',
+  open: 'Atend.',
+  pending: 'Aguard.',
+  resolved: 'Resolv.',
   closed: 'Fechado',
 };
 
@@ -101,7 +108,7 @@ export default function ConversationList({
     refetchInterval: 60_000,
   });
 
-  const activeStatus = filters.status ?? 'open';
+  const activeStatus = filters.status;
   const filtered = useMemo(() => {
     let list = conversations.filter((c) => {
       const isGroup = isGroupChat(c.contact.phone);
@@ -140,8 +147,10 @@ export default function ConversationList({
     if (localOrder) newFilters.sort = localOrder as 'recent' | 'oldest' | 'name';
     if (localStatus && localStatus !== 'todos') {
       newFilters.status = localStatus as Enums<'conversation_status'>;
+    } else if (localStatus === 'todos') {
+      newFilters.status = undefined;
     } else {
-      newFilters.status = activeStatus as Enums<'conversation_status'>;
+      newFilters.status = activeStatus;
     }
     onFilterChange(newFilters);
   }
@@ -154,7 +163,7 @@ export default function ConversationList({
     setLocalStatus('');
     setLocalOrder('');
     setLocalChannel('');
-    onFilterChange({ status: 'open', channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
+    onFilterChange({ status: undefined, channel: undefined, name: undefined, phone: undefined, tag: undefined, assigned_user_id: undefined, sort: undefined });
   }
 
   // Quick filter chips are now in the main UI below status tabs
@@ -307,8 +316,10 @@ export default function ConversationList({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="todos">Todos</SelectItem>
-                    <SelectItem value="open">Aberto</SelectItem>
+                    <SelectItem value="new">Aberto</SelectItem>
+                    <SelectItem value="open">Em Atendimento</SelectItem>
                     <SelectItem value="pending">Aguardando</SelectItem>
+                    <SelectItem value="resolved">Resolvido</SelectItem>
                     <SelectItem value="closed">Fechado</SelectItem>
                   </SelectContent>
                 </Select>
@@ -343,12 +354,12 @@ export default function ConversationList({
       </Collapsible>
 
       {/* Status tabs */}
-      <div className="flex border-b border-border shrink-0">
+      <div className="flex border-b border-border shrink-0 overflow-x-auto scrollbar-none">
         {statusTabs.map((tab) => (
           <button
-            key={tab.value}
+            key={tab.value ?? 'all'}
             onClick={() => onFilterChange({ status: tab.value })}
-            className={`flex-1 py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+            className={`flex-1 min-w-[48px] py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap px-1 ${
               activeStatus === tab.value
                 ? 'border-b-2 border-primary text-primary'
                 : 'text-muted-foreground hover:text-foreground'
@@ -431,6 +442,7 @@ export default function ConversationList({
                   />
 
                   <div className="flex-1 min-w-0">
+                    {/* Row 1: Name + Timestamp */}
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex items-center gap-1 min-w-0">
                         <span className={`text-sm truncate ${unread > 0 ? 'font-semibold' : 'font-medium'} text-foreground`}>
@@ -442,25 +454,25 @@ export default function ConversationList({
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${statusColors[conv.status]}`}>
-                          {statusLabels[conv.status]}
-                        </span>
-                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
                     </div>
 
+                    {/* Row 2: Phone / email */}
                     <p className={`mt-0.5 text-xs truncate ${unread > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
                       {conv.contact.phone ?? conv.contact.email ?? 'Sem contato'}
                     </p>
 
+                    {/* Row 3: Channel + Agent + Status badge */}
                     <div className="mt-1 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
                         <ChannelBadge channel={conv.channel} />
                         <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">
                           {conv.assigned_user?.name ?? 'Não atribuído'}
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${statusColors[conv.status]}`}>
+                        {statusLabels[conv.status]}
+                      </span>
                     </div>
                   </div>
                 </button>

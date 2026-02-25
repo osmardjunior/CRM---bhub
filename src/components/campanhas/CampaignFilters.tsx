@@ -21,6 +21,7 @@ interface Filters {
   no_receive_days_max: number | null;
   no_send_days_min: number | null;
   no_send_days_max: number | null;
+  funnel_id: string;
   funnel_stage_id: string;
   conversation_status: string;
   responsible_user_id: string;
@@ -44,7 +45,7 @@ export default function CampaignFilters({ filters, onChange }: Props) {
   const { data: team = [] } = useTeamProfiles();
   const { funnels } = useFunnels();
 
-  const allStages = funnels.flatMap(f => f.stages.map(s => ({ ...s, funnelName: f.name })));
+  const selectedFunnel = funnels.find(f => f.id === filters.funnel_id);
 
   const toggleArrayItem = (arr: string[], item: string) =>
     arr.includes(item) ? arr.filter(x => x !== item) : [...arr, item];
@@ -53,171 +54,195 @@ export default function CampaignFilters({ filters, onChange }: Props) {
 
   return (
     <div className="space-y-6">
+
+      {/* Status + Funil (CRM filters) */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Conversa</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Status da Conversa</Label>
+            <Select value={filters.conversation_status || 'all'} onValueChange={v => update({ conversation_status: v === 'all' ? '' : v })}>
+              <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="new">Nova</SelectItem>
+                <SelectItem value="open">Em Atendimento</SelectItem>
+                <SelectItem value="pending">Pendente</SelectItem>
+                <SelectItem value="closed">Fechada/Resolvida</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm">Responsável</Label>
+            <Select value={filters.responsible_user_id || 'all'} onValueChange={v => update({ responsible_user_id: v === 'all' ? '' : v })}>
+              <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {team.map(m => (
+                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Departamento</Label>
+            <Select value={filters.department_id || 'all'} onValueChange={v => update({ department_id: v === 'all' ? '' : v })}>
+              <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {departments.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Funil */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Funil de Vendas</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Funil</Label>
+            <Select
+              value={filters.funnel_id || 'all'}
+              onValueChange={v => update({ funnel_id: v === 'all' ? '' : v, funnel_stage_id: '' })}
+            >
+              <SelectTrigger><SelectValue placeholder="Todos os funis" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os funis</SelectItem>
+                {funnels.map(f => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {selectedFunnel && (
+            <div className="space-y-2">
+              <Label className="text-sm">Etapa do Funil</Label>
+              <Select
+                value={filters.funnel_stage_id || 'all'}
+                onValueChange={v => update({ funnel_stage_id: v === 'all' ? '' : v })}
+              >
+                <SelectTrigger><SelectValue placeholder="Todas as etapas" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as etapas</SelectItem>
+                  {selectedFunnel.stages.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+        {funnels.length === 0 && (
+          <p className="text-xs text-muted-foreground">Nenhum funil cadastrado.</p>
+        )}
+      </div>
+
       {/* Tags */}
-      <div className="space-y-3">
-        <Label className="text-sm font-semibold">Incluir quem tiver estas Tags</Label>
-        <div className="flex flex-wrap gap-2">
-          {tags.map(t => (
-            <Badge
-              key={t.id}
-              variant={filters.include_tags.includes(t.id) ? 'default' : 'outline'}
-              className="cursor-pointer"
-              style={filters.include_tags.includes(t.id) ? { backgroundColor: t.color } : {}}
-              onClick={() => update({ include_tags: toggleArrayItem(filters.include_tags, t.id) })}
-            >
-              {t.name}
-            </Badge>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <Label className="text-sm font-semibold">Excluir quem tiver estas Tags</Label>
-        <div className="flex flex-wrap gap-2">
-          {tags.map(t => (
-            <Badge
-              key={t.id}
-              variant={filters.exclude_tags.includes(t.id) ? 'destructive' : 'outline'}
-              className="cursor-pointer"
-              onClick={() => update({ exclude_tags: toggleArrayItem(filters.exclude_tags, t.id) })}
-            >
-              {t.name}
-            </Badge>
-          ))}
-        </div>
-      </div>
-
-      {/* Channels */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Incluir por Canal</Label>
-          <div className="space-y-2">
-            {CHANNELS.map(ch => (
-              <label key={ch.value} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={filters.include_channels.includes(ch.value)}
-                  onCheckedChange={() => update({ include_channels: toggleArrayItem(filters.include_channels, ch.value) })}
-                />
-                {ch.label}
-              </label>
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Tags</h3>
+        <div className="space-y-3">
+          <Label className="text-sm">Incluir contatos com estas tags</Label>
+          <div className="flex flex-wrap gap-2 min-h-[36px]">
+            {tags.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma tag cadastrada.</p>}
+            {tags.map(t => (
+              <Badge
+                key={t.id}
+                variant={filters.include_tags.includes(t.id) ? 'default' : 'outline'}
+                className="cursor-pointer"
+                style={filters.include_tags.includes(t.id) ? { backgroundColor: t.color, borderColor: t.color } : {}}
+                onClick={() => update({ include_tags: toggleArrayItem(filters.include_tags, t.id) })}
+              >
+                {t.name}
+              </Badge>
             ))}
           </div>
         </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Excluir por Canal</Label>
-          <div className="space-y-2">
-            {CHANNELS.map(ch => (
-              <label key={ch.value} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={filters.exclude_channels.includes(ch.value)}
-                  onCheckedChange={() => update({ exclude_channels: toggleArrayItem(filters.exclude_channels, ch.value) })}
-                />
-                {ch.label}
-              </label>
+
+        <div className="space-y-3">
+          <Label className="text-sm">Excluir contatos com estas tags</Label>
+          <div className="flex flex-wrap gap-2 min-h-[36px]">
+            {tags.map(t => (
+              <Badge
+                key={t.id}
+                variant={filters.exclude_tags.includes(t.id) ? 'destructive' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => update({ exclude_tags: toggleArrayItem(filters.exclude_tags, t.id) })}
+              >
+                {t.name}
+              </Badge>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Registration dates */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Cadastrado a partir de</Label>
-          <Input type="date" value={filters.registered_from} onChange={e => update({ registered_from: e.target.value })} />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Cadastrado até</Label>
-          <Input type="date" value={filters.registered_to} onChange={e => update({ registered_to: e.target.value })} />
-        </div>
-      </div>
-
-      {/* Inactivity */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Mais de X dias sem interagir</Label>
-          <Input type="number" min={0} placeholder="Ex: 7" value={filters.inactive_days_min ?? ''} onChange={e => update({ inactive_days_min: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Menos de X dias sem interagir</Label>
-          <Input type="number" min={0} placeholder="Ex: 30" value={filters.inactive_days_max ?? ''} onChange={e => update({ inactive_days_max: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Mais de X dias sem receber msg</Label>
-          <Input type="number" min={0} placeholder="Ex: 7" value={filters.no_receive_days_min ?? ''} onChange={e => update({ no_receive_days_min: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Menos de X dias sem receber msg</Label>
-          <Input type="number" min={0} placeholder="Ex: 30" value={filters.no_receive_days_max ?? ''} onChange={e => update({ no_receive_days_max: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Mais de X dias sem enviar msg</Label>
-          <Input type="number" min={0} placeholder="Ex: 7" value={filters.no_send_days_min ?? ''} onChange={e => update({ no_send_days_min: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Menos de X dias sem enviar msg</Label>
-          <Input type="number" min={0} placeholder="Ex: 30" value={filters.no_send_days_max ?? ''} onChange={e => update({ no_send_days_max: e.target.value ? Number(e.target.value) : null })} />
-        </div>
-      </div>
-
-      {/* Funnel Stage */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Etapa do Funil</Label>
-          <Select value={filters.funnel_stage_id} onValueChange={v => update({ funnel_stage_id: v })}>
-            <SelectTrigger><SelectValue placeholder="Todas as etapas" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as etapas</SelectItem>
-              {allStages.map(s => (
-                <SelectItem key={s.id} value={s.id}>{s.funnelName} → {s.label}</SelectItem>
+      {/* Canal */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Canal</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Incluir por canal</Label>
+            <div className="space-y-2">
+              {CHANNELS.map(ch => (
+                <label key={ch.value} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={filters.include_channels.includes(ch.value)}
+                    onCheckedChange={() => update({ include_channels: toggleArrayItem(filters.include_channels, ch.value) })}
+                  />
+                  {ch.label}
+                </label>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Status de Conversa</Label>
-          <Select value={filters.conversation_status} onValueChange={v => update({ conversation_status: v })}>
-            <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="open">Aberta</SelectItem>
-              <SelectItem value="pending">Pendente</SelectItem>
-              <SelectItem value="closed">Fechada</SelectItem>
-            </SelectContent>
-          </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm">Excluir por canal</Label>
+            <div className="space-y-2">
+              {CHANNELS.map(ch => (
+                <label key={ch.value} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={filters.exclude_channels.includes(ch.value)}
+                    onCheckedChange={() => update({ exclude_channels: toggleArrayItem(filters.exclude_channels, ch.value) })}
+                  />
+                  {ch.label}
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Responsible & Department */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Responsável</Label>
-          <Select value={filters.responsible_user_id} onValueChange={v => update({ responsible_user_id: v })}>
-            <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {team.map(m => (
-                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {/* Datas de cadastro */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Data de Cadastro</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Cadastrado a partir de</Label>
+            <Input type="date" value={filters.registered_from} onChange={e => update({ registered_from: e.target.value })} />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm">Cadastrado até</Label>
+            <Input type="date" value={filters.registered_to} onChange={e => update({ registered_to: e.target.value })} />
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Departamento</Label>
-          <Select value={filters.department_id} onValueChange={v => update({ department_id: v })}>
-            <SelectTrigger><SelectValue placeholder="Todos" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {departments.map(d => (
-                <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      </div>
+
+      {/* Inatividade */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground border-b pb-2">Inatividade (dias)</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-sm">Mais de X dias sem interagir</Label>
+            <Input type="number" min={0} placeholder="Ex: 7" value={filters.inactive_days_min ?? ''} onChange={e => update({ inactive_days_min: e.target.value ? Number(e.target.value) : null })} />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm">Menos de X dias sem interagir</Label>
+            <Input type="number" min={0} placeholder="Ex: 30" value={filters.inactive_days_max ?? ''} onChange={e => update({ inactive_days_max: e.target.value ? Number(e.target.value) : null })} />
+          </div>
         </div>
       </div>
     </div>
@@ -237,6 +262,7 @@ export const EMPTY_FILTERS = {
   no_receive_days_max: null as number | null,
   no_send_days_min: null as number | null,
   no_send_days_max: null as number | null,
+  funnel_id: '',
   funnel_stage_id: '',
   conversation_status: '',
   responsible_user_id: '',

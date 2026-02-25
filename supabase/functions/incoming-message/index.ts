@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  normalizeWhatsAppNumberSafe,
+  isGroupJid,
+  parseWhatsAppIdentifier,
+} from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,13 +12,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-webhook-secret",
 };
 
-/** Detect if a phone/JID is a group */
-function isGroupJid(phone: string): boolean {
-  if (phone.includes("@g.us")) return true;
-  const digits = phone.replace(/\D/g, "");
-  if (digits.startsWith("120363")) return true;
-  if (digits.length >= 18) return true;
-  return false;
+/**
+ * Normalize WhatsApp phone for storage — returns digits-only string (no "+").
+ * Uses the shared util but strips the "+" for backwards-compat with existing DB rows.
+ */
+function normalizeWhatsAppPhone(phone: string): string {
+  const result = normalizeWhatsAppNumberSafe(phone);
+  if (result) return result.replace(/^\+/, ""); // strip leading "+"
+  // Fallback: return raw digits if normalization fails (e.g. group JID)
+  return phone.replace(/@.*$/, "").replace(/:.*$/, "").replace(/\D/g, "");
 }
 
 /**
@@ -39,6 +46,8 @@ function parseEvolutionPayload(body: any): {
   is_group?: boolean;
   group_subject?: string;
   from_me?: boolean;
+  from_jid_kind?: string;
+  remote_jid_raw?: string;
 } {
   // Evolution API v2 sends: { event, instance, data, ... }
   if (body.event && body.instance) {
@@ -54,8 +63,18 @@ function parseEvolutionPayload(body: any): {
       const isFromMe = !!key.fromMe;
 
       // Extract phone from remoteJid (format: 5531XXXX@s.whatsapp.net or ...@g.us)
+      // Strip domain AND multi-device suffix (:108) before extracting digits.
+      // e.g. "92999597994:108@s.whatsapp.net" → "92999597994" (not "92999597994108")
       const remoteJid = key.remoteJid || "";
-      const fromPhone = remoteJid.replace(/@.*$/, "");
+      const rawPhone = remoteJid.replace(/@.*$/, "").replace(/:.*$/, "");
+      const parsedJid = parseWhatsAppIdentifier(remoteJid);
+      const isLidJid = parsedJid.kind === "lid";
+      // LID contacts (@lid) must not be normalized as phone — they're device IDs
+      const fromPhone = isGroupJid(remoteJid)
+        ? rawPhone
+        : isLidJid
+          ? rawPhone
+          : normalizeWhatsAppPhone(rawPhone);
 
       // Detect group
       const isGroup = isGroupJid(remoteJid);
@@ -119,7 +138,9 @@ function parseEvolutionPayload(body: any): {
         channel: "whatsapp",
         external_message_id: messageId,
         from_phone: fromPhone,
-        from_name: isGroup ? (groupSubject || undefined) : pushName,
+        // When isFromMe=true, pushName is the agent's own name — do NOT use it
+        // to name the contact (lead), otherwise leads get the agent's name.
+        from_name: isGroup ? (groupSubject || undefined) : (isFromMe ? undefined : pushName),
         sender_name: isGroup ? pushName : undefined,
         participant_phone: isGroup ? participantPhone : undefined,
         body: messageBody || (mediaUrl ? "" : ""),
@@ -131,6 +152,8 @@ function parseEvolutionPayload(body: any): {
         is_group: isGroup,
         group_subject: groupSubject || undefined,
         from_me: isFromMe,
+        from_jid_kind: isGroupJid(remoteJid) ? "group" : parsedJid.kind,
+        remote_jid_raw: remoteJid,
       };
     }
 
@@ -139,6 +162,102 @@ function parseEvolutionPayload(body: any): {
   }
 
   return { isEvolution: false };
+}
+
+/**
+ * Pick the best agent via weighted round-robin.
+ *
+ * Algorithm: score = conversations_assigned_last_30d / round_robin_weight
+ * The agent with the lowest score gets the next conversation.
+ *
+ * Works for both modes:
+ *   - weight mode:      weight is a relative multiplier (1–10)
+ *   - percentage mode:  weight is an explicit percentage (1–100)
+ * The scoring formula is identical — the difference is only in the UI.
+ *
+ * Uses a 30-day rolling window so that closing conversations doesn't
+ * unfairly reset an agent's load counter.
+ *
+ * Respects allowed_integration_ids: if an agent has a non-null list,
+ * they only receive conversations from integrations in that list.
+ */
+async function pickRoundRobinAgent(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  integrationId: string | null,
+): Promise<string | null> {
+  try {
+    // Get all active agents/supervisors for the company
+    const { data: agents } = await supabase
+      .from("profiles")
+      .select("id, round_robin_weight, allowed_integration_ids")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+
+    if (!agents || agents.length === 0) return null;
+
+    // Join with user_roles to get only agent/supervisor roles
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id, role")
+      .in("user_id", agents.map((a: any) => a.id))
+      .in("role", ["agent", "supervisor"]);
+
+    const eligibleRoleIds = new Set((roles ?? []).map((r: any) => r.user_id));
+
+    // Filter agents: must have eligible role AND pass integration filter
+    const eligible = agents.filter((a: any) => {
+      if (!eligibleRoleIds.has(a.id)) return false;
+      // If agent has allowed_integration_ids set, check if current integration is allowed
+      if (a.allowed_integration_ids && a.allowed_integration_ids.length > 0) {
+        if (!integrationId) return false;
+        return a.allowed_integration_ids.includes(integrationId);
+      }
+      return true; // null = receives from all integrations
+    });
+
+    if (eligible.length === 0) return null;
+
+    // Count conversations assigned in the last 30 days (rolling window).
+    // Using a time window prevents the "agent closed all chats → always gets next" bug.
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: counts } = await supabase
+      .from("conversations")
+      .select("assigned_user_id")
+      .eq("company_id", companyId)
+      .in("assigned_user_id", eligible.map((a: any) => a.id))
+      .gte("created_at", since30d);
+
+    const countMap: Record<string, number> = {};
+    for (const row of (counts ?? [])) {
+      if (row.assigned_user_id) {
+        countMap[row.assigned_user_id] = (countMap[row.assigned_user_id] ?? 0) + 1;
+      }
+    }
+
+    // Pick agent with lowest score (assigned_last_30d / weight).
+    // Tie-breaking: first in list (consistent ordering from DB).
+    let bestAgent: string | null = null;
+    let bestScore = Infinity;
+    for (const agent of eligible) {
+      const assigned = countMap[agent.id] ?? 0;
+      const weight = (agent as any).round_robin_weight || 1;
+      const score = assigned / weight;
+      if (score < bestScore) {
+        bestScore = score;
+        bestAgent = agent.id;
+      }
+    }
+
+    console.log(
+      `[round-robin] eligible=${eligible.length} best=${bestAgent} score=${bestScore.toFixed(2)}`
+    );
+
+    return bestAgent;
+  } catch (err: any) {
+    console.warn("[round-robin] error:", err.message);
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -187,6 +306,13 @@ serve(async (req) => {
     let is_group = false;
     let media_type = "text";
     let from_me = false;
+    // Cached integration config — set once during company lookup, reused later
+    let evolutionIntegConfig: any = null;
+    // integration_id for this message — stored on conversation for correct reply routing
+    let integrationId: string | null = null;
+    // LID detection — @lid contacts are device IDs, not phone numbers
+    let isLidContact = false;
+    let remoteJidRaw: string | null = null;
 
     if (evolution.isEvolution) {
       // Skip non-message events
@@ -203,23 +329,19 @@ serve(async (req) => {
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       );
 
-      // Find integration by instance name to get company_id
-      const { data: integrations } = await supabaseAdmin
+      // Find integration by instance name to get company_id (server-side JSONB filter)
+      const { data: foundInteg } = await supabaseAdmin
         .from("integrations")
-        .select("company_id, config")
+        .select("id, company_id, config")
         .eq("channel", "whatsapp")
-        .eq("provider", "evolution");
+        .eq("provider", "evolution")
+        .filter("config->>instance_name", "eq", evolution.instance_name)
+        .maybeSingle();
 
-      let foundCompanyId: string | null = null;
-      if (integrations) {
-        for (const integ of integrations) {
-          const config = integ.config as any;
-          if (config?.instance_name === evolution.instance_name) {
-            foundCompanyId = integ.company_id;
-            break;
-          }
-        }
-      }
+      const foundCompanyId = foundInteg?.company_id ?? null;
+      integrationId = foundInteg?.id ?? null;
+      // Cache integration config to avoid redundant re-fetches later
+      if (foundInteg?.config) evolutionIntegConfig = foundInteg.config;
 
       if (!foundCompanyId) {
         console.error(`No integration found for instance: ${evolution.instance_name}`);
@@ -243,18 +365,30 @@ serve(async (req) => {
       media_type = evolution.media_type || "text";
       from_me = evolution.from_me || false;
 
+      // ── LID detection (device IDs, not phone numbers) ──────────────────
+      // LID contacts have @lid domain — must NOT be treated as phone numbers.
+      // They're stored in wa_identifier_raw instead of phone/phone_e164.
+      isLidContact = evolution.from_jid_kind === "lid";
+      remoteJidRaw = evolution.remote_jid_raw || null;
+      if (isLidContact) {
+        console.log(`[incoming] kind=lid jid=${remoteJidRaw} — LID contact, não normalizar como telefone`);
+      }
+
       // ── Filter invalid JIDs (status broadcasts, newsletters, communities, invalid phones) ──
       const phoneDigits = from_phone.replace(/\D/g, "");
       const looksLikeGroupJid = /^\d+-\d+$/.test(from_phone); // e.g. 553183022054-1632608644
       const looksLikeCommunity = phoneDigits.startsWith("120363");
+      // LID contacts bypass the digit-length filter — they're valid with 14-18 digits
       if (
-        phoneDigits.length > 15 ||
-        phoneDigits.length < 8 ||
-        from_phone.includes("status") ||
-        from_phone.includes("newsletter") ||
-        from_phone === "0" ||
-        looksLikeCommunity ||
-        (looksLikeGroupJid && !is_group)
+        !isLidContact && (
+          phoneDigits.length > 15 ||
+          phoneDigits.length < 8 ||
+          from_phone.includes("status") ||
+          from_phone.includes("newsletter") ||
+          from_phone === "0" ||
+          looksLikeCommunity ||
+          (looksLikeGroupJid && !is_group)
+        )
       ) {
         console.log(`Skipping invalid JID: ${from_phone}`);
         return new Response(
@@ -370,49 +504,90 @@ serve(async (req) => {
     }
 
     // ── Find or create contact ─────────────────────────
-    const normalizedPhone = from_phone.replace(/\D/g, "");
+    let contact: any = null;
 
-    let { data: contact } = await supabase
-      .from("contacts")
-      .select("id, name, is_group")
-      .eq("company_id", company_id)
-      .eq("phone", from_phone)
-      .maybeSingle();
-
-    if (!contact) {
-      // Try normalized match
-      const { data: contacts } = await supabase
+    if (isLidContact) {
+      // LID contacts: use wa_identifier_raw for lookup — phone is NOT available
+      const { data: lidContact } = await supabase
         .from("contacts")
-        .select("id, name, phone, is_group")
-        .eq("company_id", company_id);
+        .select("id, name, is_group, avatar_url")
+        .eq("company_id", company_id)
+        .eq("wa_identifier_raw", remoteJidRaw)
+        .maybeSingle();
+      contact = lidContact;
 
-      const match = (contacts ?? []).find(
-        (c: any) => c.phone && c.phone.replace(/\D/g, "") === normalizedPhone,
-      );
-
-      if (match) {
-        contact = match;
-      } else {
+      if (!contact) {
+        console.log(`[incoming] kind=lid jid=${remoteJidRaw} — criando contato sem telefone (wa_identifier_raw)`);
         const { data: newContact, error: contactErr } = await supabase
           .from("contacts")
-          .upsert(
-            {
-              company_id,
-              name: from_name || from_phone,
-              phone: from_phone,
-              source: channel,
-              tags: [],
-              is_group: is_group,
-              avatar_url: is_group ? null : (profile_picture_url || null),
-            },
-            { onConflict: "company_id,phone" }
-          )
+          .insert({
+            company_id,
+            name: from_name || "WhatsApp",
+            phone: null,
+            phone_e164: null,
+            wa_identifier_raw: remoteJidRaw,
+            remote_jid_raw: remoteJidRaw,
+            source: channel,
+            tags: [],
+            is_group: false,
+            avatar_url: null,
+          })
           .select("id, name, is_group")
           .single();
-
         if (contactErr) throw contactErr;
         contact = newContact;
       }
+    } else {
+      // Regular phone-based contact
+      let { data: phoneContact } = await supabase
+        .from("contacts")
+        .select("id, name, is_group, avatar_url")
+        .eq("company_id", company_id)
+        .eq("phone", from_phone)
+        .maybeSingle();
+
+      if (!phoneContact) {
+        // Try normalized phone lookup (indexed query instead of full table scan)
+        const normalizedAttempt = normalizeWhatsAppPhone(from_phone);
+        if (normalizedAttempt !== from_phone) {
+          const { data: contact2 } = await supabase
+            .from("contacts")
+            .select("id, name, is_group, avatar_url")
+            .eq("company_id", company_id)
+            .eq("phone", normalizedAttempt)
+            .maybeSingle();
+          if (contact2) phoneContact = contact2;
+        }
+
+        if (!phoneContact) {
+          // Compute E.164 and capture raw JID for the new contact
+          const phoneE164 = normalizeWhatsAppNumberSafe(from_phone);
+          const capturedJidRaw = remoteJidRaw ?? rawBody?.data?.key?.remoteJid ?? null;
+
+          const { data: newContact, error: contactErr } = await supabase
+            .from("contacts")
+            .upsert(
+              {
+                company_id,
+                name: from_name || from_phone,
+                phone: from_phone,
+                phone_e164: phoneE164,
+                remote_jid_raw: capturedJidRaw,
+                source: channel,
+                tags: [],
+                is_group: is_group,
+                avatar_url: is_group ? null : (profile_picture_url || null),
+              },
+              { onConflict: "company_id,phone" }
+            )
+            .select("id, name, is_group")
+            .single();
+
+          if (contactErr) throw contactErr;
+          phoneContact = newContact;
+        }
+      }
+      contact = phoneContact;
     }
 
     // ── Update contact metadata ────────────────────────
@@ -423,8 +598,9 @@ serve(async (req) => {
       contactUpdates.is_group = true;
     }
 
-    // Update avatar only for individual contacts (not groups)
-    if (profile_picture_url && !is_group) {
+    // Update avatar only for individual contacts (not groups) and only for incoming messages
+    // When from_me=true, the profile_picture_url belongs to the agent, not the contact
+    if (profile_picture_url && !is_group && !from_me) {
       contactUpdates.avatar_url = profile_picture_url;
     }
 
@@ -433,80 +609,7 @@ serve(async (req) => {
       contactUpdates.name = from_name;
     }
 
-    // ── Fetch missing data from Evolution API ──────────
-    if (evolution.isEvolution && evolution.instance_name) {
-      // Look up Evolution API credentials
-      const { data: evoInteg } = await supabase
-        .from("integrations")
-        .select("config")
-        .eq("company_id", company_id)
-        .eq("provider", "evolution")
-        .limit(1)
-        .maybeSingle();
-
-      if (evoInteg) {
-        const evoConfig = evoInteg.config as any;
-        let evoBaseUrl = (evoConfig?.api_url || "").trim().replace(/\/+$/, "");
-        if (evoBaseUrl && !/^https?:\/\//i.test(evoBaseUrl)) {
-          evoBaseUrl = `https://${evoBaseUrl}`;
-        }
-        evoBaseUrl = evoBaseUrl.replace(/\/(manager|api)\/?$/i, "");
-        const evoApiKey = evoConfig?.api_key || "";
-        const instName = evolution.instance_name;
-
-        // Fetch profile picture if contact has none
-        if (!contact.avatar_url && !profile_picture_url && evoBaseUrl && evoApiKey) {
-          try {
-            const remoteJid = is_group
-              ? `${from_phone}@g.us`
-              : `${from_phone}@s.whatsapp.net`;
-            const picResp = await fetch(
-              `${evoBaseUrl}/chat/fetchProfilePictureUrl/${instName}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey: evoApiKey },
-                body: JSON.stringify({ number: remoteJid }),
-              },
-            );
-            if (picResp.ok) {
-              const picData = await picResp.json();
-              const picUrl = picData?.profilePictureUrl || picData?.picture || picData?.url || null;
-              if (picUrl) {
-                contactUpdates.avatar_url = picUrl;
-              }
-            }
-          } catch (e) {
-            console.warn("Failed to fetch profile picture:", e);
-          }
-        }
-
-        // Fetch group name if it looks like a JID/number
-        const nameIsJid = contact.name && /^\d{10,}$/.test(contact.name.replace(/\D/g, ""));
-        if (is_group && nameIsJid && evoBaseUrl && evoApiKey) {
-          try {
-            const groupJid = `${from_phone}@g.us`;
-            const grpResp = await fetch(
-              `${evoBaseUrl}/group/findGroupInfos/${instName}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey: evoApiKey },
-                body: JSON.stringify({ groupJid }),
-              },
-            );
-            if (grpResp.ok) {
-              const grpData = await grpResp.json();
-              const subject = grpData?.subject || grpData?.name || null;
-              if (subject) {
-                contactUpdates.name = subject;
-              }
-            }
-          } catch (e) {
-            console.warn("Failed to fetch group info:", e);
-          }
-        }
-      }
-    }
-
+    // Apply basic contact updates immediately (from webhook data — no API calls)
     if (Object.keys(contactUpdates).length > 0) {
       await supabase
         .from("contacts")
@@ -514,60 +617,89 @@ serve(async (req) => {
         .eq("id", contact.id);
     }
 
-    // ── Find the most recent conversation for this contact (any status) ───
-    let { data: conversation } = await supabase
-      .from("conversations")
-      .select("id, status")
-      .eq("company_id", company_id)
-      .eq("contact_id", contact.id)
-      .eq("channel", channel)
-      .order("last_message_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // ── Find the most recent conversation for this contact + integration ──
+    // Each phone number (integration) gets its own isolated conversation per
+    // contact. If the same contact messages Number 1 and Number 2, they
+    // appear as TWO separate conversations — one per number.
+    {
+      let query = supabase
+        .from("conversations")
+        .select("id, status, integration_id")
+        .eq("company_id", company_id)
+        .eq("contact_id", contact.id)
+        .eq("channel", channel);
+
+      // Scope to the specific integration/number when known
+      if (integrationId) {
+        query = query.eq("integration_id", integrationId);
+      }
+
+      var { data: conversation } = await query
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    }
 
     if (conversation) {
-      // If it's closed or pending, reopen it — but only for incoming messages (not fromMe)
-      if (conversation.status !== "open" && !from_me) {
+      // Reopen closed/resolved conversations when a new inbound message arrives
+      const isClosed = conversation.status === "closed" || conversation.status === "resolved";
+      const updates: Record<string, any> = {};
+      if (isClosed && !from_me) {
+        updates.status = "new";
+        updates.close_reason = null;
+        // Re-assign if previously unassigned (pick via round-robin)
+        const currentConv = await supabase
+          .from("conversations")
+          .select("assigned_user_id")
+          .eq("id", conversation.id)
+          .maybeSingle();
+        if (!currentConv.data?.assigned_user_id) {
+          const agentId = await pickRoundRobinAgent(supabase, company_id, integrationId);
+          if (agentId) updates.assigned_user_id = agentId;
+        }
+      }
+      if (Object.keys(updates).length > 0) {
         await supabase
           .from("conversations")
-          .update({
-            status: "open",
-            close_reason: null,
-            last_message_at: timestamp || new Date().toISOString(),
-          })
+          .update(updates)
           .eq("id", conversation.id);
       }
+      // last_message_at is kept up-to-date by the DB trigger on messages INSERT
     } else {
-      // No conversation exists, create a new one
+      // No conversation for this contact+number — create a new one
+      // Pick agent via weighted round-robin before creating conversation
+      const assignedAgentId = !from_me
+        ? await pickRoundRobinAgent(supabase, company_id, integrationId)
+        : null;
+
       const { data: newConv, error: convErr } = await supabase
         .from("conversations")
         .insert({
           company_id,
           contact_id: contact.id,
           channel,
-          status: "open",
+          status: "new",
           last_message_at: timestamp || new Date().toISOString(),
+          ...(integrationId ? { integration_id: integrationId } : {}),
+          ...(assignedAgentId ? { assigned_user_id: assignedAgentId } : {}),
         })
         .select("id")
         .single();
 
       if (convErr) throw convErr;
       conversation = newConv;
+
+      if (assignedAgentId) {
+        console.log(`[round-robin] conversa ${newConv.id} atribuída ao agente ${assignedAgentId}`);
+      }
     }
 
     // ── Download media from Evolution and store in our bucket ───
     if (evolution.isEvolution && media_url && media_type !== "text") {
       try {
-        const { data: evoInteg2 } = await supabase
-          .from("integrations")
-          .select("config")
-          .eq("company_id", company_id)
-          .eq("provider", "evolution")
-          .limit(1)
-          .maybeSingle();
-
-        if (evoInteg2) {
-          const ec = evoInteg2.config as any;
+        // Use cached integration config (fetched during company lookup)
+        if (evolutionIntegConfig) {
+          const ec = evolutionIntegConfig as any;
           let evoUrl = (ec?.api_url || "").trim().replace(/\/+$/, "");
           if (evoUrl && !/^https?:\/\//i.test(evoUrl)) evoUrl = `https://${evoUrl}`;
           evoUrl = evoUrl.replace(/\/(manager|api)\/?$/i, "");
@@ -639,7 +771,9 @@ serve(async (req) => {
     // ── Deduplication for fromMe messages ────────────
     // Messages sent from the phone (fromMe) may already exist in the DB
     // if they were sent via the CRM (without external_message_id).
-    if (from_me) {
+    // Also handles cases where Evolution fires the webhook with fromMe=false
+    // for messages sent via the REST API (Evolution API quirk).
+    {
       const recentCutoff = new Date(Date.now() - 60000).toISOString();
       const { data: recentMatch } = await supabase
         .from("messages")
@@ -657,8 +791,8 @@ serve(async (req) => {
           .from("messages")
           .update({ external_message_id })
           .eq("id", recentMatch.id);
-        
-        console.log(`Deduplicated fromMe message: ${external_message_id}`);
+
+        console.log(`Deduplicated agent message (fromMe=${from_me}): ${external_message_id}`);
         return new Response(
           JSON.stringify({ ok: true, conversation_id: conversation.id, deduplicated: true }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -682,12 +816,88 @@ serve(async (req) => {
     });
 
     if (msgErr) throw msgErr;
+    // last_message_at is kept up-to-date by the DB trigger on messages INSERT
 
-    // ── Update last_message_at ─────────────────────────
-    await supabase
-      .from("conversations")
-      .update({ last_message_at: timestamp || new Date().toISOString() })
-      .eq("id", conversation.id);
+    // ── Fire-and-forget: enrich contact from Evolution API ─────────────────
+    // Runs AFTER the message is saved so it never delays delivery.
+    if (evolution.isEvolution && evolution.instance_name && evolutionIntegConfig) {
+      const _contactId = contact.id;
+      const _hasAvatar = !!(contact as any).avatar_url;
+      const _contactName: string = contact.name ?? "";
+      const _instName = evolution.instance_name;
+      const _cfg = evolutionIntegConfig;
+      (async () => {
+        try {
+          let evoBaseUrl = (_cfg?.api_url || "").trim().replace(/\/+$/, "");
+          if (evoBaseUrl && !/^https?:\/\//i.test(evoBaseUrl)) evoBaseUrl = `https://${evoBaseUrl}`;
+          evoBaseUrl = evoBaseUrl.replace(/\/(manager|api)\/?$/i, "");
+          const evoApiKey = _cfg?.api_key || "";
+          if (!evoBaseUrl || !evoApiKey) return;
+
+          const enrichUpdates: Record<string, any> = {};
+          const nameIsPhone = _contactName && /^\d{8,}$/.test(_contactName.replace(/\D/g, ""));
+
+          // Fetch profile picture if contact has none
+          if (!_hasAvatar && !profile_picture_url && !from_me) {
+            try {
+              const remoteJid = is_group ? `${from_phone}@g.us` : `${from_phone}@s.whatsapp.net`;
+              const picResp = await fetch(`${evoBaseUrl}/chat/fetchProfilePictureUrl/${_instName}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiKey },
+                body: JSON.stringify({ number: remoteJid }),
+              });
+              if (picResp.ok) {
+                const picData = await picResp.json();
+                const picUrl = picData?.profilePictureUrl || picData?.picture || picData?.url || null;
+                if (picUrl) enrichUpdates.avatar_url = picUrl;
+              }
+            } catch {}
+          }
+
+          if (is_group && nameIsPhone) {
+            // Fetch group subject
+            try {
+              const groupJid = `${from_phone}@g.us`;
+              const grpResp = await fetch(`${evoBaseUrl}/group/findGroupInfos/${_instName}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiKey },
+                body: JSON.stringify({ groupJid }),
+              });
+              if (grpResp.ok) {
+                const grpData = await grpResp.json();
+                const subject = grpData?.subject || grpData?.name || null;
+                if (subject) enrichUpdates.name = subject;
+              }
+            } catch {}
+          } else if (!is_group && nameIsPhone) {
+            // Fetch WhatsApp display name
+            try {
+              const contactJid = `${from_phone}@s.whatsapp.net`;
+              const ctResp = await fetch(`${evoBaseUrl}/contact/fetchContacts/${_instName}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiKey },
+                body: JSON.stringify({ where: { id: contactJid } }),
+              });
+              if (ctResp.ok) {
+                const ctData = await ctResp.json();
+                const ctList = Array.isArray(ctData) ? ctData : (ctData?.contacts || []);
+                const found = ctList.find((c: any) => c.id === contactJid || c.remoteJid === contactJid);
+                const realName = found?.pushName || found?.name || found?.verifiedName || null;
+                if (realName && !/^\d{8,}$/.test(realName.replace(/\D/g, ""))) {
+                  enrichUpdates.name = realName;
+                }
+              }
+            } catch {}
+          }
+
+          if (Object.keys(enrichUpdates).length > 0) {
+            await supabase.from("contacts").update(enrichUpdates).eq("id", _contactId);
+          }
+        } catch (e) {
+          console.warn("Background enrichment failed (non-fatal):", e);
+        }
+      })();
+    }
 
     // ── Check for pending NPS survey response ──────────
     const trimmedBody = messageBody.trim();
@@ -751,37 +961,46 @@ serve(async (req) => {
               const bh = (activeFlow.business_hours || {}) as Record<string, any>;
               const triggerType: string = bh._trigger?.type || "none";
               const triggerKeyword: string = bh._trigger?.keyword || "";
+              const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
 
-              switch (triggerType) {
-                case "any_message":
-                  shouldRun = true;
-                  break;
+              // Filter by integration: [] = all; specific IDs = only those numbers
+              const convIntegrationId: string | null = (conversation as any).integration_id ?? null;
+              const integrationAllowed =
+                allowedIntegrationIds.length === 0 ||
+                (convIntegrationId !== null && allowedIntegrationIds.includes(convIntegrationId));
 
-                case "first_message": {
-                  // Only start if this is the very first user message in this conversation
-                  const { count } = await supabase
-                    .from("messages")
-                    .select("id", { count: "exact", head: true })
-                    .eq("conversation_id", conversation.id)
-                    .eq("sender_type", "user");
-                  shouldRun = (count ?? 0) <= 1;
-                  break;
+              if (integrationAllowed) {
+                switch (triggerType) {
+                  case "any_message":
+                    shouldRun = true;
+                    break;
+
+                  case "first_message": {
+                    // Only start if this is the very first user message in this conversation
+                    const { count } = await supabase
+                      .from("messages")
+                      .select("id", { count: "exact", head: true })
+                      .eq("conversation_id", conversation.id)
+                      .eq("sender_type", "user");
+                    shouldRun = (count ?? 0) <= 1;
+                    break;
+                  }
+
+                  case "keyword": {
+                    // Check if any keyword matches the message body
+                    const keywords = triggerKeyword
+                      .split(",")
+                      .map((k: string) => k.trim().toLowerCase())
+                      .filter(Boolean);
+                    const msgLower = messageBody.toLowerCase();
+                    shouldRun = keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
+                    break;
+                  }
+
+                  case "none":
+                  default:
+                    shouldRun = false;
                 }
-
-                case "keyword": {
-                  // Check if any keyword matches the message body
-                  const keywords = triggerKeyword
-                    .split(",")
-                    .map((k: string) => k.trim().toLowerCase())
-                    .filter(Boolean);
-                  const msgLower = messageBody.toLowerCase();
-                  shouldRun = keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
-                  break;
-                }
-
-                case "none":
-                default:
-                  shouldRun = false;
               }
             }
 

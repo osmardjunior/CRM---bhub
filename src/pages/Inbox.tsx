@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ConversationList from '@/components/inbox/ConversationList';
 import ChatPanel from '@/components/inbox/ChatPanel';
@@ -10,14 +10,29 @@ import {
   useMarkConversationRead,
 } from '@/hooks/useConversations';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
+import { useAuth } from '@/contexts/AuthContext';
 import type { ConversationFilters } from '@/services/api';
+import type { Enums } from '@/integrations/supabase/types';
 
 export default function InboxPage() {
-  const [searchParams] = useSearchParams();
+  const { user, role } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialId = searchParams.get('id');
+  const initialStatus = searchParams.get('status') as Enums<'conversation_status'> | null;
+
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
-  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({ status: 'open' });
+  const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
+    status: initialStatus ?? undefined,
+  });
+
+  // Agents only see conversations assigned to them
+  const effectiveFilters = useMemo<Omit<ConversationFilters, 'page'>>(() => {
+    if (role === 'agent' && user?.id) {
+      return { ...filters, assigned_user_id: user.id };
+    }
+    return filters;
+  }, [filters, role, user?.id]);
 
   const {
     data: infiniteData,
@@ -25,14 +40,23 @@ export default function InboxPage() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useInfiniteConversations(filters);
+  } = useInfiniteConversations(effectiveFilters);
 
   const conversations = useMemo(
     () => infiniteData?.pages.flat() ?? [],
     [infiniteData],
   );
 
-  const effectiveSelectedId = selectedId ?? conversations[0]?.id ?? null;
+  // Auto-seleciona a primeira conversa UMA única vez após o carregamento inicial.
+  const didAutoSelect = useRef(false);
+  useEffect(() => {
+    if (!didAutoSelect.current && selectedId === null && conversations.length > 0) {
+      didAutoSelect.current = true;
+      setSelectedId(conversations[0].id);
+    }
+  }, [conversations, selectedId]);
+
+  const effectiveSelectedId = selectedId;
   const { data: detail, isLoading: detailLoading } = useConversationDetail(effectiveSelectedId);
   const { data: unreadCounts } = useUnreadCounts(conversations);
   const markRead = useMarkConversationRead();
@@ -48,7 +72,19 @@ export default function InboxPage() {
   }, [effectiveSelectedId]);
 
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }));
+    setFilters((prev) => {
+      const next = { ...prev, ...newFilters };
+      // Persist status filter in URL so it survives page reload
+      setSearchParams(params => {
+        if (next.status) {
+          params.set('status', next.status);
+        } else {
+          params.delete('status');
+        }
+        return params;
+      }, { replace: true });
+      return next;
+    });
   };
 
   const hasSelection = !!effectiveSelectedId;

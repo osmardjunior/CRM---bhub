@@ -26,25 +26,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
+    // Run both queries in parallel — cuts initial load time in half
+    const [{ data: profileData }, { data: roleData }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle(),
+    ]);
 
-    if (profileData) {
-      setProfile(profileData);
-    }
+    if (profileData) setProfile(profileData);
+    if (roleData) setRole(roleData.role);
 
-    const { data: roleData } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (roleData) {
-      setRole(roleData.role);
-    }
+    // Only mark loading=false AFTER profile is ready — prevents race conditions
+    // where spy_mode and other profile flags are read before they're populated.
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -55,13 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          // Use setTimeout to avoid potential deadlock with Supabase client
+          // setTimeout breaks out of the Supabase callback context to avoid deadlock
           setTimeout(() => fetchProfile(newSession.user.id), 0);
         } else {
           setProfile(null);
           setRole(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
@@ -71,8 +64,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(existingSession?.user ?? null);
       if (existingSession?.user) {
         fetchProfile(existingSession.user.id);
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

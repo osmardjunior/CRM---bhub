@@ -30,21 +30,24 @@ export function useCampaigns() {
       const { data, error } = await supabase
         .from('campaigns')
         .select('*')
+        .eq('company_id', companyId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as Campaign[];
     },
     enabled: !!companyId,
+    refetchInterval: 5000, // poll progress every 5s while campaigns run
   });
 }
 
 export function useCreateCampaign() {
   const qc = useQueryClient();
+  const { companyId } = useAuth();
   return useMutation({
     mutationFn: async (payload: Partial<Campaign>) => {
       const { data, error } = await supabase
         .from('campaigns')
-        .insert(payload as any)
+        .insert({ ...payload, company_id: companyId } as any)
         .select()
         .single();
       if (error) throw error;
@@ -70,7 +73,6 @@ export function useUpdateCampaign() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
-      toast.success('Campanha atualizada!');
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -91,5 +93,25 @@ export function useDeleteCampaign() {
       toast.success('Campanha excluída!');
     },
     onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useRunCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (campaignId: string) => {
+      const { error } = await supabase
+        .from('campaigns')
+        .update({ status: 'scheduled', schedule_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      if (error) throw error;
+      // Trigger immediately
+      await supabase.functions.invoke('execute-campaign', { body: { campaign_id: campaignId } });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      toast.success('Campanha iniciada!');
+    },
+    onError: (err: Error) => toast.error(`Erro ao executar: ${err.message}`),
   });
 }

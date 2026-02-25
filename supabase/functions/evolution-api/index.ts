@@ -240,11 +240,37 @@ serve(async (req) => {
       const state = statusData.instance?.state || statusData.state || "unknown";
       const isConnected = state === "open" || state === "connected";
 
-      // If connected and we have an integration_id, update its status
+      // If connected and we have an integration_id, update status + fetch phone number
       if (isConnected && integration_id) {
+        let phoneNumber: string | null = null;
+
+        // Try to fetch the phone number from fetchInstances
+        try {
+          const fetchResp = await fetch(
+            `${baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance_name)}`,
+            { method: "GET", headers: { apikey: api_key } }
+          );
+          if (fetchResp.ok) {
+            const fetchData = await fetchResp.json();
+            // fetchInstances returns an array; each item may have instance.owner or ownerJid
+            const item = Array.isArray(fetchData) ? fetchData[0] : fetchData;
+            const owner: string = item?.instance?.owner || item?.ownerJid || item?.owner || "";
+            if (owner) {
+              // Strip @s.whatsapp.net and normalize to +E.164 style
+              const digits = owner.replace(/@.*$/, "").replace(/[^0-9]/g, "");
+              if (digits.length >= 10) phoneNumber = `+${digits}`;
+            }
+          }
+        } catch {
+          // Best-effort, ignore
+        }
+
+        const updatePayload: Record<string, unknown> = { status: "connected" };
+        if (phoneNumber) updatePayload.phone_number = phoneNumber;
+
         await supabase
           .from("integrations")
-          .update({ status: "connected" })
+          .update(updatePayload)
           .eq("id", integration_id);
       }
 
@@ -318,9 +344,78 @@ serve(async (req) => {
       );
     }
 
+    // ── Action: fetch-phone ─────────────────────────
+    if (action === "fetch-phone") {
+      if (!instance_name || !integration_id) {
+        return new Response(
+          JSON.stringify({ error: "instance_name and integration_id are required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      let phoneNumber: string | null = null;
+
+      // Try 1: fetchInstances endpoint
+      try {
+        const r = await fetch(
+          `${baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance_name)}`,
+          { method: "GET", headers: { apikey: api_key } }
+        );
+        if (r.ok) {
+          const data = await r.json();
+          const item = Array.isArray(data) ? data[0] : data;
+          const owner: string =
+            item?.instance?.owner ||
+            item?.instance?.ownerJid ||
+            item?.ownerJid ||
+            item?.owner ||
+            "";
+          if (owner) {
+            const digits = owner.replace(/@.*$/, "").replace(/[^0-9]/g, "");
+            if (digits.length >= 10) phoneNumber = `+${digits}`;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Try 2: connectionState endpoint (some Evolution versions include phone here)
+      if (!phoneNumber) {
+        try {
+          const r = await fetch(
+            `${baseUrl}/instance/connectionState/${encodeURIComponent(instance_name)}`,
+            { method: "GET", headers: { apikey: api_key } }
+          );
+          if (r.ok) {
+            const data = await r.json();
+            const owner: string =
+              data?.instance?.owner ||
+              data?.instance?.ownerJid ||
+              data?.ownerJid ||
+              data?.owner ||
+              "";
+            if (owner) {
+              const digits = owner.replace(/@.*$/, "").replace(/[^0-9]/g, "");
+              if (digits.length >= 10) phoneNumber = `+${digits}`;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (phoneNumber) {
+        await supabase
+          .from("integrations")
+          .update({ phone_number: phoneNumber })
+          .eq("id", integration_id);
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, phone_number: phoneNumber }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({
-        error: "Invalid action. Use: create-instance, get-qrcode, check-status, set-webhook",
+        error: "Invalid action. Use: create-instance, get-qrcode, check-status, set-webhook, fetch-phone",
       }),
       {
         status: 400,

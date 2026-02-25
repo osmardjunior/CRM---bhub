@@ -8,11 +8,12 @@ export function useSidebarStats() {
   return useQuery({
     queryKey: ['sidebar-stats', companyId],
     queryFn: async () => {
-      const [convRes, taskRes] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'open'),
+      const [unreadRes, taskRes] = await Promise.all([
+        // Single server-side aggregation replacing full table scan + client comparison
+        supabase.rpc('get_sidebar_unread_count', {
+          p_user_id: user!.id,
+          p_company_id: companyId!,
+        }),
         supabase
           .from('tasks')
           .select('id', { count: 'exact', head: true })
@@ -22,11 +23,11 @@ export function useSidebarStats() {
       ]);
 
       return {
-        openConversations: convRes.count ?? 0,
+        openConversations: (unreadRes.data as number) ?? 0,
         overdueTasks: taskRes.count ?? 0,
       };
     },
     enabled: !!user && !!companyId,
-    refetchInterval: 30000,
+    refetchInterval: 10_000, // fallback polling — realtime invalida via useInboxRealtime
   });
 }
