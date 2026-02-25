@@ -196,13 +196,19 @@ function FunnelCard({
         >
           {funnel.name}
         </button>
-        <button
-          onClick={() => setMoreOpen((o) => !o)}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
-        >
-          <Plus size={12} />
-          Mais Opções
-        </button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+            <Filter size={11} />
+            Métricas
+          </Button>
+          <button
+            onClick={() => setMoreOpen((o) => !o)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
+          >
+            <Plus size={12} />
+            Mais Opções
+          </button>
+        </div>
       </div>
 
       <div className="bg-funnel-dark overflow-x-auto">
@@ -275,10 +281,6 @@ function FunnelCard({
               <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-info text-info hover:bg-info hover:text-white">
                 <Download size={11} />
                 Exportar em CSV
-              </Button>
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
-                <Filter size={11} />
-                Ver Métricas
               </Button>
             </div>
             <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5" onClick={() => onDelete(funnel.id)}>
