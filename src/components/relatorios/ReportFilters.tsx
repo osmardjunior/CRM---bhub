@@ -197,56 +197,62 @@ export default function ReportFiltersPanel({
           </Select>
         </div>
 
-        {/* Department */}
-        <div>
-          <Label className="text-xs text-muted-foreground">Departamento</Label>
-          <Select
-            value={filters.departmentIds?.[0] ?? 'any'}
-            onValueChange={(v) => update({ departmentIds: v === 'any' ? [] : [v] })}
-          >
-            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="any">Todos</SelectItem>
-              {(departments ?? []).map((d) => (
-                <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Funnel */}
-        <div>
-          <Label className="text-xs text-muted-foreground">Funil</Label>
-          <Select
-            value={filters.funnelId ?? 'any'}
-            onValueChange={(v) => update({ funnelId: v === 'any' ? undefined : v, stageId: undefined })}
-          >
-            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="any">Todos</SelectItem>
-              {funnels.map((f) => (
-                <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {filters.funnelId && (
+        {/* Department — only for chats */}
+        {reportType === 'chats' && (
           <div>
-            <Label className="text-xs text-muted-foreground">Etapa do Funil</Label>
+            <Label className="text-xs text-muted-foreground">Departamento</Label>
             <Select
-              value={filters.stageId ?? 'any'}
-              onValueChange={(v) => update({ stageId: v === 'any' ? undefined : v })}
+              value={filters.departmentIds?.[0] ?? 'any'}
+              onValueChange={(v) => update({ departmentIds: v === 'any' ? [] : [v] })}
             >
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="any">Todas</SelectItem>
-                {(funnels.find((f) => f.id === filters.funnelId)?.stages ?? []).map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                <SelectItem value="any">Todos</SelectItem>
+                {(departments ?? []).map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+        )}
+
+        {/* Funnel + Stage — only for contacts */}
+        {reportType === 'contacts' && (
+          <>
+            <div>
+              <Label className="text-xs text-muted-foreground">Funil</Label>
+              <Select
+                value={filters.funnelId ?? 'any'}
+                onValueChange={(v) => update({ funnelId: v === 'any' ? undefined : v, stageId: undefined })}
+              >
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Todos</SelectItem>
+                  {funnels.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filters.funnelId && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Etapa do Funil</Label>
+                <Select
+                  value={filters.stageId ?? 'any'}
+                  onValueChange={(v) => update({ stageId: v === 'any' ? undefined : v })}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Todas</SelectItem>
+                    {(funnels.find((f) => f.id === filters.funnelId)?.stages ?? []).map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </>
         )}
 
         {/* Date filters */}

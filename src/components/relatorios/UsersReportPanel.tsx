@@ -1,7 +1,14 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAgentMetrics } from '@/hooks/useReports';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const periodOptions = [
+  { label: '7 dias', value: '7' },
+  { label: '30 dias', value: '30' },
+  { label: '90 dias', value: '90' },
+];
 
 function formatSeconds(seconds: number | null): string {
   if (seconds == null || isNaN(seconds)) return '—';
@@ -10,13 +17,20 @@ function formatSeconds(seconds: number | null): string {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
+function formatNps(avgScore: number | null): string {
+  if (avgScore == null || isNaN(Number(avgScore))) return '—';
+  return `${Number(avgScore).toFixed(1)}/5`;
+}
+
 export default function UsersReportPanel() {
+  const [period, setPeriod] = useState('30');
+
   const dateTo = useMemo(() => new Date().toISOString(), []);
   const dateFrom = useMemo(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
+    d.setDate(d.getDate() - parseInt(period));
     return d.toISOString();
-  }, []);
+  }, [period]);
 
   const { data: agents, isLoading } = useAgentMetrics(dateFrom, dateTo);
 
@@ -24,10 +38,20 @@ export default function UsersReportPanel() {
     return <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>;
   }
 
+  const periodLabel = periodOptions.find((o) => o.value === period)?.label ?? period;
+
   return (
     <div className="rounded-xl border border-border bg-card card-shadow">
-      <div className="p-4 border-b border-border">
-        <h3 className="text-sm font-semibold text-foreground">Performance dos Agentes (últimos 30 dias)</h3>
+      <div className="p-4 border-b border-border flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Performance dos Agentes — {periodLabel}</h3>
+        <Select value={period} onValueChange={setPeriod}>
+          <SelectTrigger className="w-[110px] h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {periodOptions.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <Table>
         <TableHeader>
@@ -36,7 +60,7 @@ export default function UsersReportPanel() {
             <TableHead className="text-right">Conversas</TableHead>
             <TableHead className="text-right">1ª Resposta</TableHead>
             <TableHead className="text-right">Resolução</TableHead>
-            <TableHead className="text-right">NPS</TableHead>
+            <TableHead className="text-right">Satisfação</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -46,12 +70,12 @@ export default function UsersReportPanel() {
               <TableCell className="text-right">{a.conversations_handled}</TableCell>
               <TableCell className="text-right text-muted-foreground">{formatSeconds(a.avg_first_response_seconds)}</TableCell>
               <TableCell className="text-right text-muted-foreground">{formatSeconds(a.avg_resolution_seconds)}</TableCell>
-              <TableCell className="text-right text-muted-foreground">{a.avg_nps != null ? Number(a.avg_nps).toFixed(1) : '—'}</TableCell>
+              <TableCell className="text-right text-muted-foreground">{formatNps(a.avg_nps)}</TableCell>
             </TableRow>
           ))}
           {(agents ?? []).length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem dados</TableCell>
+              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem dados para o período selecionado</TableCell>
             </TableRow>
           )}
         </TableBody>

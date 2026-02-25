@@ -210,11 +210,15 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
 
       if (profileErr) throw profileErr;
 
-      const { error: roleErr } = await supabase.from('user_roles')
-        .update({ role: form.role as 'admin' | 'supervisor' | 'agent' })
+      // user_roles has no UPDATE policy — use delete + insert instead
+      const { error: roleDelErr } = await supabase.from('user_roles')
+        .delete()
         .eq('user_id', form.id);
+      if (roleDelErr) throw roleDelErr;
 
-      if (roleErr) throw roleErr;
+      const { error: roleInsErr } = await supabase.from('user_roles')
+        .insert({ user_id: form.id, role: form.role as 'admin' | 'supervisor' | 'agent' });
+      if (roleInsErr) throw roleInsErr;
 
       toast.success('Usuário atualizado com sucesso!');
       onSaved();

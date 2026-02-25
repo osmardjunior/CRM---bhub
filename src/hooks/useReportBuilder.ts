@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,7 +11,7 @@ export interface ReportFilters {
   excludeTags?: string[];
   isArchived?: 'yes' | 'no' | 'any';
   hasUnreadMsg?: 'yes' | 'no' | 'any';
-  status?: 'open' | 'closed' | 'pending' | 'any';
+  status?: 'open' | 'closed' | 'pending' | 'new' | 'any';
   assignedUserIds?: string[];
   departmentIds?: string[];
   channels?: string[];
@@ -135,33 +135,42 @@ async function queryChats(filters: ReportFilters, offset: number) {
   if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
     query = query.in('assigned_user_id', filters.assignedUserIds);
   }
+  if (filters.departmentIds && filters.departmentIds.length > 0) {
+    query = query.in('department_id', filters.departmentIds);
+  }
   if (filters.botStatus === 'active') {
     query = query.eq('chatbot_active', true);
   } else if (filters.botStatus === 'inactive') {
     query = query.eq('chatbot_active', false);
   }
 
-  // Tag filters on contact
+  // Tag filters on contact — use JSONB @> operator via .contains()
+  // Pass an array, not JSON.stringify (PostgREST handles serialization)
   if (filters.includeTags && filters.includeTags.length > 0) {
     for (const tag of filters.includeTags) {
-      query = query.contains('contact.tags', JSON.stringify([tag]));
+      query = (query as any).contains('contact.tags', [tag]);
+    }
+  }
+  if (filters.excludeTags && filters.excludeTags.length > 0) {
+    for (const tag of filters.excludeTags) {
+      query = (query as any).filter('contact.tags', 'not.cs', JSON.stringify([tag]));
     }
   }
 
   // Date filters on contact
   if (filters.registeredFrom) {
-    query = query.gte('contact.created_at', filters.registeredFrom);
+    query = (query as any).gte('contact.created_at', filters.registeredFrom);
   }
   if (filters.registeredTo) {
-    query = query.lte('contact.created_at', filters.registeredTo);
+    query = (query as any).lte('contact.created_at', filters.registeredTo);
   }
   if (filters.registeredLastDays) {
     const d = new Date();
     d.setDate(d.getDate() - filters.registeredLastDays);
-    query = query.gte('contact.created_at', d.toISOString());
+    query = (query as any).gte('contact.created_at', d.toISOString());
   }
 
-  // Interaction date filters
+  // Interaction date filters (last_message_at on conversation)
   if (filters.interactedLastDays) {
     const d = new Date();
     d.setDate(d.getDate() - filters.interactedLastDays);
@@ -171,6 +180,20 @@ async function queryChats(filters: ReportFilters, offset: number) {
     const d = new Date();
     d.setDate(d.getDate() - filters.daysWithoutInteraction);
     query = query.lte('last_message_at', d.toISOString());
+  }
+
+  // Days without receiving (no incoming message from contact in X days)
+  if (filters.daysWithoutReceiving) {
+    const convIds = await getConversationsWithoutIncomingMessage(filters.daysWithoutReceiving);
+    if (convIds.length === 0) return { rows: [], total: 0 };
+    query = query.in('id', convIds);
+  }
+
+  // Days without sending (no outgoing message from agent in X days)
+  if (filters.daysWithoutSending) {
+    const convIds = await getConversationsWithoutOutgoingMessage(filters.daysWithoutSending);
+    if (convIds.length === 0) return { rows: [], total: 0 };
+    query = query.in('id', convIds);
   }
 
   query = query
@@ -187,11 +210,18 @@ async function queryContacts(filters: ReportFilters, offset: number) {
     .from('contacts')
     .select('*', { count: 'exact' });
 
+  // Tag filters — fix: pass array not JSON.stringify
   if (filters.includeTags && filters.includeTags.length > 0) {
     for (const tag of filters.includeTags) {
-      query = query.contains('tags', JSON.stringify([tag]));
+      query = query.contains('tags', [tag]);
     }
   }
+  if (filters.excludeTags && filters.excludeTags.length > 0) {
+    for (const tag of filters.excludeTags) {
+      query = (query as any).filter('tags', 'not.cs', JSON.stringify([tag]));
+    }
+  }
+
   if (filters.registeredFrom) {
     query = query.gte('created_at', filters.registeredFrom);
   }
@@ -208,8 +238,20 @@ async function queryContacts(filters: ReportFilters, offset: number) {
     d.setDate(d.getDate() - filters.daysWithoutInteraction);
     query = query.lte('last_contact_at', d.toISOString());
   }
+  if (filters.interactedLastDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - filters.interactedLastDays);
+    query = query.gte('last_contact_at', d.toISOString());
+  }
   if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
     query = query.in('responsible_user_id', filters.assignedUserIds);
+  }
+
+  // Funnel/stage filter for contacts — filter by contact_funnel_stages
+  if (filters.funnelId) {
+    const contactIds = await getContactIdsByFunnel(filters.funnelId, filters.stageId);
+    if (contactIds.length === 0) return { rows: [], total: 0 };
+    query = query.in('id', contactIds);
   }
 
   query = query
@@ -219,4 +261,72 @@ async function queryContacts(filters: ReportFilters, offset: number) {
   const { data, error, count } = await query;
   if (error) throw error;
   return { rows: data ?? [], total: count ?? 0 };
+}
+
+// Fetch conversation IDs where the last incoming message (from contact) is older than X days
+async function getConversationsWithoutIncomingMessage(days: number): Promise<string[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('conversation_id, created_at')
+    .in('sender_type', ['user', 'contact'])
+    .order('created_at', { ascending: false });
+
+  if (error || !data) return [];
+
+  // Group by conversation_id and keep the latest incoming message per conversation
+  const latestPerConv: Record<string, string> = {};
+  for (const msg of data) {
+    if (!latestPerConv[msg.conversation_id]) {
+      latestPerConv[msg.conversation_id] = msg.created_at;
+    }
+  }
+
+  // Return conversations where the latest incoming message is before the cutoff
+  return Object.entries(latestPerConv)
+    .filter(([, date]) => new Date(date) < cutoff)
+    .map(([id]) => id);
+}
+
+// Fetch conversation IDs where the last outgoing message (from agent) is older than X days
+async function getConversationsWithoutOutgoingMessage(days: number): Promise<string[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('conversation_id, created_at')
+    .eq('sender_type', 'agent')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) return [];
+
+  const latestPerConv: Record<string, string> = {};
+  for (const msg of data) {
+    if (!latestPerConv[msg.conversation_id]) {
+      latestPerConv[msg.conversation_id] = msg.created_at;
+    }
+  }
+
+  return Object.entries(latestPerConv)
+    .filter(([, date]) => new Date(date) < cutoff)
+    .map(([id]) => id);
+}
+
+// Fetch contact IDs in a specific funnel (and optionally stage)
+async function getContactIdsByFunnel(funnelId: string, stageId?: string): Promise<string[]> {
+  let query = supabase
+    .from('contact_funnel_stages')
+    .select('contact_id')
+    .eq('funnel_id', funnelId);
+
+  if (stageId) {
+    query = query.eq('stage_id', stageId);
+  }
+
+  const { data, error } = await query;
+  if (error || !data) return [];
+  return data.map((r: any) => r.contact_id);
 }

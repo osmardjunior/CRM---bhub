@@ -42,9 +42,11 @@ export default function ChartsPanel() {
     ? nps.nps >= 50 ? 'text-success' : nps.nps >= 0 ? 'text-warning' : 'text-destructive'
     : 'text-muted-foreground';
 
+  const periodLabel = periodOptions.find((o) => o.value === period)?.label ?? period;
+
   const summaryCards = [
     {
-      label: 'NPS (30d)',
+      label: `NPS (${periodLabel})`,
       value: nps?.nps != null ? `${nps.nps > 0 ? '+' : ''}${nps.nps}` : '—',
       icon: Star, color: npsColor,
       sub: nps?.total ? `${nps.total} respostas` : 'Sem dados',
