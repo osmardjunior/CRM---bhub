@@ -44,7 +44,22 @@ export default function EvolutionQRModal({
           integration_id: integrationId,
         },
       });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // Try to extract the actual error message from the response body
+        let msg = error.message;
+        try {
+          const ctx = (error as any).context;
+          if (ctx?.json) {
+            const json = await ctx.json();
+            msg = json?.error || json?.message || msg;
+          } else if (typeof ctx?.text === 'function') {
+            const text = await ctx.text();
+            const parsed = JSON.parse(text);
+            msg = parsed?.error || parsed?.message || msg;
+          }
+        } catch { /* use original message */ }
+        throw new Error(msg);
+      }
       if (data?.error) throw new Error(data.error);
       return data;
     },

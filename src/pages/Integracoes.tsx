@@ -274,8 +274,12 @@ export default function IntegracoesPage() {
       return;
     }
     const isEvolution = provider === 'evolution';
+    if (isEvolution && (!config.api_url?.trim() || !config.api_key?.trim() || !config.instance_name?.trim())) {
+      toast.error('Preencha a URL da API, API Key e Nome da instância');
+      return;
+    }
     const savedConfig = { ...config };
-    const savedInstanceName = config.instance_name || '';
+    const savedInstanceName = config.instance_name || deviceName.trim();
     addDevice.mutate({
       channel: 'whatsapp',
       provider,
