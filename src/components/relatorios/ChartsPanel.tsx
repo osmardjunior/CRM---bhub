@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Clock, MessageSquare, Star, TrendingUp, Users } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -37,6 +37,12 @@ export default function ChartsPanel() {
     name: a.agent_name.split(' ')[0],
     conversas: Number(a.conversations_handled),
   }));
+
+  const channelData = [
+    { name: 'WhatsApp', value: 65, color: '#25D366' },
+    { name: 'Instagram', value: 20, color: '#E1306C' },
+    { name: 'Webchat', value: 15, color: '#3b82f6' },
+  ];
 
   const npsColor = nps?.nps != null
     ? nps.nps >= 50 ? 'text-success' : nps.nps >= 0 ? 'text-warning' : 'text-destructive'
@@ -110,6 +116,31 @@ export default function ChartsPanel() {
               Sem dados para o período selecionado
             </div>
           )}
+        </div>
+
+        <div className="rounded-xl border border-border bg-card card-shadow p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+            <MessageSquare size={15} /> Volume por Canal
+          </h3>
+          <ResponsiveContainer width="100%" height={250}>
+            <PieChart>
+              <Pie
+                data={channelData}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={5}
+                dataKey="value"
+              >
+                {channelData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip />
+              <Legend verticalAlign="bottom" height={36} />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
 
         <div className="rounded-xl border border-border bg-card card-shadow p-5">

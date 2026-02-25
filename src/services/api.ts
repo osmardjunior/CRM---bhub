@@ -271,6 +271,10 @@ export async function getConversation(
   };
 }
 
+// Cache para perfil do usuário (reduz latência)
+let cachedProfile: { id: string; company_id: string } | null = null;
+let cachedProfileUserId: string | null = null;
+
 export async function sendMessage(
   conversationId: string,
   body: string,

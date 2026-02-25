@@ -196,18 +196,27 @@ function FunnelCard({
         >
           {funnel.name}
         </button>
-        <button
-          onClick={() => setMoreOpen((o) => !o)}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
-        >
-          <Plus size={12} />
-          Mais Opções
-        </button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+            <Filter size={11} />
+            Métricas
+          </Button>
+          <button
+            onClick={() => setMoreOpen((o) => !o)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
+          >
+            <Plus size={12} />
+            Mais Opções
+          </button>
+        </div>
       </div>
 
       <div className="bg-funnel-dark overflow-x-auto">
         <div className="flex min-w-max">
-          {funnel.stages.map((stage, idx) => (
+          {funnel.stages.map((stage, idx) => {
+            const prevCount = idx > 0 ? funnel.stages[idx - 1].count : stage.count;
+            const conversionRate = prevCount > 0 ? Math.round((stage.count / prevCount) * 100) : 100;
+            return (
             <div
               key={idx}
               className="flex-1 min-w-[110px] border-r border-funnel-dark last:border-r-0 px-3 py-3"
@@ -216,8 +225,14 @@ function FunnelCard({
               <div className="text-[10px] font-semibold text-success uppercase tracking-wide mt-1">
                 {stage.label}
               </div>
+              {idx > 0 && (
+                <div className="text-[9px] text-yellow-400 mt-1">
+                  Conv: {conversionRate}%
+                </div>
+              )}
             </div>
-          ))}
+          );
+          })}
         </div>
 
         <div className="bg-funnel-darker px-0 pb-0">

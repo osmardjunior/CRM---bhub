@@ -757,6 +757,40 @@ export default function ConfiguracoesPage() {
                 <Save size={14} /> {updateCompany.isPending ? 'Salvando...' : 'Salvar'}
               </Button>
             </div>
+
+            {/* Configuração de Distribuição de Leads */}
+            <div className="rounded-xl border border-border bg-card card-shadow p-6">
+              <h2 className="text-base font-semibold text-foreground mb-4">Distribuição de Leads (Rodízio)</h2>
+              <p className="text-sm text-muted-foreground mb-4">Configure como os novos leads serão distribuídos entre os agentes da sua equipe.</p>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Modo de Distribuição</Label>
+                  <Select defaultValue="peso">
+                    <SelectTrigger className="bg-secondary border-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="peso">Por Peso (1-10)</SelectItem>
+                      <SelectItem value="porcentagem">Por Porcentagem (%)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="rounded-lg bg-secondary/30 p-4 border border-border">
+                  <p className="text-xs font-medium text-foreground mb-3">Distribuição Atual</p>
+                  <div className="space-y-2">
+                    {(teamMembers ?? []).filter(m => m.role === 'agent').map(agent => (
+                      <div key={agent.id} className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">{agent.name}</span>
+                        <Input placeholder="Peso ou %" className="w-20 h-8 text-xs bg-background border-0" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <Button className="mt-5 gap-1.5" size="sm">
+                <Save size={14} /> Salvar Configuração
+              </Button>
+            </div>
           </TabsContent>
 
           {/* ===== USUÁRIOS ===== */}

@@ -117,7 +117,8 @@ export default function ConversationList({
         const q = search.toLowerCase();
         return (
           c.contact.name.toLowerCase().includes(q) ||
-          (c.contact.phone ?? '').includes(q)
+          (c.contact.phone ?? '').includes(q) ||
+          (c.last_message?.body ?? '').toLowerCase().includes(q)
         );
       }
       return true;
@@ -175,10 +176,10 @@ export default function ConversationList({
         <div className="relative flex-1">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Pesquisar mensagem..."
+            placeholder="Buscar por nome, telefone ou mensagem..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-8 text-xs bg-secondary border-0 rounded-lg"
+            className="h-8 pl-8 text-[11px] bg-secondary border-0 rounded-lg focus-visible:ring-1 focus-visible:ring-primary/30"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
