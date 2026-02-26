@@ -282,7 +282,7 @@ export default function IntegracoesPage() {
     setEditDevice(device);
     setEditName(device.device_name || '');
     setEditPhone(device.phone_number || '');
-    setEditDeptId(device.department_id ?? '');
+    setEditDeptId(device.department_id ?? '__none__');
     setEditConfig(device.config as Record<string, string> ?? {});
   };
 
@@ -349,7 +349,7 @@ export default function IntegracoesPage() {
         device_name: editName,
         phone_number: editPhone,
         config: editConfig,
-        department_id: editDeptId || null,
+        department_id: editDeptId === '__none__' ? null : editDeptId || null,
       },
     }, {
       onSuccess: () => setEditDevice(null),
@@ -689,7 +689,7 @@ export default function IntegracoesPage() {
                     <SelectValue placeholder="Nenhum departamento" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Nenhum</SelectItem>
+                    <SelectItem value="__none__">Nenhum</SelectItem>
                     {departments.map(d => (
                       <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
                     ))}
