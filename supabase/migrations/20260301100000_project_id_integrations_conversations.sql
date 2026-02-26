@@ -41,7 +41,7 @@ CREATE OR REPLACE FUNCTION is_dept_role(p_dept_id uuid, p_roles text[])
 RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE AS $$
   SELECT EXISTS (
     SELECT 1 FROM profile_departments
-    WHERE user_id = auth.uid()
+    WHERE profile_id = auth.uid()
       AND department_id = p_dept_id
       AND role_in_department = ANY(p_roles)
   );
@@ -124,7 +124,7 @@ CREATE POLICY "user_projects_select" ON user_projects
       FROM projects p
       JOIN profile_departments pd ON pd.department_id = p.department_id
       WHERE p.id = project_id
-        AND pd.user_id = auth.uid()
+        AND pd.profile_id = auth.uid()
         AND pd.role_in_department IN ('admin','supervisor')
     )
   );
@@ -138,7 +138,7 @@ CREATE POLICY "user_projects_manage" ON user_projects
       FROM projects p
       JOIN profile_departments pd ON pd.department_id = p.department_id
       WHERE p.id = project_id
-        AND pd.user_id = auth.uid()
+        AND pd.profile_id = auth.uid()
         AND pd.role_in_department IN ('admin','supervisor')
     )
   );
@@ -147,10 +147,6 @@ CREATE POLICY "user_projects_manage" ON user_projects
 -- Inserts "Atendimento" department and 3 projects linked to the first company.
 -- Admins will assign projects to users via the UI.
 
-INSERT INTO departments (name)
-  VALUES ('Atendimento')
-  ON CONFLICT (name) DO NOTHING;
-
 DO $$
 DECLARE
   v_company_id  uuid;
@@ -158,10 +154,23 @@ DECLARE
   v_proj_name   text;
 BEGIN
   SELECT id INTO v_company_id FROM companies LIMIT 1;
-  SELECT id INTO v_dept_id    FROM departments WHERE name = 'Atendimento' LIMIT 1;
 
-  IF v_company_id IS NULL OR v_dept_id IS NULL THEN
+  IF v_company_id IS NULL THEN
     RETURN; -- no company yet, skip seed
+  END IF;
+
+  -- Insert "Atendimento" department if it doesn't exist for this company
+  INSERT INTO departments (company_id, name)
+    SELECT v_company_id, 'Atendimento'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM departments WHERE company_id = v_company_id AND name = 'Atendimento'
+    );
+
+  SELECT id INTO v_dept_id FROM departments
+    WHERE company_id = v_company_id AND name = 'Atendimento' LIMIT 1;
+
+  IF v_dept_id IS NULL THEN
+    RETURN; -- dept not found, skip projects
   END IF;
 
   FOREACH v_proj_name IN ARRAY ARRAY['TipsPlace','Davi Couto','Rei dos Cantos'] LOOP
