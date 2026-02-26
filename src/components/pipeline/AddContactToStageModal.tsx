@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -16,16 +16,24 @@ interface Props {
 
 export default function AddContactToStageModal({ open, onClose, onAdd, existingContactIds }: Props) {
   const [search, setSearch] = useState('');
-  const { data: contactsResult, isLoading } = useContacts();
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Reset search when modal closes
+  useEffect(() => {
+    if (!open) { setSearch(''); setDebouncedSearch(''); }
+  }, [open]);
+
+  const { data: contactsResult, isLoading } = useContacts(
+    debouncedSearch ? { search: debouncedSearch } : undefined
+  );
 
   const allContacts = Array.isArray(contactsResult) ? contactsResult : (contactsResult?.data ?? []);
-
-  const filtered = allContacts.filter(
-    (c: any) =>
-      !existingContactIds.includes(c.id) &&
-      ((c.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (c.phone ?? '').includes(search))
-  );
+  const filtered = allContacts.filter((c) => !existingContactIds.includes(c.id));
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -50,7 +58,7 @@ export default function AddContactToStageModal({ open, onClose, onAdd, existingC
             <p className="text-sm text-muted-foreground text-center py-4">Nenhum contato encontrado</p>
           ) : (
             <div className="space-y-1">
-              {filtered.slice(0, 50).map((c) => (
+              {filtered.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => {

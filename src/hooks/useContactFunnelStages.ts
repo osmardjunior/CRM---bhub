@@ -98,8 +98,24 @@ export function useMoveContactStage() {
         .eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => invalidateFunnelStages(qc),
-    onError: (err: Error) => toast.error(err.message),
+    onMutate: async ({ id, newStageId }) => {
+      await qc.cancelQueries({ queryKey: ['contact-funnel-stages'] });
+      // Snapshot all cached lists so we can rollback on error
+      const snapshots = qc.getQueriesData<FunnelContact[]>({ queryKey: ['contact-funnel-stages'] });
+      // Optimistically move the contact to the new stage in every cached list
+      qc.setQueriesData<FunnelContact[]>({ queryKey: ['contact-funnel-stages'] }, (old) => {
+        if (!old) return old;
+        return old.map((c) => c.id === id ? { ...c, stage_id: newStageId } : c);
+      });
+      return { snapshots };
+    },
+    onError: (_err, _vars, context) => {
+      context?.snapshots.forEach(([queryKey, data]) => {
+        qc.setQueryData(queryKey, data);
+      });
+      toast.error('Erro ao mover contato');
+    },
+    onSettled: () => invalidateFunnelStages(qc),
   });
 }
 
@@ -124,7 +140,7 @@ export function useAddContactToStage() {
 
       const { error } = await supabase
         .from('contact_funnel_stages')
-        .insert({ contact_id: contactId, funnel_id: funnelId, stage_id: stageId } as any);
+        .insert({ contact_id: contactId, funnel_id: funnelId, stage_id: stageId });
       if (error) throw error;
     },
     onSuccess: () => {

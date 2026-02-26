@@ -9,7 +9,18 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useFunnels, Funnel } from '@/contexts/FunnelContext';
 import { useDepartments } from '@/hooks/useDepartments';
 
@@ -200,15 +211,20 @@ function CreateFunnelModal({
 function FunnelCard({
   funnel,
   onDelete,
+  onRename,
   onOpen,
 }: {
   funnel: Funnel;
   onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
   onOpen: (id: string) => void;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [visibilityRestrict, setVisibilityRestrict] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'mine'>('mine');
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState(funnel.name);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div className="rounded-lg border border-border overflow-hidden mb-4">
@@ -297,7 +313,7 @@ function FunnelCard({
 
           <div className="flex items-center justify-between pt-1">
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary text-primary hover:bg-primary hover:text-primary-foreground">
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary text-primary hover:bg-primary hover:text-primary-foreground" onClick={() => { setRenameValue(funnel.name); setRenameOpen(true); }}>
                 <Pencil size={11} />
                 Alterar Nome
               </Button>
@@ -306,13 +322,52 @@ function FunnelCard({
                 Exportar em CSV
               </Button>
             </div>
-            <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5" onClick={() => onDelete(funnel.id)}>
+            <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5" onClick={() => setConfirmDelete(true)}>
               <Trash2 size={11} />
               Apagar Funil
             </Button>
           </div>
         </div>
       )}
+
+      {/* Rename Dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Alterar nome do funil</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={e => setRenameValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && renameValue.trim()) { onRename(funnel.id, renameValue.trim()); setRenameOpen(false); } }}
+            placeholder="Nome do funil"
+            className="mt-1"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameOpen(false)}>Cancelar</Button>
+            <Button disabled={!renameValue.trim()} onClick={() => { onRename(funnel.id, renameValue.trim()); setRenameOpen(false); }}>Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm */}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar funil "{funnel.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Todos os contatos nas etapas deste funil serão removidos do funil permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => { onDelete(funnel.id); setConfirmDelete(false); }}>
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -339,7 +394,7 @@ function FunnelEmptyState({ onCreate }: { onCreate: () => void }) {
 // ── Page ─────────────────────────────────────────────────
 export default function PipelinePage() {
   const navigate = useNavigate();
-  const { funnels, addFunnel, deleteFunnel } = useFunnels();
+  const { funnels, addFunnel, deleteFunnel, renameFunnel } = useFunnels();
   const [showCreate, setShowCreate] = useState(false);
 
   return (
@@ -370,6 +425,7 @@ export default function PipelinePage() {
               key={f.id}
               funnel={f}
               onDelete={deleteFunnel}
+              onRename={renameFunnel}
               onOpen={(id) => navigate(`/pipeline/${id}`)}
             />
           ))}

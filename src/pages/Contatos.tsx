@@ -26,14 +26,18 @@ import ContactDetailPanel from '@/components/contatos/ContactDetailPanel';
 import NewContactModal from '@/components/contatos/NewContactModal';
 import ImportContactsModal from '@/components/contatos/ImportContactsModal';
 import { useContacts } from '@/hooks/useContacts';
+import { useTags } from '@/hooks/useTags';
 import { useAuth } from '@/contexts/AuthContext';
 import { generateCSV, downloadCSV } from '@/lib/csv';
+import { exportAllContacts, type ContactFilters } from '@/services/api';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 
 const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
 
 export default function ContatosPage() {
   const [search, setSearch] = useState('');
-  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all'); // stores tag UUID or 'all'
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -41,10 +45,12 @@ export default function ContatosPage() {
   const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(0);
   const { user, role, companyId } = useAuth();
+  const isMobile = useIsMobile();
+  const { data: allTags = [] } = useTags();
 
   const filters = useMemo(() => ({
     search: search || undefined,
-    tag: tagFilter,
+    tag_id: tagFilter !== 'all' ? tagFilter : undefined,
     source: sourceFilter,
     page,
     limit: 25,
@@ -57,23 +63,27 @@ export default function ContatosPage() {
   const contacts = useMemo(() => result?.data ?? [], [result?.data]);
   const totalPages = result?.totalPages ?? 1;
 
-  const allTags = useMemo(() => {
-    return Array.from(new Set(contacts.flatMap((c) => (c.tags as string[]) || [])));
-  }, [contacts]);
-
   const selectedContact = contacts.find((c) => c.id === selectedId) || null;
 
   const handleExport = useCallback(async () => {
-    if (!contacts.length) return;
     setExporting(true);
     try {
-      const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Tags', 'Último contato'];
-      const rows = contacts.map((c) => ({
+      const exportFilters: Omit<ContactFilters, 'page' | 'limit'> = {
+        search: search || undefined,
+        tag_id: tagFilter !== 'all' ? tagFilter : undefined,
+        source: sourceFilter !== 'all' ? sourceFilter : undefined,
+        ...(role === 'agent' && user?.id ? { assigned_user_id: user.id } : {}),
+      };
+      const allContacts = await exportAllContacts(exportFilters);
+      if (!allContacts.length) return;
+      const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Tags', 'Responsável', 'Último contato'];
+      const rows = allContacts.map((c) => ({
         Nome: c.name,
         Telefone: c.phone ?? '',
         Email: c.email ?? '',
         Origem: c.source ?? '',
         Tags: ((c.tags as string[]) || []).join('; '),
+        Responsável: (c.responsible as { name: string } | null)?.name ?? '',
         'Último contato': c.last_contact_at ? new Date(c.last_contact_at).toLocaleDateString('pt-BR') : '',
       }));
       const csv = generateCSV(headers, rows);
@@ -81,14 +91,14 @@ export default function ContatosPage() {
     } finally {
       setExporting(false);
     }
-  }, [contacts]);
+  }, [search, tagFilter, sourceFilter, role, user?.id]);
 
   return (
     <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-3">
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <div className="relative flex-1 min-w-[130px] max-w-xs">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Buscar por nome ou telefone..."
@@ -105,7 +115,12 @@ export default function ContatosPage() {
             <SelectContent>
               <SelectItem value="all">Todas as tags</SelectItem>
               {allTags.map((tag) => (
-                <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                <SelectItem key={tag.id} value={tag.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                    {tag.name}
+                  </span>
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -124,13 +139,16 @@ export default function ContatosPage() {
 
           <div className="flex items-center gap-2 ml-auto">
             <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => setImportOpen(true)}>
-              <Upload size={14} /> Importar
+              <Upload size={14} />
+              <span className="hidden sm:inline">Importar</span>
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleExport} disabled={contacts.length === 0 || exporting}>
-              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Exportar
+            <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleExport} disabled={exporting}>
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              <span className="hidden sm:inline">Exportar</span>
             </Button>
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setModalOpen(true)}>
-              <Plus size={15} /> Novo contato
+              <Plus size={15} />
+              <span className="hidden sm:inline">Novo contato</span>
             </Button>
           </div>
         </div>
@@ -241,9 +259,9 @@ export default function ContatosPage() {
         )}
       </div>
 
-      {/* Right: Detail panel */}
-      {selectedContact && (
-        <div className="w-80 xl:w-96 shrink-0 hidden md:block">
+      {/* Right: Detail panel — desktop */}
+      {selectedContact && !isMobile && (
+        <div className="w-80 xl:w-96 shrink-0">
           <ContactDetailPanel
             key={selectedContact.id}
             contact={selectedContact}
@@ -251,6 +269,19 @@ export default function ContatosPage() {
           />
         </div>
       )}
+
+      {/* Mobile: Sheet drawer from bottom */}
+      <Sheet open={isMobile && !!selectedContact} onOpenChange={(o) => !o && setSelectedId(null)}>
+        <SheetContent side="bottom" className="p-0 h-[90vh] rounded-t-xl overflow-hidden">
+          {selectedContact && (
+            <ContactDetailPanel
+              key={selectedContact.id}
+              contact={selectedContact}
+              onClose={() => setSelectedId(null)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
 
       <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} companyId={companyId} />
       <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />

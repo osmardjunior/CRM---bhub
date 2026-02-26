@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { useCreateContact } from '@/hooks/useContacts';
 import { useTags } from '@/hooks/useTags';
+import { supabase } from '@/integrations/supabase/client';
 
 const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Google Ads', 'Facebook Ads'];
 
@@ -36,7 +37,7 @@ interface FormErrors {
 
 export default function NewContactModal({ open, onClose, companyId }: NewContactModalProps) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: '' });
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const createContact = useCreateContact();
   const { data: availableTags } = useTags();
@@ -52,21 +53,26 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
 
   const handleSubmit = async () => {
     if (!validate() || !companyId) return;
-    await createContact.mutateAsync({
+    const newContact = await createContact.mutateAsync({
       company_id: companyId,
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim() || null,
       source: form.source || null,
-      tags: selectedTags,
     });
+    // Insert into normalized contact_tags table
+    if (selectedTagIds.length > 0 && newContact?.id) {
+      await supabase.from('contact_tags').insert(
+        selectedTagIds.map(tagId => ({ contact_id: newContact.id, tag_id: tagId })) as any
+      );
+    }
     handleClose();
   };
 
   const handleClose = () => {
     onClose();
     setForm({ name: '', phone: '', email: '', source: '' });
-    setSelectedTags([]);
+    setSelectedTagIds([]);
     setErrors({});
   };
 
@@ -109,15 +115,16 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
             <Label className="text-xs">Tags</Label>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {(availableTags ?? []).map(tag => {
-                const selected = selectedTags.includes(tag.name);
+                const selected = selectedTagIds.includes(tag.id);
                 return (
                   <Badge
                     key={tag.id}
                     variant={selected ? 'default' : 'outline'}
                     className="text-xs cursor-pointer transition-colors"
                     style={selected ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
-                    onClick={() => setSelectedTags(prev => selected ? prev.filter(t => t !== tag.name) : [...prev, tag.name])}
+                    onClick={() => setSelectedTagIds(prev => selected ? prev.filter(id => id !== tag.id) : [...prev, tag.id])}
                   >
+                    <span className="h-2 w-2 rounded-full mr-1 shrink-0" style={{ backgroundColor: selected ? '#fff' : tag.color }} />
                     {tag.name}
                   </Badge>
                 );

@@ -17,6 +17,7 @@ export function useSidebarStats() {
         supabase
           .from('tasks')
           .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId!)
           .neq('status', 'concluida')
           .lt('due_date', new Date().toISOString().split('T')[0])
           .eq('assigned_user_id', user!.id),

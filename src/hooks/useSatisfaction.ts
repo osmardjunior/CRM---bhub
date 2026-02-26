@@ -27,6 +27,7 @@ export function useNPSCard() {
       const { data, error } = await supabase
         .from('satisfaction_surveys')
         .select('score')
+        .eq('company_id', companyId!)
         .not('score', 'is', null)
         .gte('answered_at', thirtyDaysAgo.toISOString());
 
@@ -49,6 +50,7 @@ export function useNPSStats(dateFrom: string, dateTo: string) {
       const { data, error } = await supabase
         .from('satisfaction_surveys')
         .select('score')
+        .eq('company_id', companyId!)
         .not('score', 'is', null)
         .gte('answered_at', dateFrom)
         .lte('answered_at', dateTo);
@@ -74,6 +76,7 @@ export function useNPSSurveys(dateFrom: string, dateTo: string) {
           contact:contacts(name, phone),
           assigned_user:profiles!satisfaction_surveys_assigned_user_id_fkey(name)
         `)
+        .eq('company_id', companyId!)
         .gte('sent_at', dateFrom)
         .lte('sent_at', dateTo)
         .order('sent_at', { ascending: false });

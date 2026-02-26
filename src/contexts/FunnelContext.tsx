@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 
 export interface FunnelStage {
@@ -13,6 +13,7 @@ export interface FunnelStage {
 export interface Funnel {
   id: string;
   name: string;
+  department_id: string | null;
   stages: FunnelStage[];
   expanded: boolean;
 }
@@ -35,7 +36,6 @@ const FunnelContext = createContext<FunnelContextType | null>(null);
 export function FunnelProvider({ children }: { children: ReactNode }) {
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
 
   const fetchFunnels = useCallback(async () => {
     try {
@@ -76,6 +76,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       const mapped: Funnel[] = funnelsData.map((f) => ({
         id: f.id,
         name: f.name,
+        department_id: (f as any).department_id ?? null,
         expanded: true,
         stages: (stagesData || [])
           .filter((s) => s.funnel_id === f.id)
@@ -84,7 +85,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
 
       setFunnels(mapped);
     } catch {
-      toast({ title: 'Erro ao carregar funis', variant: 'destructive' });
+      toast.error('Erro ao carregar funis');
     } finally {
       setLoading(false);
     }
@@ -103,7 +104,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       .single();
 
     if (error || !newFunnel) {
-      toast({ title: 'Erro ao criar funil', variant: 'destructive' });
+      toast.error('Erro ao criar funil');
       return;
     }
 
@@ -116,7 +117,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
 
       const { error: sErr } = await supabase.from('funnel_stages').insert(stagesToInsert as TablesInsert<'funnel_stages'>[]);
       if (sErr) {
-        toast({ title: 'Erro ao criar etapas', variant: 'destructive' });
+        toast.error('Erro ao criar etapas');
       }
     }
 
@@ -126,7 +127,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
   const deleteFunnel = async (id: string) => {
     const { error } = await supabase.from('funnels').delete().eq('id', id);
     if (error) {
-      toast({ title: 'Erro ao excluir funil', variant: 'destructive' });
+      toast.error('Erro ao excluir funil');
       return;
     }
     await fetchFunnels();
@@ -137,7 +138,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
   const renameFunnel = async (funnelId: string, newName: string) => {
     const { error } = await supabase.from('funnels').update({ name: newName }).eq('id', funnelId);
     if (error) {
-      toast({ title: 'Erro ao renomear funil', variant: 'destructive' });
+      toast.error('Erro ao renomear funil');
       return;
     }
     await fetchFunnels();
@@ -153,7 +154,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       .insert({ funnel_id: funnelId, label, position: nextPos } as TablesInsert<'funnel_stages'>);
 
     if (error) {
-      toast({ title: 'Erro ao adicionar etapa', variant: 'destructive' });
+      toast.error('Erro ao adicionar etapa');
       return;
     }
     await fetchFunnels();
@@ -162,7 +163,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
   const deleteStage = async (funnelId: string, stageId: string) => {
     const { error } = await supabase.from('funnel_stages').delete().eq('id', stageId);
     if (error) {
-      toast({ title: 'Erro ao excluir etapa', variant: 'destructive' });
+      toast.error('Erro ao excluir etapa');
       return;
     }
     await fetchFunnels();
@@ -171,7 +172,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
   const renameStage = async (funnelId: string, stageId: string, newLabel: string) => {
     const { error } = await supabase.from('funnel_stages').update({ label: newLabel }).eq('id', stageId);
     if (error) {
-      toast({ title: 'Erro ao renomear etapa', variant: 'destructive' });
+      toast.error('Erro ao renomear etapa');
       return;
     }
     await fetchFunnels();
@@ -186,13 +187,16 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
     const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
     if (targetIdx < 0 || targetIdx >= sorted.length) return;
 
-    const updates = [
-      { id: sorted[idx].id, position: sorted[targetIdx].position },
-      { id: sorted[targetIdx].id, position: sorted[idx].position },
-    ];
+    const { error } = await supabase.rpc('swap_funnel_stage_positions', {
+      p_stage_id_a: sorted[idx].id,
+      p_position_a: sorted[targetIdx].position,
+      p_stage_id_b: sorted[targetIdx].id,
+      p_position_b: sorted[idx].position,
+    } as any);
 
-    for (const u of updates) {
-      await supabase.from('funnel_stages').update({ position: u.position }).eq('id', u.id);
+    if (error) {
+      toast.error('Erro ao mover etapa');
+      return;
     }
 
     await fetchFunnels();

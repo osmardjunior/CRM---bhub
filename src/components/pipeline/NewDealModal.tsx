@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { useTeamMembers, useContacts } from '@/hooks/useContacts';
 import { useCreateDeal } from '@/hooks/useDeals';
+import { useDepartments } from '@/hooks/useDepartments';
 import type { DealStage } from '@/services/deals';
 
 const stages: { key: DealStage; label: string }[] = [
@@ -38,6 +39,7 @@ interface NewDealModalProps {
 export default function NewDealModal({ open, onClose }: NewDealModalProps) {
   const { data: teamMembers } = useTeamMembers();
   const { data: contacts } = useContacts();
+  const { data: departments = [] } = useDepartments();
   const createDeal = useCreateDeal();
 
   const [form, setForm] = useState({
@@ -46,6 +48,7 @@ export default function NewDealModal({ open, onClose }: NewDealModalProps) {
     stage: 'novo_lead' as DealStage,
     contactId: '',
     assignedUserId: '',
+    departmentId: '',
     probability: '',
     notes: '',
   });
@@ -58,6 +61,7 @@ export default function NewDealModal({ open, onClose }: NewDealModalProps) {
       stage: 'novo_lead',
       contactId: '',
       assignedUserId: '',
+      departmentId: '',
       probability: '',
       notes: '',
     });
@@ -82,6 +86,7 @@ export default function NewDealModal({ open, onClose }: NewDealModalProps) {
         stage: form.stage,
         contact_id: form.contactId && form.contactId !== 'none' ? form.contactId : null,
         assigned_user_id: form.assignedUserId && form.assignedUserId !== 'none' ? form.assignedUserId : null,
+        department_id: form.departmentId && form.departmentId !== 'none' ? form.departmentId : null,
         probability: form.probability ? Number(form.probability) : 0,
         notes: form.notes || '',
       },
@@ -172,6 +177,21 @@ export default function NewDealModal({ open, onClose }: NewDealModalProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {departments.length > 0 && (
+            <div>
+              <Label className="text-xs">Departamento</Label>
+              <Select value={form.departmentId || 'none'} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum (visível a todos)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum (visível a todos)</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div>
             <Label className="text-xs">Observações</Label>

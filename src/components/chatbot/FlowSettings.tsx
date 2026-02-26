@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import type { ChatbotFlow } from '@/hooks/useChatbotFlows';
 
 const TRIGGER_OPTIONS = [
@@ -35,7 +35,6 @@ interface FlowSettingsProps {
 }
 
 export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
-  const { toast } = useToast();
   const [offlineMessage, setOfflineMessage] = useState('');
   const [aiInstructions, setAiInstructions] = useState('');
   const [timeoutMinutes, setTimeoutMinutes] = useState(30);
@@ -76,7 +75,7 @@ export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
       timeout_minutes: timeoutMinutes,
       business_hours: bh,
     });
-    toast({ title: 'Configurações salvas!' });
+    toast.success('Configurações salvas!');
   };
 
   return (

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   listTasks,
   createTask,
@@ -10,9 +11,11 @@ import {
 } from '@/services/tasks';
 
 export function useTasks() {
+  const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['tasks'],
-    queryFn: listTasks,
+    queryKey: ['tasks', companyId],
+    enabled: !!companyId,
+    queryFn: () => listTasks(companyId!),
   });
 }
 

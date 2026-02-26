@@ -19,11 +19,13 @@ export default function InboxPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialId = searchParams.get('id');
   const initialStatus = searchParams.get('status') as Enums<'conversation_status'> | null;
+  const initialSearch = searchParams.get('search');
 
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
     status: initialStatus ?? undefined,
+    search: initialSearch ?? undefined,
   });
 
   // Agents only see conversations assigned to them

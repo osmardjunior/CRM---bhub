@@ -39,7 +39,7 @@ function handleError(error: { message: string; code?: string }): never {
   throw new ApiError(error.message, error.code ?? 'UNKNOWN');
 }
 
-export async function listTasks(): Promise<TaskWithRelations[]> {
+export async function listTasks(companyId: string): Promise<TaskWithRelations[]> {
   const { data, error } = await supabase
     .from('tasks')
     .select(`
@@ -47,6 +47,7 @@ export async function listTasks(): Promise<TaskWithRelations[]> {
       contact:contacts!tasks_contact_id_fkey(id, name),
       assigned_user:profiles!tasks_assigned_user_id_fkey(id, name)
     `)
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
   if (error) handleError(error);

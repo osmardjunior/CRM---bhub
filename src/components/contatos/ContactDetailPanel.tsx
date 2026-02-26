@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import type { Tables } from '@/integrations/supabase/types';
 import { useUpdateContact } from '@/hooks/useContacts';
 import { useTags } from '@/hooks/useTags';
+import { useContactTags, useAddContactTag, useRemoveContactTag } from '@/hooks/useContactTags';
 import { useNavigate } from 'react-router-dom';
 
 type Contact = Tables<'contacts'>;
@@ -22,7 +23,11 @@ interface ContactDetailPanelProps {
 export default function ContactDetailPanel({ contact, onClose }: ContactDetailPanelProps) {
   const navigate = useNavigate();
   const updateContact = useUpdateContact();
-  const { data: availableTags } = useTags();
+  const { data: availableTags = [] } = useTags();
+  const { data: contactTags = [] } = useContactTags(contact.id);
+  const addContactTag = useAddContactTag();
+  const removeContactTag = useRemoveContactTag();
+
   const [form, setForm] = useState({
     name: contact.name,
     phone: contact.phone || '',
@@ -30,14 +35,15 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
     source: contact.source || '',
     notes: contact.notes || '',
   });
-  const [tags, setTags] = useState<string[]>((contact.tags as string[]) || []);
 
-  const toggleTag = (tagName: string) => {
-    setTags(prev => prev.includes(tagName) ? prev.filter(t => t !== tagName) : [...prev, tagName]);
-  };
+  const activeTagIds = new Set(contactTags.map(t => t.tag_id));
 
-  const handleRemoveTag = (tag: string) => {
-    setTags(tags.filter((t) => t !== tag));
+  const toggleTag = (tagId: string) => {
+    if (activeTagIds.has(tagId)) {
+      removeContactTag.mutate({ contactId: contact.id, tagId });
+    } else {
+      addContactTag.mutate({ contactId: contact.id, tagId });
+    }
   };
 
   const handleSave = () => {
@@ -48,7 +54,6 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
       email: form.email,
       source: form.source,
       notes: form.notes,
-      tags: tags,
     });
   };
 
@@ -102,22 +107,25 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
         <div>
           <Label className="text-xs text-muted-foreground">Tags</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {tags.map((tag) => {
-              const tagData = availableTags?.find(t => t.name === tag);
+            {availableTags.map(tag => {
+              const active = activeTagIds.has(tag.id);
               return (
-                <Badge key={tag} variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-destructive/15 hover:text-destructive transition-colors" style={tagData ? { backgroundColor: tagData.color + '30', color: tagData.color, borderColor: tagData.color + '40' } : {}} onClick={() => handleRemoveTag(tag)}>
-                  {tag} ×
+                <Badge
+                  key={tag.id}
+                  variant={active ? 'secondary' : 'outline'}
+                  className="text-xs cursor-pointer transition-colors"
+                  style={active ? { backgroundColor: tag.color + '30', color: tag.color, borderColor: tag.color + '40' } : {}}
+                  onClick={() => toggleTag(tag.id)}
+                >
+                  <span className="h-2 w-2 rounded-full mr-1 shrink-0" style={{ backgroundColor: tag.color }} />
+                  {tag.name}
+                  {active && <span className="ml-1 opacity-60">×</span>}
                 </Badge>
               );
             })}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {(availableTags ?? []).filter(t => !tags.includes(t.name)).map(tag => (
-              <Badge key={tag.id} variant="outline" className="text-xs cursor-pointer hover:bg-accent transition-colors" onClick={() => toggleTag(tag.name)}>
-                <span className="h-2 w-2 rounded-full mr-1" style={{ backgroundColor: tag.color }} />
-                {tag.name}
-              </Badge>
-            ))}
+            {availableTags.length === 0 && (
+              <p className="text-xs text-muted-foreground">Nenhuma tag cadastrada.</p>
+            )}
           </div>
         </div>
 
@@ -132,7 +140,14 @@ export default function ContactDetailPanel({ contact, onClose }: ContactDetailPa
 
       {/* Footer actions */}
       <div className="border-t border-border p-3 space-y-2">
-        <Button className="w-full gap-2" size="sm" onClick={() => navigate('/inbox')}>
+        <Button
+          className="w-full gap-2"
+          size="sm"
+          onClick={() => {
+            const q = contact.phone || contact.name;
+            navigate(q ? `/inbox?search=${encodeURIComponent(q)}` : '/inbox');
+          }}
+        >
           <MessageSquare size={14} /> Abrir conversa
         </Button>
         <Button variant="outline" className="w-full gap-2" size="sm" onClick={handleSave} disabled={updateContact.isPending}>

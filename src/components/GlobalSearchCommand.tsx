@@ -39,7 +39,8 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
       supabase.from('deals').select('id, title, value').ilike('title', term).limit(5),
       supabase
         .from('conversations')
-        .select('id, channel, contact:contacts(name)')
+        .select('id, channel, contact:contacts!inner(name)')
+        .ilike('contacts.name', term)
         .limit(5),
     ]);
 
@@ -48,9 +49,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
     deals.data?.forEach(d => r.push({ id: d.id, label: d.title, sub: `R$ ${Number(d.value).toLocaleString('pt-BR')}`, type: 'deal' }));
     conversations.data?.forEach(c => {
       const contactName = (c.contact as any)?.name ?? 'Conversa';
-      if (contactName.toLowerCase().includes(q.toLowerCase())) {
-        r.push({ id: c.id, label: contactName, sub: c.channel, type: 'conversation' });
-      }
+      r.push({ id: c.id, label: contactName, sub: c.channel, type: 'conversation' });
     });
 
     setResults(r);

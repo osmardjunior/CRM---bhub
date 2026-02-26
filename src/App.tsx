@@ -33,6 +33,7 @@ const NPS             = lazy(() => import("./pages/NPS"));
 const Arquivos        = lazy(() => import("./pages/Arquivos"));
 const Modulos         = lazy(() => import("./pages/Modulos"));
 const Suporte         = lazy(() => import("./pages/Suporte"));
+const Negocios        = lazy(() => import("./pages/Negocios"));
 
 /** Redirects to /inbox if user's role is not in allowedRoles */
 function RoleGuard({ allowedRoles, children }: { allowedRoles: string[]; children: ReactNode }) {
@@ -78,6 +79,7 @@ const App = () => (
                 {/* All roles */}
                 <Route path="/inbox" element={<ProtectedRoute><AppLayout><Inbox /></AppLayout></ProtectedRoute>} />
                 <Route path="/contatos" element={<ProtectedRoute><AppLayout><Contatos /></AppLayout></ProtectedRoute>} />
+                <Route path="/negocios" element={<ProtectedRoute><AppLayout><Negocios /></AppLayout></ProtectedRoute>} />
                 <Route path="/pipeline" element={<ProtectedRoute><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
                 <Route path="/pipeline/:id" element={<ProtectedRoute><AppLayout><FunnelKanban /></AppLayout></ProtectedRoute>} />
                 <Route path="/respostas-rapidas" element={<ProtectedRoute><AppLayout><RespostasRapidas /></AppLayout></ProtectedRoute>} />

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Search, MessageSquare, Loader2, SlidersHorizontal, X,
   Star, Clock, MailWarning,
@@ -80,8 +80,13 @@ export default function ConversationList({
   onLoadMore,
   loadingMore,
 }: Props) {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(filters.search ?? '');
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Sync search when parent sets it via URL (e.g. navigating from /contatos with ?search=)
+  useEffect(() => {
+    setSearch(filters.search ?? '');
+  }, [filters.search]);
   const [quickFilter, setQuickFilter] = useState<'all' | 'favorites' | 'unread' | 'scheduled'>('all');
   const [localName, setLocalName] = useState('');
   const [localPhone, setLocalPhone] = useState('');

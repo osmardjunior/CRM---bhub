@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 export interface ChatbotFlow {
   id: string;
@@ -30,7 +30,6 @@ export interface ChatbotNode {
 export function useChatbotFlows() {
   const { companyId } = useAuth();
   const queryClient = useQueryClient();
-  const { toast } = useToast();
 
   const flowsQuery = useQuery({
     queryKey: ['chatbot-flows', companyId],
@@ -57,9 +56,9 @@ export function useChatbotFlows() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chatbot-flows'] });
-      toast({ title: 'Fluxo criado com sucesso!' });
+      toast.success('Fluxo criado com sucesso!');
     },
-    onError: (e: Error) => toast({ title: 'Erro ao criar fluxo', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao criar fluxo: ${e.message}`),
   });
 
   const updateFlow = useMutation({
@@ -68,7 +67,7 @@ export function useChatbotFlows() {
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chatbot-flows'] }),
-    onError: (e: Error) => toast({ title: 'Erro ao atualizar fluxo', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao atualizar fluxo: ${e.message}`),
   });
 
   const deleteFlow = useMutation({
@@ -78,9 +77,9 @@ export function useChatbotFlows() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chatbot-flows'] });
-      toast({ title: 'Fluxo excluído' });
+      toast.success('Fluxo excluído');
     },
-    onError: (e: Error) => toast({ title: 'Erro ao excluir', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao excluir: ${e.message}`),
   });
 
   const toggleActive = useMutation({
@@ -93,7 +92,7 @@ export function useChatbotFlows() {
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chatbot-flows'] }),
-    onError: (e: Error) => toast({ title: 'Erro ao alterar status', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao alterar status: ${e.message}`),
   });
 
   return { flows: flowsQuery.data ?? [], isLoading: flowsQuery.isLoading, createFlow, updateFlow, deleteFlow, toggleActive };
@@ -101,7 +100,6 @@ export function useChatbotFlows() {
 
 export function useChatbotNodes(flowId: string | null) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const { companyId } = useAuth();
 
   const nodesQuery = useQuery({
@@ -144,9 +142,9 @@ export function useChatbotNodes(flowId: string | null) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chatbot-nodes'] });
-      toast({ title: 'Etapa adicionada!' });
+      toast.success('Etapa adicionada!');
     },
-    onError: (e: Error) => toast({ title: 'Erro ao adicionar etapa', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao adicionar etapa: ${e.message}`),
   });
 
   const updateNode = useMutation({
@@ -155,7 +153,7 @@ export function useChatbotNodes(flowId: string | null) {
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chatbot-nodes'] }),
-    onError: (e: Error) => toast({ title: 'Erro ao atualizar etapa', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao atualizar etapa: ${e.message}`),
   });
 
   const deleteNode = useMutation({
@@ -165,9 +163,9 @@ export function useChatbotNodes(flowId: string | null) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chatbot-nodes'] });
-      toast({ title: 'Etapa removida' });
+      toast.success('Etapa removida');
     },
-    onError: (e: Error) => toast({ title: 'Erro ao remover etapa', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast.error(`Erro ao remover etapa: ${e.message}`),
   });
 
   const reorderNodes = useMutation({

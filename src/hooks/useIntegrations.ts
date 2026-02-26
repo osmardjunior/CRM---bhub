@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export interface Integration {
@@ -12,17 +13,21 @@ export interface Integration {
   phone_number: string | null;
   device_name: string;
   restrict_users: string[];
+  department_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export function useIntegrations() {
+  const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['integrations'],
+    queryKey: ['integrations', companyId],
+    enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('integrations')
         .select('*')
+        .eq('company_id', companyId!)
         .order('created_at');
       if (error) throw error;
       return (data ?? []) as Integration[];

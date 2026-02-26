@@ -332,7 +332,8 @@ export async function sendMessage(
 // ── Contacts ───────────────────────────────────────────
 export interface ContactFilters {
   search?: string;
-  tag?: string;
+  /** Filter by tag UUID — uses contact_tags normalized table */
+  tag_id?: string;
   source?: string;
   page?: number;
   limit?: number;
@@ -361,6 +362,19 @@ export async function listContacts(
     query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
   }
 
+  // Filter by tag (normalized contact_tags table) — before range() so count is correct
+  if (filters?.tag_id && filters.tag_id !== 'all') {
+    const { data: tagContacts } = await supabase
+      .from('contact_tags')
+      .select('contact_id')
+      .eq('tag_id', filters.tag_id);
+    const tagContactIds = (tagContacts ?? []).map((r: any) => r.contact_id).filter(Boolean);
+    if (tagContactIds.length === 0) {
+      return { data: [], total: 0, page, totalPages: 0 };
+    }
+    query = query.in('id', tagContactIds);
+  }
+
   // Agents only see contacts with conversations assigned to them
   if (filters?.assigned_user_id) {
     const { data: convContacts } = await supabase
@@ -379,22 +393,58 @@ export async function listContacts(
   const { data, error, count } = await query;
   if (error) handleError(error);
 
-  let results = data ?? [];
-
-  if (filters?.tag && filters.tag !== 'all') {
-    results = results.filter((c) => {
-      const tags = (c.tags as string[]) || [];
-      return tags.includes(filters.tag!);
-    });
-  }
-
   const total = count ?? 0;
   return {
-    data: results as (Contact & { responsible: { id: string; name: string } | null })[],
+    data: (data ?? []) as (Contact & { responsible: { id: string; name: string } | null })[],
     total,
     page,
     totalPages: Math.ceil(total / limit),
   };
+}
+
+/** Fetch ALL contacts matching the given filters (no pagination) — for CSV export. */
+export async function exportAllContacts(
+  filters?: Omit<ContactFilters, 'page' | 'limit'>,
+): Promise<(Contact & { responsible: { id: string; name: string } | null })[]> {
+  let query = supabase
+    .from('contacts')
+    .select('*, responsible:profiles!contacts_responsible_user_id_fkey(id, name)')
+    .order('created_at', { ascending: false })
+    .range(0, 9999); // up to 10 k contacts
+
+  if (filters?.source && filters.source !== 'all') {
+    query = query.eq('source', filters.source);
+  }
+
+  if (filters?.search) {
+    query = query.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+  }
+
+  if (filters?.tag_id && filters.tag_id !== 'all') {
+    const { data: tagContacts } = await supabase
+      .from('contact_tags')
+      .select('contact_id')
+      .eq('tag_id', filters.tag_id);
+    const tagContactIds = (tagContacts ?? []).map((r: any) => r.contact_id).filter(Boolean);
+    if (tagContactIds.length === 0) return [];
+    query = query.in('id', tagContactIds);
+  }
+
+  if (filters?.assigned_user_id) {
+    const { data: convContacts } = await supabase
+      .from('conversations')
+      .select('contact_id')
+      .eq('assigned_user_id', filters.assigned_user_id);
+    const contactIds = Array.from(
+      new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)),
+    );
+    if (contactIds.length === 0) return [];
+    query = query.in('id', contactIds);
+  }
+
+  const { data, error } = await query;
+  if (error) handleError(error);
+  return (data ?? []) as (Contact & { responsible: { id: string; name: string } | null })[];
 }
 
 export async function createContact(

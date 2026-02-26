@@ -11,19 +11,20 @@ export interface QuickReply {
 }
 
 export function useQuickReplies() {
-  const { user } = useAuth();
+  const { user, companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['quick_replies', user?.id],
+    queryKey: ['quick_replies', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('quick_replies')
         .select('id, shortcut, message, created_at')
+        .eq('company_id', companyId!)
         .order('shortcut', { ascending: true });
       if (error) throw error;
       return data as QuickReply[];
     },
-    enabled: !!user,
+    enabled: !!user && !!companyId,
   });
 }
 

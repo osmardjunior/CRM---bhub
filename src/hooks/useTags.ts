@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
 export interface Tag {
@@ -12,12 +13,15 @@ export interface Tag {
 }
 
 export function useTags() {
+  const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['tags'],
+    queryKey: ['tags', companyId],
+    enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tags')
         .select('*')
+        .eq('company_id', companyId!)
         .order('name');
       if (error) throw error;
       return (data ?? []) as Tag[];

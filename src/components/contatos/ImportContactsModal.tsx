@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { Upload, FileText, AlertCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -40,6 +41,7 @@ export default function ImportContactsModal({ open, onClose }: Props) {
   const [rows, setRows] = useState<CSVRow[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const createContact = useCreateContact();
 
@@ -49,6 +51,7 @@ export default function ImportContactsModal({ open, onClose }: Props) {
     setRows([]);
     setMapping({});
     setImporting(false);
+    setProgress(null);
   };
 
   const handleClose = () => {
@@ -99,17 +102,19 @@ export default function ImportContactsModal({ open, onClose }: Props) {
     }
 
     setImporting(true);
+    setProgress({ processed: 0, total: rows.length });
     let success = 0;
     let errors = 0;
 
-    for (const row of rows) {
-      const name = row[nameCol]?.trim();
-      if (!name) { errors++; continue; }
+    const phoneCol = Object.entries(mapping).find(([, v]) => v === 'phone')?.[0];
+    const emailCol = Object.entries(mapping).find(([, v]) => v === 'email')?.[0];
+    const sourceCol = Object.entries(mapping).find(([, v]) => v === 'source')?.[0];
+    const tagsCol = Object.entries(mapping).find(([, v]) => v === 'tags')?.[0];
 
-      const phoneCol = Object.entries(mapping).find(([, v]) => v === 'phone')?.[0];
-      const emailCol = Object.entries(mapping).find(([, v]) => v === 'email')?.[0];
-      const sourceCol = Object.entries(mapping).find(([, v]) => v === 'source')?.[0];
-      const tagsCol = Object.entries(mapping).find(([, v]) => v === 'tags')?.[0];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const name = row[nameCol]?.trim();
+      if (!name) { errors++; setProgress({ processed: i + 1, total: rows.length }); continue; }
 
       const tags = tagsCol && row[tagsCol]
         ? row[tagsCol].split(';').map((t) => t.trim()).filter(Boolean)
@@ -127,6 +132,7 @@ export default function ImportContactsModal({ open, onClose }: Props) {
       } catch {
         errors++;
       }
+      setProgress({ processed: i + 1, total: rows.length });
     }
 
     toast.success(`Importação concluída: ${success} contatos criados${errors > 0 ? `, ${errors} erros` : ''}.`);
@@ -221,6 +227,23 @@ export default function ImportContactsModal({ open, onClose }: Props) {
           </div>
         )}
 
+        {/* Import progress */}
+        {importing && progress && (
+          <div className="space-y-1.5 px-0.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                {progress.processed < progress.total ? (
+                  <span>Importando contatos...</span>
+                ) : (
+                  <span className="flex items-center gap-1 text-green-600"><CheckCircle2 size={12} /> Concluído</span>
+                )}
+              </span>
+              <span className="font-medium">{progress.processed} / {progress.total}</span>
+            </div>
+            <Progress value={Math.round((progress.processed / progress.total) * 100)} className="h-2" />
+          </div>
+        )}
+
         <DialogFooter>
           {step === 'map' && (
             <>
@@ -232,7 +255,7 @@ export default function ImportContactsModal({ open, onClose }: Props) {
           )}
           {step === 'preview' && (
             <>
-              <Button variant="outline" onClick={() => setStep('map')}>Voltar</Button>
+              <Button variant="outline" onClick={() => setStep('map')} disabled={importing}>Voltar</Button>
               <Button onClick={handleImport} disabled={importing}>
                 {importing ? 'Importando...' : `Importar ${rows.length} contatos`}
               </Button>

@@ -15,7 +15,7 @@ export function useAgentMetrics(dateFrom: string, dateTo: string) {
   const { companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['agent-metrics', dateFrom, dateTo],
+    queryKey: ['agent-metrics', companyId, dateFrom, dateTo],
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_agent_metrics', {
@@ -32,12 +32,13 @@ export function usePipelineConversion(dateFrom: string, dateTo: string) {
   const { companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['pipeline-conversion', dateFrom, dateTo],
+    queryKey: ['pipeline-conversion', companyId, dateFrom, dateTo],
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('deals')
         .select('stage')
+        .eq('company_id', companyId!)
         .gte('updated_at', dateFrom)
         .lte('updated_at', dateTo);
 
@@ -56,12 +57,13 @@ export function useNPSSummary(dateFrom: string, dateTo: string) {
   const { companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['nps-summary', dateFrom, dateTo],
+    queryKey: ['nps-summary', companyId, dateFrom, dateTo],
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('satisfaction_surveys')
         .select('score')
+        .eq('company_id', companyId!)
         .not('score', 'is', null)
         .gte('answered_at', dateFrom)
         .lte('answered_at', dateTo);

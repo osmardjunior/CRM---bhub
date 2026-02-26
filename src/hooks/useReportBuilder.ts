@@ -40,12 +40,15 @@ export interface SavedReport {
 }
 
 export function useSavedReports() {
+  const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['saved-reports'],
+    queryKey: ['saved-reports', companyId],
+    enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('saved_reports')
         .select('*')
+        .eq('company_id', companyId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as SavedReport[];
@@ -55,7 +58,7 @@ export function useSavedReports() {
 
 export function useSaveReport() {
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, companyId } = useAuth();
 
   return useMutation({
     mutationFn: async (payload: {
@@ -70,6 +73,7 @@ export function useSaveReport() {
         filters: payload.filters as any,
         show_on_home: payload.show_on_home ?? false,
         created_by: user?.id,
+        company_id: companyId,
       } as any);
       if (error) throw error;
     },
@@ -104,27 +108,29 @@ export function useReportQuery(
   page: number,
   enabled: boolean,
 ) {
+  const { companyId } = useAuth();
   return useQuery({
     queryKey: ['report-results', reportType, filters, page],
-    enabled,
+    enabled: enabled && !!companyId,
     queryFn: async () => {
       const offset = (page - 1) * PAGE_SIZE;
 
       if (reportType === 'chats') {
-        return queryChats(filters, offset);
+        return queryChats(filters, offset, companyId!);
       }
       if (reportType === 'contacts' || reportType === 'messages') {
-        return queryContacts(filters, offset);
+        return queryContacts(filters, offset, companyId!);
       }
       return { rows: [], total: 0 };
     },
   });
 }
 
-async function queryChats(filters: ReportFilters, offset: number) {
+async function queryChats(filters: ReportFilters, offset: number, companyId: string) {
   let query = supabase
     .from('conversations')
-    .select('*, contact:contacts!inner(*)', { count: 'exact' });
+    .select('*, contact:contacts!inner(*)', { count: 'exact' })
+    .eq('company_id', companyId);
 
   if (filters.status && filters.status !== 'any') {
     query = query.eq('status', filters.status);
@@ -205,10 +211,11 @@ async function queryChats(filters: ReportFilters, offset: number) {
   return { rows: data ?? [], total: count ?? 0 };
 }
 
-async function queryContacts(filters: ReportFilters, offset: number) {
+async function queryContacts(filters: ReportFilters, offset: number, companyId: string) {
   let query = supabase
     .from('contacts')
-    .select('*', { count: 'exact' });
+    .select('*', { count: 'exact' })
+    .eq('company_id', companyId);
 
   // Tag filters — fix: pass array not JSON.stringify
   if (filters.includeTags && filters.includeTags.length > 0) {
@@ -268,10 +275,15 @@ async function getConversationsWithoutIncomingMessage(days: number): Promise<str
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
+  // Limit lookback to 1 year to avoid loading the entire messages table
+  const lookbackFrom = new Date();
+  lookbackFrom.setFullYear(lookbackFrom.getFullYear() - 1);
+
   const { data, error } = await supabase
     .from('messages')
     .select('conversation_id, created_at')
     .in('sender_type', ['user', 'contact'])
+    .gte('created_at', lookbackFrom.toISOString())
     .order('created_at', { ascending: false });
 
   if (error || !data) return [];
@@ -295,10 +307,15 @@ async function getConversationsWithoutOutgoingMessage(days: number): Promise<str
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
+  // Limit lookback to 1 year to avoid loading the entire messages table
+  const lookbackFrom = new Date();
+  lookbackFrom.setFullYear(lookbackFrom.getFullYear() - 1);
+
   const { data, error } = await supabase
     .from('messages')
     .select('conversation_id, created_at')
     .eq('sender_type', 'agent')
+    .gte('created_at', lookbackFrom.toISOString())
     .order('created_at', { ascending: false });
 
   if (error || !data) return [];

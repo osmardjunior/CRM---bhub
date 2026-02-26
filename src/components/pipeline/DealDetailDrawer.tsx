@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Save, CheckSquare } from 'lucide-react';
+import { Save, CheckSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,15 +45,12 @@ export default function DealDetailDrawer({ deal, stages, onClose, onUpdate }: De
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-border bg-card shadow-xl flex flex-col">
+    <div className="flex flex-col h-full">
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-foreground">{deal.title}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">{getDaysAgo(deal.created_at)} dias no pipeline</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
-          <X size={16} />
-        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-5">

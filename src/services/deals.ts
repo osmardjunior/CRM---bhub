@@ -10,6 +10,7 @@ export type Deal = {
   stage: 'novo_lead' | 'em_contato' | 'proposta' | 'fechamento' | 'ganho' | 'perdido';
   probability: number;
   assigned_user_id: string | null;
+  department_id: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -29,6 +30,7 @@ export type DealInsert = {
   stage?: DealStage;
   probability?: number;
   assigned_user_id?: string | null;
+  department_id?: string | null;
   notes?: string;
   company_id?: string;
 };
@@ -39,7 +41,7 @@ function handleError(error: { message: string; code?: string }): never {
   throw new ApiError(error.message, error.code ?? 'UNKNOWN');
 }
 
-export async function listDeals(): Promise<DealWithRelations[]> {
+export async function listDeals(companyId: string): Promise<DealWithRelations[]> {
   const { data, error } = await supabase
     .from('deals')
     .select(`
@@ -47,6 +49,7 @@ export async function listDeals(): Promise<DealWithRelations[]> {
       contact:contacts!deals_contact_id_fkey(id, name),
       assigned_user:profiles!deals_assigned_user_id_fkey(id, name)
     `)
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
   if (error) handleError(error);

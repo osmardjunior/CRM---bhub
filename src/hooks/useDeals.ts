@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   listDeals,
   createDeal,
@@ -10,9 +11,11 @@ import {
 } from '@/services/deals';
 
 export function useDeals() {
+  const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['deals'],
-    queryFn: listDeals,
+    queryKey: ['deals', companyId],
+    enabled: !!companyId,
+    queryFn: () => listDeals(companyId!),
   });
 }
 
