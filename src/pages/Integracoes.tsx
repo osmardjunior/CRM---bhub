@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw } from 'lucide-react';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -88,9 +88,10 @@ function ProviderFields({ provider, config, onChange }: {
 }
 
 // ── Device Card ──────────────────────────────────────
-function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect, onSyncPhone, liveStatus }: {
+function DeviceCard({ device, isAdmin, departments, onDisconnect, onDelete, onEdit, onConnect, onSyncPhone, liveStatus }: {
   device: Integration;
   isAdmin: boolean;
+  departments: { id: string; name: string }[];
   onDisconnect: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (device: Integration) => void;
@@ -145,6 +146,17 @@ function DeviceCard({ device, isAdmin, onDisconnect, onDelete, onEdit, onConnect
           </div>
           <code className="text-[11px] text-muted-foreground">{maskSecret(JSON.stringify(device.config))}</code>
         </div>
+        {departments.length > 0 && (
+          <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Layers size={12} />
+              <span>Departamento</span>
+            </div>
+            <span className="text-xs font-medium text-foreground">
+              {device.department_id ? (departments.find(d => d.id === device.department_id)?.name ?? '—') : <span className="text-muted-foreground italic">Nenhum</span>}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -214,6 +226,7 @@ export default function IntegracoesPage() {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editConfig, setEditConfig] = useState<Record<string, string>>({});
+  const [editDeptId, setEditDeptId] = useState<string>('');
 
   const whatsappDevices = integrations?.filter(i => i.channel === 'whatsapp') ?? [];
 
@@ -269,6 +282,7 @@ export default function IntegracoesPage() {
     setEditDevice(device);
     setEditName(device.device_name || '');
     setEditPhone(device.phone_number || '');
+    setEditDeptId(device.department_id ?? '');
     setEditConfig(device.config as Record<string, string> ?? {});
   };
 
@@ -324,8 +338,9 @@ export default function IntegracoesPage() {
 
   const handleEdit = () => {
     if (!editDevice) return;
-    if (!editName.trim() || !editPhone.trim()) {
-      toast.error('Preencha nome e número');
+    const needsPhone = editDevice.provider !== 'evolution';
+    if (!editName.trim() || (needsPhone && !editPhone.trim())) {
+      toast.error(needsPhone ? 'Preencha nome e número' : 'Preencha o nome');
       return;
     }
     updateDevice.mutate({
@@ -334,6 +349,7 @@ export default function IntegracoesPage() {
         device_name: editName,
         phone_number: editPhone,
         config: editConfig,
+        department_id: editDeptId || null,
       },
     }, {
       onSuccess: () => setEditDevice(null),
@@ -414,6 +430,7 @@ export default function IntegracoesPage() {
               key={d.id}
               device={d}
               isAdmin={permissions.isAdmin}
+              departments={departments}
               onDisconnect={id => setConfirmId(id)}
               onDelete={id => setDeleteId(id)}
               onEdit={openEdit}
@@ -657,11 +674,29 @@ export default function IntegracoesPage() {
               <Label className="text-xs">Nome do aparelho</Label>
               <Input className="mt-1" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Ex: Vendas - Principal" />
             </div>
-            <div>
-              <Label className="text-xs">Número de telefone</Label>
-              <Input className="mt-1" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+5511999999999" />
-            </div>
+            {editDevice?.provider !== 'evolution' && (
+              <div>
+                <Label className="text-xs">Número de telefone</Label>
+                <Input className="mt-1" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+5511999999999" />
+              </div>
+            )}
 
+            {departments.length > 0 && (
+              <div>
+                <Label className="text-xs">Departamento</Label>
+                <Select value={editDeptId} onValueChange={setEditDeptId}>
+                  <SelectTrigger className="mt-1 h-9 text-sm">
+                    <SelectValue placeholder="Nenhum departamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Nenhum</SelectItem>
+                    {departments.map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {editDevice && (
               <>
                 <div className="rounded-lg bg-secondary/50 p-3">
