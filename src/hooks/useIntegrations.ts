@@ -14,21 +14,26 @@ export interface Integration {
   device_name: string;
   restrict_users: string[];
   department_id: string | null;
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export function useIntegrations() {
+export function useIntegrations(projectId?: string) {
   const { companyId } = useAuth();
   return useQuery({
-    queryKey: ['integrations', companyId],
+    queryKey: ['integrations', companyId, projectId ?? 'all'],
     enabled: !!companyId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('integrations')
         .select('*')
         .eq('company_id', companyId!)
         .order('created_at');
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return (data ?? []) as Integration[];
     },

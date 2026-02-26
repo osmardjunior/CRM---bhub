@@ -30,6 +30,7 @@ import {
   Puzzle,
   Headphones,
   TrendingUp,
+  FolderOpen,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -109,6 +110,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     {
       label: 'Sistema',
       items: [
+        { to: '/folders', label: 'Pastas / Projetos', icon: FolderOpen },
         { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone, roles: ['admin'] },
         { to: '/modulos', label: 'Módulos', icon: Puzzle, roles: ['admin'] },
         { to: '/configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },

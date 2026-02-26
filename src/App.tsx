@@ -34,6 +34,9 @@ const Arquivos        = lazy(() => import("./pages/Arquivos"));
 const Modulos         = lazy(() => import("./pages/Modulos"));
 const Suporte         = lazy(() => import("./pages/Suporte"));
 const Negocios        = lazy(() => import("./pages/Negocios"));
+const Folders         = lazy(() => import("./pages/Folders"));
+const FolderProjects  = lazy(() => import("./pages/FolderProjects"));
+const FolderNumbers   = lazy(() => import("./pages/FolderNumbers"));
 
 /** Redirects to /inbox if user's role is not in allowedRoles */
 function RoleGuard({ allowedRoles, children }: { allowedRoles: string[]; children: ReactNode }) {
@@ -83,6 +86,9 @@ const App = () => (
                 <Route path="/pipeline" element={<ProtectedRoute><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
                 <Route path="/pipeline/:id" element={<ProtectedRoute><AppLayout><FunnelKanban /></AppLayout></ProtectedRoute>} />
                 <Route path="/respostas-rapidas" element={<ProtectedRoute><AppLayout><RespostasRapidas /></AppLayout></ProtectedRoute>} />
+                <Route path="/folders" element={<ProtectedRoute><AppLayout><Folders /></AppLayout></ProtectedRoute>} />
+                <Route path="/folders/:departmentId" element={<ProtectedRoute><AppLayout><FolderProjects /></AppLayout></ProtectedRoute>} />
+                <Route path="/folders/:departmentId/:projectId" element={<ProtectedRoute><AppLayout><FolderNumbers /></AppLayout></ProtectedRoute>} />
                 <Route path="/suporte" element={<ProtectedRoute><AppLayout><Suporte /></AppLayout></ProtectedRoute>} />
                 <Route path="/perfil" element={<ProtectedRoute><AppLayout><MeuPerfil /></AppLayout></ProtectedRoute>} />
 

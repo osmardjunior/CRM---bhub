@@ -121,6 +121,7 @@ export interface ConversationFilters {
   phone?: string;
   tag?: string;
   assigned_user_id?: string;
+  project_id?: string;
   sort?: 'recent' | 'oldest' | 'name';
   page?: number;
   limit?: number;
@@ -159,6 +160,9 @@ export async function listConversations(
   }
   if (filters?.assigned_user_id) {
     query = query.eq('assigned_user_id', filters.assigned_user_id);
+  }
+  if (filters?.project_id) {
+    query = query.eq('project_id', filters.project_id);
   }
 
   // Sort order

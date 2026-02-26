@@ -11,6 +11,11 @@ import {
 } from '@/hooks/useConversations';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjects } from '@/hooks/useProjects';
+import { useSelectedProject } from '@/hooks/useSelectedProject';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import type { ConversationFilters } from '@/services/api';
 import type { Enums } from '@/integrations/supabase/types';
 
@@ -20,12 +25,20 @@ export default function InboxPage() {
   const initialId = searchParams.get('id');
   const initialStatus = searchParams.get('status') as Enums<'conversation_status'> | null;
   const initialSearch = searchParams.get('search');
+  const initialProjectId = searchParams.get('projectId') ?? '';
+
+  const { data: projects = [] } = useProjects();
+  const { projectId, select: selectProject } = useSelectedProject();
+
+  // URL param takes priority over localStorage on first load
+  const effectiveProjectId = initialProjectId || projectId;
 
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
     status: initialStatus ?? undefined,
     search: initialSearch ?? undefined,
+    project_id: effectiveProjectId || undefined,
   });
 
   // Agents only see conversations assigned to them
@@ -73,6 +86,14 @@ export default function InboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveSelectedId]);
 
+  const handleProjectChange = (value: string) => {
+    const id = value === '__all__' ? '' : value;
+    selectProject(id);
+    setSelectedId(null);
+    didAutoSelect.current = false;
+    setFilters((prev) => ({ ...prev, project_id: id || undefined }));
+  };
+
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
     setFilters((prev) => {
       const next = { ...prev, ...newFilters };
@@ -92,7 +113,29 @@ export default function InboxPage() {
   const hasSelection = !!effectiveSelectedId;
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] gap-0 -mt-2 rounded-xl border border-border bg-card card-shadow overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2">
+      {/* Project selector bar */}
+      {projects.length > 0 && (
+        <div className="flex items-center gap-2 px-3 pb-2">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Projeto:</span>
+          <Select
+            value={filters.project_id ?? '__all__'}
+            onValueChange={handleProjectChange}
+          >
+            <SelectTrigger className="h-7 text-xs w-48">
+              <SelectValue placeholder="Todos os projetos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Todos os projetos</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="flex flex-1 min-h-0 gap-0 rounded-xl border border-border bg-card card-shadow overflow-hidden">
       {/* Conversation list — hidden on mobile when a chat is open */}
       <div className={hasSelection ? 'hidden md:flex shrink-0' : 'flex w-full md:w-auto shrink-0'}>
         <ConversationList
@@ -126,6 +169,7 @@ export default function InboxPage() {
           onClose={() => setProfileOpen(false)}
         />
       )}
+      </div>
     </div>
   );
 }
