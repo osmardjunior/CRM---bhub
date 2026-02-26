@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers, FolderOpen } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -191,6 +192,7 @@ function DeviceCard({ device, isAdmin, departments, onDisconnect, onDelete, onEd
 
 // ── Main Page ────────────────────────────────────────
 export default function IntegracoesPage() {
+  const navigate = useNavigate();
   const permissions = usePermissions();
   const { data: integrations, isLoading } = useIntegrations();
   const { data: departments = [] } = useDepartments();
@@ -396,6 +398,9 @@ export default function IntegracoesPage() {
         subtitle="Nesta área estão listados todos os aparelhos da sua conta."
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/folders')}>
+              <FolderOpen size={14} /> Pastas / Projetos
+            </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={checkAllStatuses}>
               <RefreshCw size={14} /> Atualizar Status
             </Button>

@@ -86,9 +86,9 @@ const App = () => (
                 <Route path="/pipeline" element={<ProtectedRoute><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
                 <Route path="/pipeline/:id" element={<ProtectedRoute><AppLayout><FunnelKanban /></AppLayout></ProtectedRoute>} />
                 <Route path="/respostas-rapidas" element={<ProtectedRoute><AppLayout><RespostasRapidas /></AppLayout></ProtectedRoute>} />
-                <Route path="/folders" element={<ProtectedRoute><AppLayout><Folders /></AppLayout></ProtectedRoute>} />
-                <Route path="/folders/:departmentId" element={<ProtectedRoute><AppLayout><FolderProjects /></AppLayout></ProtectedRoute>} />
-                <Route path="/folders/:departmentId/:projectId" element={<ProtectedRoute><AppLayout><FolderNumbers /></AppLayout></ProtectedRoute>} />
+                <Route path="/folders" element={<ProtectedRoute><RoleGuard allowedRoles={['admin']}><AppLayout><Folders /></AppLayout></RoleGuard></ProtectedRoute>} />
+                <Route path="/folders/:departmentId" element={<ProtectedRoute><RoleGuard allowedRoles={['admin']}><AppLayout><FolderProjects /></AppLayout></RoleGuard></ProtectedRoute>} />
+                <Route path="/folders/:departmentId/:projectId" element={<ProtectedRoute><RoleGuard allowedRoles={['admin']}><AppLayout><FolderNumbers /></AppLayout></RoleGuard></ProtectedRoute>} />
                 <Route path="/suporte" element={<ProtectedRoute><AppLayout><Suporte /></AppLayout></ProtectedRoute>} />
                 <Route path="/perfil" element={<ProtectedRoute><AppLayout><MeuPerfil /></AppLayout></ProtectedRoute>} />
 
