@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useProjects } from '@/hooks/useProjects';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import PageHeader from '@/components/shared/PageHeader';
@@ -196,6 +197,7 @@ export default function IntegracoesPage() {
   const permissions = usePermissions();
   const { data: integrations, isLoading } = useIntegrations();
   const { data: departments = [] } = useDepartments();
+  const { data: allProjects = [] } = useProjects();
   const addDevice = useAddDevice();
   const updateDevice = useUpdateDevice();
   const disconnectDevice = useDisconnectDevice();
@@ -229,8 +231,11 @@ export default function IntegracoesPage() {
   const [editPhone, setEditPhone] = useState('');
   const [editConfig, setEditConfig] = useState<Record<string, string>>({});
   const [editDeptId, setEditDeptId] = useState<string>('');
+  // map deviceId → selectedProjectId for "move to folder" action
+  const [moveProjectMap, setMoveProjectMap] = useState<Record<string, string>>({});
 
   const whatsappDevices = integrations?.filter(i => i.channel === 'whatsapp') ?? [];
+  const orphanedDevices = whatsappDevices.filter(d => !d.project_id);
 
   // Live status for Evolution API devices (separate from DB status)
   const [liveStatus, setLiveStatus] = useState<Record<string, 'checking' | 'connected' | 'disconnected'>>({});
@@ -424,6 +429,72 @@ export default function IntegracoesPage() {
           <FolderOpen size={14} className="mr-1.5" /> Abrir Pastas / Projetos
         </Button>
       </div>
+
+      {/* ── Números sem pasta ───────────────────────── */}
+      {orphanedDevices.length > 0 && (
+        <div className="rounded-xl border border-warning/40 bg-warning/5 overflow-hidden">
+          <div className="px-4 py-3 border-b border-warning/20 flex items-center gap-2">
+            <Smartphone size={15} className="text-warning" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Números sem pasta</p>
+              <p className="text-xs text-muted-foreground">
+                {orphanedDevices.length} número{orphanedDevices.length > 1 ? 's' : ''} ainda não {orphanedDevices.length > 1 ? 'foram atribuídos' : 'foi atribuído'} a uma pasta/projeto.
+                {allProjects.length > 0 ? ' Mova-os para uma pasta para que fiquem organizados.' : ' Crie uma pasta em Pastas / Projetos primeiro.'}
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-border">
+            {orphanedDevices.map(device => {
+              const connected = liveStatus[device.id] === 'connected' || (liveStatus[device.id] !== 'disconnected' && device.status === 'connected');
+              const selectedProject = moveProjectMap[device.id] ?? '';
+              return (
+                <div key={device.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Badge variant="outline" className={`text-[11px] shrink-0 ${connected ? 'bg-success/10 text-success border-success/20' : 'bg-muted text-muted-foreground'}`}>
+                      {liveStatus[device.id] === 'checking' ? '...' : connected ? 'Conectado' : 'Desconectado'}
+                    </Badge>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{device.device_name || 'Sem nome'}</p>
+                      <p className="text-xs text-muted-foreground">{device.phone_number || 'Número não detectado'}</p>
+                    </div>
+                  </div>
+                  {allProjects.length > 0 && permissions.isAdmin && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Select
+                        value={selectedProject}
+                        onValueChange={v => setMoveProjectMap(prev => ({ ...prev, [device.id]: v }))}
+                      >
+                        <SelectTrigger className="h-8 text-xs w-44">
+                          <SelectValue placeholder="Escolher pasta..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allProjects.map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs"
+                        disabled={!selectedProject || updateDevice.isPending}
+                        onClick={() => {
+                          if (!selectedProject) return;
+                          updateDevice.mutate(
+                            { id: device.id, updates: { project_id: selectedProject } },
+                            { onSuccess: () => setMoveProjectMap(prev => { const n = { ...prev }; delete n[device.id]; return n; }) }
+                          );
+                        }}
+                      >
+                        Mover
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── API Info Section ────────────────────────── */}
       <div className="rounded-xl border border-border bg-card card-shadow p-5 space-y-4">

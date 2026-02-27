@@ -48,6 +48,13 @@ export function useDeleteDepartment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      // Primeiro deletar projetos vinculados (user_projects cascadeiam automaticamente)
+      const { error: projError } = await supabase
+        .from('projects')
+        .delete()
+        .eq('department_id', id);
+      if (projError) throw projError;
+
       const { error } = await supabase
         .from('departments')
         .delete()
@@ -56,6 +63,7 @@ export function useDeleteDepartment() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['departments'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
       toast.success('Departamento removido!');
     },
     onError: (err: Error) => toast.error(err.message),

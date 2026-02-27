@@ -1047,7 +1047,7 @@ export default function ConfiguracoesPage() {
               </DialogHeader>
               <p className="text-sm text-muted-foreground">
                 Tem certeza que deseja excluir o departamento <strong>{confirmDeleteDeptName}</strong>?
-                Esta ação removerá o departamento e todos os vínculos com usuários.
+                Esta ação também removerá todos os projetos e integrantes vinculados a ele.
               </p>
               <DialogFooter className="mt-2">
                 <Button variant="outline" onClick={() => setConfirmDeleteDeptId(null)}>Cancelar</Button>
