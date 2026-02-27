@@ -165,6 +165,8 @@ export default function FolderNumbers() {
   const project = projects.find(p => p.id === projectId);
 
   const { data: integrations = [], isLoading } = useIntegrations(projectId);
+  // All company integrations (for detecting existing Evolution credentials)
+  const { data: allIntegrations = [] } = useIntegrations();
   const { data: userProjects = [] } = useUserProjects(projectId!);
   const { data: teamMembers = [] } = useTeamProfiles();
 
@@ -210,6 +212,19 @@ export default function FolderNumbers() {
     return () => clearInterval(t);
   }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Quick-add helpers ─────────────────────────────────
+  // If a Evolution integration already exists in the company, reuse its credentials.
+  const existingEvolution = allIntegrations.find(
+    d => d.provider === 'evolution' && d.config?.api_url && d.config?.api_key,
+  );
+  const quickAddMode = !!existingEvolution;
+
+  const toInstanceName = (name: string) => {
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const suffix = Math.random().toString(36).slice(2, 6);
+    return `${slug}-${suffix}`;
+  };
+
   // ── Add device modal state ───────────────────────────
   const [addOpen, setAddOpen] = useState(false);
   const [devName, setDevName] = useState('');
@@ -218,6 +233,35 @@ export default function FolderNumbers() {
   const [devConfig, setDevConfig] = useState<Record<string, string>>({});
 
   const resetAddForm = () => { setDevName(''); setDevPhone(''); setDevProvider('evolution'); setDevConfig({}); };
+
+  const handleQuickAdd = () => {
+    if (!devName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
+    if (!existingEvolution) return;
+    const instanceName = toInstanceName(devName);
+    const cfg = {
+      api_url: existingEvolution.config.api_url as string,
+      api_key: existingEvolution.config.api_key as string,
+      instance_name: instanceName,
+    };
+    addDevice.mutate({
+      channel: 'whatsapp',
+      provider: 'evolution',
+      config: cfg,
+      phone_number: '',
+      device_name: devName.trim(),
+      project_id: projectId,
+    }, {
+      onSuccess: async () => {
+        setAddOpen(false);
+        resetAddForm();
+        await new Promise(r => setTimeout(r, 500));
+        const { data } = await supabase.from('integrations').select('id')
+          .eq('device_name', devName.trim()).eq('provider', 'evolution')
+          .order('created_at', { ascending: false }).limit(1);
+        setQrModal({ open: true, integrationId: data?.[0]?.id ?? null, apiUrl: cfg.api_url, apiKey: cfg.api_key, instanceName });
+      },
+    });
+  };
 
   const handleAdd = () => {
     if (!devName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
@@ -256,17 +300,61 @@ export default function FolderNumbers() {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editConfig, setEditConfig] = useState<Record<string, string>>({});
+  type AgentEntry = { id: string; name: string; originalAllowed: string[] | null; checked: boolean };
+  const [editAgentsList, setEditAgentsList] = useState<AgentEntry[]>([]);
 
-  const openEdit = (d: Integration) => {
+  const openEdit = async (d: Integration) => {
     setEditDevice(d);
     setEditName(d.device_name || '');
     setEditPhone(d.phone_number || '');
     setEditConfig(d.config as Record<string, string> ?? {});
+    setEditAgentsList([]);
+    if (companyId) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, name, allowed_integration_ids')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('name');
+      if (profiles) {
+        setEditAgentsList(profiles.map((p: any) => ({
+          id: p.id,
+          name: p.name || p.id,
+          originalAllowed: p.allowed_integration_ids ?? null,
+          checked: p.allowed_integration_ids === null || (p.allowed_integration_ids ?? []).includes(d.id),
+        })));
+      }
+    }
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!editDevice) return;
     if (!editName.trim()) { toast.error('Preencha o nome'); return; }
+    // Save agent assignment changes
+    const deviceId = editDevice.id;
+    const allDeviceIds = allIntegrations.map(d => d.id);
+    const agentUpdates: Promise<any>[] = [];
+    for (const agent of editAgentsList) {
+      const wasChecked = agent.originalAllowed === null || agent.originalAllowed.includes(deviceId);
+      const isNowChecked = agent.checked;
+      if (wasChecked === isNowChecked) continue;
+      let newAllowed: string[] | null;
+      if (isNowChecked) {
+        if (agent.originalAllowed === null) continue;
+        newAllowed = [...agent.originalAllowed, deviceId];
+      } else {
+        if (agent.originalAllowed === null) {
+          newAllowed = allDeviceIds.filter(id => id !== deviceId);
+        } else {
+          newAllowed = agent.originalAllowed.filter(id => id !== deviceId);
+        }
+      }
+      agentUpdates.push(
+        supabase.from('profiles').update({ allowed_integration_ids: newAllowed }).eq('id', agent.id)
+      );
+    }
+    if (agentUpdates.length > 0) await Promise.all(agentUpdates);
+
     updateDevice.mutate({ id: editDevice.id, updates: { device_name: editName, phone_number: editPhone, config: editConfig } }, {
       onSuccess: () => setEditDevice(null),
     });
@@ -364,30 +452,69 @@ export default function FolderNumbers() {
       {/* ── Add Number Modal ───────────────────────────────── */}
       <Dialog open={addOpen} onOpenChange={v => { if (!v) { setAddOpen(false); resetAddForm(); } }}>
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Adicionar Número</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-xs">Provedor</Label>
-              <Select value={devProvider} onValueChange={v => { setDevProvider(v); setDevConfig({}); }}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{PROVIDERS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Nome do aparelho</Label>
-              <Input className="mt-1" placeholder="Ex: Vendas - Principal" value={devName} onChange={e => setDevName(e.target.value)} />
-            </div>
-            {devProvider !== 'evolution' && (
+          <DialogHeader>
+            <DialogTitle>Adicionar Número</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              {quickAddMode
+                ? 'Digite o nome do número e escaneie o QR Code para conectar.'
+                : 'Preencha os dados do aparelho para conectar.'}
+            </p>
+          </DialogHeader>
+
+          {quickAddMode ? (
+            /* ── Quick add: só precisa do nome ─────────── */
+            <div className="space-y-4 py-2">
               <div>
-                <Label className="text-xs">Número de telefone</Label>
-                <Input className="mt-1" placeholder="+5511999999999" value={devPhone} onChange={e => setDevPhone(e.target.value)} />
+                <Label className="text-xs">Nome do aparelho</Label>
+                <Input
+                  className="mt-1"
+                  placeholder="Ex: Vendas - Principal"
+                  value={devName}
+                  onChange={e => setDevName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !addDevice.isPending) handleQuickAdd(); }}
+                  autoFocus
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na equipe</p>
               </div>
-            )}
-            <ProviderFields provider={devProvider} config={devConfig} onChange={setDevConfig} />
-          </div>
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                <p className="text-xs text-primary font-medium flex items-center gap-1.5">
+                  <QrCode className="h-3 w-3" /> Número detectado pelo QR Code
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Após clicar em Adicionar, escaneie o QR Code com o WhatsApp para conectar.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* ── Full form: sem Evolution existente ────── */
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-xs">Provedor</Label>
+                <Select value={devProvider} onValueChange={v => { setDevProvider(v); setDevConfig({}); }}>
+                  <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>{PROVIDERS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Nome do aparelho</Label>
+                <Input className="mt-1" placeholder="Ex: Vendas - Principal" value={devName} onChange={e => setDevName(e.target.value)} />
+              </div>
+              {devProvider !== 'evolution' && (
+                <div>
+                  <Label className="text-xs">Número de telefone</Label>
+                  <Input className="mt-1" placeholder="+5511999999999" value={devPhone} onChange={e => setDevPhone(e.target.value)} />
+                </div>
+              )}
+              <ProviderFields provider={devProvider} config={devConfig} onChange={setDevConfig} />
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => { setAddOpen(false); resetAddForm(); }}>Cancelar</Button>
-            <Button onClick={handleAdd} disabled={addDevice.isPending}>
+            <Button
+              onClick={quickAddMode ? handleQuickAdd : handleAdd}
+              disabled={addDevice.isPending}
+            >
               {addDevice.isPending ? 'Adicionando...' : 'Adicionar'}
             </Button>
           </DialogFooter>
@@ -410,6 +537,44 @@ export default function FolderNumbers() {
               </div>
             )}
             {editDevice && <ProviderFields provider={editDevice.provider} config={editConfig} onChange={setEditConfig} />}
+
+            {/* ── Agent assignment ─────────────────────── */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                <Label className="text-xs font-semibold">Agentes que atendem este número</Label>
+              </div>
+              {editAgentsList.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic pl-5">Carregando agentes...</p>
+              ) : (
+                <div className="rounded-lg border border-border divide-y divide-border max-h-44 overflow-y-auto">
+                  {editAgentsList.map(agent => (
+                    <label
+                      key={agent.id}
+                      className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-secondary/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded accent-primary"
+                        checked={agent.checked}
+                        onChange={() =>
+                          setEditAgentsList(prev =>
+                            prev.map(a => a.id === agent.id ? { ...a, checked: !a.checked } : a)
+                          )
+                        }
+                      />
+                      <span className="text-sm text-foreground flex-1">{agent.name}</span>
+                      {agent.originalAllowed === null && (
+                        <span className="text-[11px] text-muted-foreground">todos os números</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground pl-5">
+                Desmarcar restringe o agente a não receber conversas deste número.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDevice(null)}>Cancelar</Button>
