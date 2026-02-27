@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers, FolderOpen } from 'lucide-react';
+import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers, FolderOpen, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useProjects } from '@/hooks/useProjects';
@@ -195,6 +196,7 @@ function DeviceCard({ device, isAdmin, departments, onDisconnect, onDelete, onEd
 export default function IntegracoesPage() {
   const navigate = useNavigate();
   const permissions = usePermissions();
+  const { companyId } = useAuth();
   const { data: integrations, isLoading } = useIntegrations();
   const { data: departments = [] } = useDepartments();
   const { data: allProjects = [] } = useProjects();
@@ -231,6 +233,9 @@ export default function IntegracoesPage() {
   const [editPhone, setEditPhone] = useState('');
   const [editConfig, setEditConfig] = useState<Record<string, string>>({});
   const [editDeptId, setEditDeptId] = useState<string>('');
+  // Agent assignment for edit modal
+  type AgentEntry = { id: string; name: string; originalAllowed: string[] | null; checked: boolean };
+  const [editAgentsList, setEditAgentsList] = useState<AgentEntry[]>([]);
   // map deviceId → selectedProjectId for "move to folder" action
   const [moveProjectMap, setMoveProjectMap] = useState<Record<string, string>>({});
 
@@ -331,12 +336,30 @@ export default function IntegracoesPage() {
     });
   };
 
-  const openEdit = (device: Integration) => {
+  const openEdit = async (device: Integration) => {
     setEditDevice(device);
     setEditName(device.device_name || '');
     setEditPhone(device.phone_number || '');
     setEditDeptId(device.department_id ?? '__none__');
     setEditConfig(device.config as Record<string, string> ?? {});
+    setEditAgentsList([]); // reset while loading
+    if (companyId) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, name, allowed_integration_ids')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('name');
+      if (profiles) {
+        const deviceId = device.id;
+        setEditAgentsList(profiles.map((p: any) => ({
+          id: p.id,
+          name: p.name || p.id,
+          originalAllowed: p.allowed_integration_ids ?? null,
+          checked: p.allowed_integration_ids === null || (p.allowed_integration_ids ?? []).includes(deviceId),
+        })));
+      }
+    }
   };
 
   const handleAdd = () => {
@@ -389,13 +412,41 @@ export default function IntegracoesPage() {
     });
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!editDevice) return;
     const needsPhone = editDevice.provider !== 'evolution';
     if (!editName.trim() || (needsPhone && !editPhone.trim())) {
       toast.error(needsPhone ? 'Preencha nome e número' : 'Preencha o nome');
       return;
     }
+    // Save agent assignment changes
+    const deviceId = editDevice.id;
+    const allIntegrationIds = whatsappDevices.map(d => d.id);
+    const agentUpdates: Promise<any>[] = [];
+    for (const agent of editAgentsList) {
+      const wasChecked = agent.originalAllowed === null || agent.originalAllowed.includes(deviceId);
+      const isNowChecked = agent.checked;
+      if (wasChecked === isNowChecked) continue;
+      let newAllowed: string[] | null;
+      if (isNowChecked) {
+        // unchecked → checked: add this device to list (if had a list)
+        if (agent.originalAllowed === null) continue; // already gets all
+        newAllowed = [...agent.originalAllowed, deviceId];
+      } else {
+        // checked → unchecked: remove this device
+        if (agent.originalAllowed === null) {
+          // was null (all) → now exclude this device
+          newAllowed = allIntegrationIds.filter(id => id !== deviceId);
+        } else {
+          newAllowed = agent.originalAllowed.filter(id => id !== deviceId);
+        }
+      }
+      agentUpdates.push(
+        supabase.from('profiles').update({ allowed_integration_ids: newAllowed }).eq('id', agent.id)
+      );
+    }
+    if (agentUpdates.length > 0) await Promise.all(agentUpdates);
+
     updateDevice.mutate({
       id: editDevice.id,
       updates: {
@@ -811,6 +862,44 @@ export default function IntegracoesPage() {
                 <ProviderFields provider={editDevice.provider} config={editConfig} onChange={setEditConfig} />
               </>
             )}
+
+            {/* Agent assignment section */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Users size={14} className="text-muted-foreground" />
+                <Label className="text-xs font-semibold">Agentes que atendem este número</Label>
+              </div>
+              {editAgentsList.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic pl-5">Carregando agentes...</p>
+              ) : (
+                <div className="rounded-lg border border-border divide-y divide-border max-h-48 overflow-y-auto">
+                  {editAgentsList.map(agent => (
+                    <label
+                      key={agent.id}
+                      className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-secondary/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded accent-primary"
+                        checked={agent.checked}
+                        onChange={() =>
+                          setEditAgentsList(prev =>
+                            prev.map(a => a.id === agent.id ? { ...a, checked: !a.checked } : a)
+                          )
+                        }
+                      />
+                      <span className="text-sm text-foreground flex-1">{agent.name}</span>
+                      {agent.originalAllowed === null && (
+                        <span className="text-[11px] text-muted-foreground">todos os números</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground pl-5">
+                Agentes marcados recebem conversas deste número. Desmarcar restringe o agente a outros números apenas.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>

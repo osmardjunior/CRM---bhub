@@ -185,12 +185,13 @@ async function pickRoundRobinAgent(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   integrationId: string | null,
+  prioritizeOnline = false,
 ): Promise<string | null> {
   try {
     // Get all active agents/supervisors for the company
     const { data: agents } = await supabase
       .from("profiles")
-      .select("id, round_robin_weight, allowed_integration_ids")
+      .select("id, round_robin_weight, allowed_integration_ids, last_seen_at")
       .eq("company_id", companyId)
       .eq("is_active", true);
 
@@ -217,6 +218,24 @@ async function pickRoundRobinAgent(
     });
 
     if (eligible.length === 0) return null;
+
+    // Online-first: if prioritizeOnline is true, prefer agents active in the last 5 minutes.
+    // Falls back to all eligible agents if no online agents are found.
+    if (prioritizeOnline) {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const onlineEligible = eligible.filter(
+        (a: any) => a.last_seen_at && a.last_seen_at > fiveMinAgo,
+      );
+      if (onlineEligible.length > 0) {
+        console.log(
+          `[round-robin] online-first: ${onlineEligible.length}/${eligible.length} agents online`,
+        );
+        eligible.length = 0;
+        eligible.push(...onlineEligible);
+      } else {
+        console.log("[round-robin] online-first: no agents online, fallback to all eligible");
+      }
+    }
 
     // Count conversations assigned in the last 30 days (rolling window).
     // Using a time window prevents the "agent closed all chats → always gets next" bug.
@@ -273,6 +292,7 @@ async function pickSupervisorOrAdmin(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   integrationId: string | null,
+  prioritizeOnline = false,
 ): Promise<string | null> {
   try {
     // Step 1: resolve department from integration → project → department
@@ -293,6 +313,30 @@ async function pickSupervisorOrAdmin(
       }
     }
 
+    // Helper: among a list of profile IDs, pick one that is online (if prioritizeOnline),
+    // otherwise pick any. Returns null if the list is empty.
+    const pickFromIds = async (ids: string[]): Promise<string | null> => {
+      if (ids.length === 0) return null;
+      if (prioritizeOnline) {
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: onlineRows } = await supabase
+          .from("profiles")
+          .select("id, last_seen_at")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .in("id", ids)
+          .gt("last_seen_at", fiveMinAgo)
+          .limit(1);
+        if (onlineRows?.[0]) {
+          console.log(`[supervisor-route] online-first: → ${onlineRows[0].id}`);
+          return onlineRows[0].id;
+        }
+        // No online supervisor — fallback to any
+      }
+      // Return first in list (already ordered by DB)
+      return ids[0];
+    };
+
     if (departmentId) {
       // Supervisors in this specific department (profile_departments)
       const { data: deptMembers } = await supabase
@@ -308,11 +352,12 @@ async function pickSupervisorOrAdmin(
           .select("id")
           .eq("company_id", companyId)
           .eq("is_active", true)
-          .in("id", memberIds)
-          .limit(1);
-        if (active?.[0]) {
-          console.log(`[supervisor-route] dept=${departmentId} → ${active[0].id}`);
-          return active[0].id;
+          .in("id", memberIds);
+        const activeIds = (active ?? []).map((p: any) => p.id);
+        const picked = await pickFromIds(activeIds);
+        if (picked) {
+          console.log(`[supervisor-route] dept=${departmentId} → ${picked}`);
+          return picked;
         }
       }
     }
@@ -332,11 +377,12 @@ async function pickSupervisorOrAdmin(
         .from("user_roles")
         .select("user_id")
         .in("user_id", profileIds)
-        .eq("role", roleToFind)
-        .limit(1);
-      if (roleRows?.[0]) {
-        console.log(`[supervisor-route] fallback role=${roleToFind} → ${roleRows[0].user_id}`);
-        return roleRows[0].user_id;
+        .eq("role", roleToFind);
+      const roleIds = (roleRows ?? []).map((r: any) => r.user_id);
+      const picked = await pickFromIds(roleIds);
+      if (picked) {
+        console.log(`[supervisor-route] fallback role=${roleToFind} → ${picked}`);
+        return picked;
       }
     }
 
@@ -668,7 +714,7 @@ serve(async (req) => {
     // ── Validate company exists ────────────────────────
     const { data: company, error: companyErr } = await supabase
       .from("companies")
-      .select("id")
+      .select("id, priority_online_agents")
       .eq("id", company_id)
       .maybeSingle();
 
@@ -847,7 +893,8 @@ serve(async (req) => {
           .maybeSingle();
         if (!currentConv.data?.assigned_user_id) {
           // Unassigned closed conversation → route to supervisor/admin (not random agent)
-          const supervisorId = await pickSupervisorOrAdmin(supabase, company_id, integrationId);
+          const priorityOnline = !!(company as any)?.priority_online_agents;
+          const supervisorId = await pickSupervisorOrAdmin(supabase, company_id, integrationId, priorityOnline);
           if (supervisorId) updates.assigned_user_id = supervisorId;
         }
         // else: has assigned_user_id → keep it (returning lead goes back to same agent)
@@ -883,7 +930,8 @@ serve(async (req) => {
             console.log(`[routing] chatbot trigger matched → no assignment`);
           } else {
             // 3. No keyword match and no chatbot trigger → route to supervisor/admin
-            assignedAgentId = await pickSupervisorOrAdmin(supabase, company_id, integrationId);
+            const priorityOnline = !!(company as any)?.priority_online_agents;
+            assignedAgentId = await pickSupervisorOrAdmin(supabase, company_id, integrationId, priorityOnline);
             console.log(`[routing] no trigger → supervisor/admin ${assignedAgentId}`);
           }
         }

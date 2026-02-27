@@ -326,43 +326,6 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
               </div>
             )}
 
-            {/* Números de WhatsApp permitidos */}
-            {integrations.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Celulares WhatsApp que este usuário pode atender</Label>
-                <p className="text-[11px] text-muted-foreground">Sem seleção = recebe mensagens de todos os números.</p>
-                <div className="space-y-1.5">
-                  {integrations.map((intg: any) => {
-                    const checked = !form.allowed_integration_ids || form.allowed_integration_ids.includes(intg.id);
-                    const isRestricted = form.allowed_integration_ids !== null && form.allowed_integration_ids.length > 0;
-                    return (
-                      <div key={intg.id} className="flex items-center gap-2.5">
-                        <Checkbox
-                          id={`intg-${intg.id}`}
-                          checked={!isRestricted || form.allowed_integration_ids!.includes(intg.id)}
-                          onCheckedChange={(c) => {
-                            setForm(f => {
-                              const current = f.allowed_integration_ids ?? integrations.map((i: any) => i.id);
-                              if (c) {
-                                return { ...f, allowed_integration_ids: [...current, intg.id] };
-                              } else {
-                                const next = current.filter((id: string) => id !== intg.id);
-                                return { ...f, allowed_integration_ids: next.length > 0 ? next : null };
-                              }
-                            });
-                          }}
-                        />
-                        <label htmlFor={`intg-${intg.id}`} className="text-sm cursor-pointer select-none flex items-center gap-1.5">
-                          <span className="font-medium">{intg.device_name || intg.phone_number || 'Celular'}</span>
-                          {intg.phone_number && <span className="text-muted-foreground text-xs">{intg.phone_number}</span>}
-                        </label>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-4 py-3">
               <div>
                 <p className="text-sm font-medium">Usuário ativo</p>
@@ -639,9 +602,11 @@ export default function ConfiguracoesPage() {
 
   const [companyName, setCompanyName] = useState('');
   const [roundRobinMode, setRoundRobinMode] = useState<'weight' | 'percentage'>('weight');
+  const [priorityOnline, setPriorityOnline] = useState(false);
   useEffect(() => {
     if (company?.name && !companyName) setCompanyName(company.name);
     if ((company as any)?.round_robin_mode) setRoundRobinMode((company as any).round_robin_mode);
+    if (typeof (company as any)?.priority_online_agents === 'boolean') setPriorityOnline((company as any).priority_online_agents);
   }, [company]);
 
   const validateInvite = () => {
@@ -678,7 +643,7 @@ export default function ConfiguracoesPage() {
 
   const handleSaveCompany = () => {
     if (!companyName.trim()) return;
-    updateCompany.mutate({ name: companyName.trim(), round_robin_mode: roundRobinMode });
+    updateCompany.mutate({ name: companyName.trim(), round_robin_mode: roundRobinMode, priority_online_agents: priorityOnline });
   };
 
   const handleCreateDept = () => {
@@ -803,6 +768,16 @@ export default function ConfiguracoesPage() {
                       <p className="text-[11px] text-muted-foreground mt-0.5">Defina exatamente qual % de leads cada agente recebe (soma = 100%).</p>
                     </button>
                   </div>
+                </div>
+                {/* Prioridade online */}
+                <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">Priorizar agentes online</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Novos leads são distribuídos primeiro para agentes ativos nos últimos 5 minutos. Se nenhum estiver online, distribui normalmente.
+                    </p>
+                  </div>
+                  <Switch checked={priorityOnline} onCheckedChange={setPriorityOnline} />
                 </div>
                 </>
               )}
