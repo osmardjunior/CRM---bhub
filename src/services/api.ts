@@ -343,6 +343,8 @@ export interface ContactFilters {
   limit?: number;
   /** When set, only contacts with a conversation assigned to this user_id are returned */
   assigned_user_id?: string;
+  /** When set, only contacts with a conversation in this project are returned */
+  project_id?: string;
 }
 
 export async function listContacts(
@@ -379,13 +381,17 @@ export async function listContacts(
     query = query.in('id', tagContactIds);
   }
 
-  // Agents only see contacts with conversations assigned to them
-  if (filters?.assigned_user_id) {
-    const { data: convContacts } = await supabase
-      .from('conversations')
-      .select('contact_id')
-      .eq('assigned_user_id', filters.assigned_user_id);
-    const contactIds = Array.from(new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)));
+  // Agents only see contacts with conversations in their project scope (and optionally assigned to them)
+  if (filters?.assigned_user_id || filters?.project_id) {
+    let convQuery = supabase.from('conversations').select('contact_id');
+    if (filters.assigned_user_id) {
+      convQuery = convQuery.eq('assigned_user_id', filters.assigned_user_id);
+    }
+    if (filters.project_id) {
+      convQuery = convQuery.eq('project_id', filters.project_id);
+    }
+    const { data: convContacts } = await convQuery;
+    const contactIds = Array.from(new Set((convContacts ?? []).map((c: any) => c.contact_id).filter(Boolean)));
     if (contactIds.length === 0) {
       return { data: [], total: 0, page, totalPages: 0 };
     }
@@ -434,13 +440,17 @@ export async function exportAllContacts(
     query = query.in('id', tagContactIds);
   }
 
-  if (filters?.assigned_user_id) {
-    const { data: convContacts } = await supabase
-      .from('conversations')
-      .select('contact_id')
-      .eq('assigned_user_id', filters.assigned_user_id);
+  if (filters?.assigned_user_id || filters?.project_id) {
+    let convQuery = supabase.from('conversations').select('contact_id');
+    if (filters.assigned_user_id) {
+      convQuery = convQuery.eq('assigned_user_id', filters.assigned_user_id);
+    }
+    if (filters.project_id) {
+      convQuery = convQuery.eq('project_id', filters.project_id);
+    }
+    const { data: convContacts } = await convQuery;
     const contactIds = Array.from(
-      new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)),
+      new Set((convContacts ?? []).map((c: any) => c.contact_id).filter(Boolean)),
     );
     if (contactIds.length === 0) return [];
     query = query.in('id', contactIds);

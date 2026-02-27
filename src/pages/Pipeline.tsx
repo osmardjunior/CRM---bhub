@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useFunnels, Funnel } from '@/contexts/FunnelContext';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useAuth } from '@/contexts/AuthContext';
 
 // ── Wave SVG ──────────────────────────────────────────────
 function FunnelWave({ stages }: { stages: { label: string; count: number }[] }) {
@@ -213,11 +214,13 @@ function FunnelCard({
   onDelete,
   onRename,
   onOpen,
+  isAdmin,
 }: {
   funnel: Funnel;
   onDelete: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onOpen: (id: string) => void;
+  isAdmin: boolean;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [visibilityRestrict, setVisibilityRestrict] = useState(false);
@@ -240,13 +243,15 @@ function FunnelCard({
             <Filter size={11} />
             Métricas
           </Button>
-          <button
-            onClick={() => setMoreOpen((o) => !o)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
-          >
-            <Plus size={12} />
-            Mais Opções
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setMoreOpen((o) => !o)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
+            >
+              <Plus size={12} />
+              Mais Opções
+            </button>
+          )}
         </div>
       </div>
 
@@ -396,6 +401,8 @@ export default function PipelinePage() {
   const navigate = useNavigate();
   const { funnels, addFunnel, deleteFunnel, renameFunnel } = useFunnels();
   const [showCreate, setShowCreate] = useState(false);
+  const { role } = useAuth();
+  const isAdmin = role === 'admin';
 
   return (
     <div className="flex flex-col gap-0">
@@ -406,18 +413,20 @@ export default function PipelinePage() {
             Nesta área estão listados todos os funis criados na sua conta.
           </p>
         </div>
-        <Button
-          size="sm"
-          className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground"
-          onClick={() => setShowCreate(true)}
-        >
-          <Plus size={14} />
-          Criar novo funil
-        </Button>
+        {isAdmin && (
+          <Button
+            size="sm"
+            className="gap-1.5 bg-success hover:bg-success/90 text-success-foreground"
+            onClick={() => setShowCreate(true)}
+          >
+            <Plus size={14} />
+            Criar novo funil
+          </Button>
+        )}
       </div>
 
       {funnels.length === 0 ? (
-        <FunnelEmptyState onCreate={() => setShowCreate(true)} />
+        isAdmin ? <FunnelEmptyState onCreate={() => setShowCreate(true)} /> : null
       ) : (
         <div>
           {funnels.map((f) => (
@@ -427,6 +436,7 @@ export default function PipelinePage() {
               onDelete={deleteFunnel}
               onRename={renameFunnel}
               onOpen={(id) => navigate(`/pipeline/${id}`)}
+              isAdmin={isAdmin}
             />
           ))}
         </div>

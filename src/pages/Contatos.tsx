@@ -28,6 +28,7 @@ import ImportContactsModal from '@/components/contatos/ImportContactsModal';
 import { useContacts } from '@/hooks/useContacts';
 import { useTags } from '@/hooks/useTags';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMyProjects } from '@/hooks/useProjects';
 import { generateCSV, downloadCSV } from '@/lib/csv';
 import { exportAllContacts, type ContactFilters } from '@/services/api';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -47,6 +48,10 @@ export default function ContatosPage() {
   const { user, role, companyId } = useAuth();
   const isMobile = useIsMobile();
   const { data: allTags = [] } = useTags();
+  const { data: myProjects = [] } = useMyProjects();
+
+  // For agents: scope contacts to their selected project (first project if only one)
+  const agentProjectId = role === 'agent' ? (myProjects[0]?.id ?? undefined) : undefined;
 
   const filters = useMemo(() => ({
     search: search || undefined,
@@ -54,9 +59,10 @@ export default function ContatosPage() {
     source: sourceFilter,
     page,
     limit: 25,
-    // Agents only see their own leads
+    // Agents only see contacts with conversations in their project scope
     ...(role === 'agent' && user?.id ? { assigned_user_id: user.id } : {}),
-  }), [search, tagFilter, sourceFilter, page, role, user?.id]);
+    ...(agentProjectId ? { project_id: agentProjectId } : {}),
+  }), [search, tagFilter, sourceFilter, page, role, user?.id, agentProjectId]);
 
   const { data: result, isLoading } = useContacts(filters);
 
@@ -73,6 +79,7 @@ export default function ContatosPage() {
         tag_id: tagFilter !== 'all' ? tagFilter : undefined,
         source: sourceFilter !== 'all' ? sourceFilter : undefined,
         ...(role === 'agent' && user?.id ? { assigned_user_id: user.id } : {}),
+        ...(agentProjectId ? { project_id: agentProjectId } : {}),
       };
       const allContacts = await exportAllContacts(exportFilters);
       if (!allContacts.length) return;
@@ -91,7 +98,7 @@ export default function ContatosPage() {
     } finally {
       setExporting(false);
     }
-  }, [search, tagFilter, sourceFilter, role, user?.id]);
+  }, [search, tagFilter, sourceFilter, role, user?.id, agentProjectId]);
 
   return (
     <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
