@@ -260,6 +260,197 @@ async function pickRoundRobinAgent(
   }
 }
 
+/**
+ * Pick the supervisor for a given integration's department, or fall back to
+ * any company supervisor, then to admin.
+ *
+ * Chain:
+ *   1. profile_departments supervisor in integration's department
+ *   2. Any active user with role=supervisor in the company
+ *   3. Any active user with role=admin in the company
+ */
+async function pickSupervisorOrAdmin(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  integrationId: string | null,
+): Promise<string | null> {
+  try {
+    // Step 1: resolve department from integration → project → department
+    let departmentId: string | null = null;
+    if (integrationId) {
+      const { data: integ } = await supabase
+        .from("integrations")
+        .select("project_id")
+        .eq("id", integrationId)
+        .maybeSingle();
+      if (integ?.project_id) {
+        const { data: project } = await supabase
+          .from("projects")
+          .select("department_id")
+          .eq("id", integ.project_id)
+          .maybeSingle();
+        departmentId = project?.department_id ?? null;
+      }
+    }
+
+    if (departmentId) {
+      // Supervisors in this specific department (profile_departments)
+      const { data: deptMembers } = await supabase
+        .from("profile_departments")
+        .select("profile_id")
+        .eq("department_id", departmentId)
+        .eq("role_in_department", "supervisor");
+
+      const memberIds = (deptMembers ?? []).map((r: any) => r.profile_id);
+      if (memberIds.length > 0) {
+        const { data: active } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .in("id", memberIds)
+          .limit(1);
+        if (active?.[0]) {
+          console.log(`[supervisor-route] dept=${departmentId} → ${active[0].id}`);
+          return active[0].id;
+        }
+      }
+    }
+
+    // Step 2: any supervisor in the company (via user_roles)
+    const { data: allProfiles } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+
+    const profileIds = (allProfiles ?? []).map((p: any) => p.id);
+    if (profileIds.length === 0) return null;
+
+    for (const roleToFind of ["supervisor", "admin"] as const) {
+      const { data: roleRows } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .in("user_id", profileIds)
+        .eq("role", roleToFind)
+        .limit(1);
+      if (roleRows?.[0]) {
+        console.log(`[supervisor-route] fallback role=${roleToFind} → ${roleRows[0].user_id}`);
+        return roleRows[0].user_id;
+      }
+    }
+
+    return null;
+  } catch (err: any) {
+    console.warn("[supervisor-route] error:", err.message);
+    return null;
+  }
+}
+
+/**
+ * Returns the assigned_user_id from the most recent conversation this contact
+ * ever had (regardless of integration or status), if the agent is still active.
+ * Used to re-route returning leads back to their previous agent.
+ */
+async function getLastAssignedAgent(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  contactId: string,
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from("conversations")
+      .select("assigned_user_id")
+      .eq("company_id", companyId)
+      .eq("contact_id", contactId)
+      .not("assigned_user_id", "is", null)
+      .order("last_message_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!data?.assigned_user_id) return null;
+
+    // Verify agent is still active
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, is_active")
+      .eq("id", data.assigned_user_id)
+      .eq("company_id", companyId)
+      .maybeSingle();
+
+    if (!profile?.is_active) return null;
+    return profile.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check whether the active chatbot flow would trigger for a brand-new
+ * (first) message in a new conversation.
+ *
+ * For new conversations:
+ *   - any_message  → always triggers
+ *   - first_message → always triggers (this IS the first message)
+ *   - keyword       → triggers only if the message body contains the keyword
+ *   - none          → never triggers
+ */
+async function willChatbotTriggerForNew(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  contactId: string,
+  integrationId: string | null,
+  messageBody: string,
+): Promise<boolean> {
+  try {
+    // Respect per-contact chatbot disable flag
+    const { data: contactData } = await supabase
+      .from("contacts")
+      .select("chatbot_enabled")
+      .eq("id", contactId)
+      .single();
+    if (contactData?.chatbot_enabled === false) return false;
+
+    const { data: activeFlow } = await supabase
+      .from("chatbot_flows")
+      .select("id, business_hours")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (!activeFlow) return false;
+
+    const bh = (activeFlow.business_hours || {}) as Record<string, any>;
+    const triggerType: string = bh._trigger?.type || "none";
+    const triggerKeyword: string = bh._trigger?.keyword || "";
+    const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
+
+    const integrationAllowed =
+      allowedIntegrationIds.length === 0 ||
+      (integrationId !== null && allowedIntegrationIds.includes(integrationId));
+
+    if (!integrationAllowed) return false;
+
+    switch (triggerType) {
+      case "any_message":
+      case "first_message":
+        return true;
+      case "keyword": {
+        const keywords = triggerKeyword
+          .split(",")
+          .map((k: string) => k.trim().toLowerCase())
+          .filter(Boolean);
+        const msgLower = messageBody.toLowerCase();
+        return keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
+      }
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -647,16 +838,19 @@ serve(async (req) => {
       if (isClosed && !from_me) {
         updates.status = "new";
         updates.close_reason = null;
-        // Re-assign if previously unassigned (pick via round-robin)
+        // Re-assign only if previously unassigned.
+        // If the conversation already has an assigned agent, keep it (returning lead → same agent).
         const currentConv = await supabase
           .from("conversations")
           .select("assigned_user_id")
           .eq("id", conversation.id)
           .maybeSingle();
         if (!currentConv.data?.assigned_user_id) {
-          const agentId = await pickRoundRobinAgent(supabase, company_id, integrationId);
-          if (agentId) updates.assigned_user_id = agentId;
+          // Unassigned closed conversation → route to supervisor/admin (not random agent)
+          const supervisorId = await pickSupervisorOrAdmin(supabase, company_id, integrationId);
+          if (supervisorId) updates.assigned_user_id = supervisorId;
         }
+        // else: has assigned_user_id → keep it (returning lead goes back to same agent)
       }
       if (Object.keys(updates).length > 0) {
         await supabase
@@ -666,11 +860,34 @@ serve(async (req) => {
       }
       // last_message_at is kept up-to-date by the DB trigger on messages INSERT
     } else {
-      // No conversation for this contact+number — create a new one
-      // Pick agent via weighted round-robin before creating conversation
-      const assignedAgentId = !from_me
-        ? await pickRoundRobinAgent(supabase, company_id, integrationId)
-        : null;
+      // ── New conversation routing logic ────────────────────────────────────
+      // 1. Returning lead: contact has a previous assigned conversation → same agent
+      // 2. Chatbot will handle this message → no assignment (chatbot delegates later)
+      // 3. No chatbot trigger → supervisor of the integration's department (or admin)
+      let assignedAgentId: string | null = null;
+
+      if (!from_me) {
+        // 1. Check if this contact has been previously assigned to an agent
+        const previousAgent = await getLastAssignedAgent(supabase, company_id, contact.id);
+        if (previousAgent) {
+          assignedAgentId = previousAgent;
+          console.log(`[routing] returning lead → same agent ${previousAgent}`);
+        } else {
+          // 2. Check if chatbot would trigger for this new message
+          const chatbotWillHandle = await willChatbotTriggerForNew(
+            supabase, company_id, contact.id, integrationId, messageBody,
+          );
+          if (chatbotWillHandle) {
+            // Chatbot is in charge — no agent assignment yet (chatbot flow will delegate)
+            assignedAgentId = null;
+            console.log(`[routing] chatbot trigger matched → no assignment`);
+          } else {
+            // 3. No keyword match and no chatbot trigger → route to supervisor/admin
+            assignedAgentId = await pickSupervisorOrAdmin(supabase, company_id, integrationId);
+            console.log(`[routing] no trigger → supervisor/admin ${assignedAgentId}`);
+          }
+        }
+      }
 
       const { data: newConv, error: convErr } = await supabase
         .from("conversations")
@@ -690,7 +907,7 @@ serve(async (req) => {
       conversation = newConv;
 
       if (assignedAgentId) {
-        console.log(`[round-robin] conversa ${newConv.id} atribuída ao agente ${assignedAgentId}`);
+        console.log(`[routing] conversa ${newConv.id} atribuída a ${assignedAgentId}`);
       }
     }
 
