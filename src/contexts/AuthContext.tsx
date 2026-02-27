@@ -27,13 +27,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = async (userId: string) => {
     // Run both queries in parallel — cuts initial load time in half
-    const [{ data: profileData }, { data: roleData }] = await Promise.all([
+    const [{ data: profileData }, { data: roleData }, { data: { user: authUser } }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle(),
+      supabase.auth.getUser(),
     ]);
 
     if (profileData) setProfile(profileData);
-    if (roleData) setRole(roleData.role);
+
+    // Use user_roles first; fall back to auth user_metadata.role for users
+    // not yet inserted in user_roles (e.g. invited agents without a role row)
+    const resolvedRole = roleData?.role ?? (authUser?.user_metadata?.role as string | undefined) ?? null;
+    if (resolvedRole) setRole(resolvedRole);
 
     // Only mark loading=false AFTER profile is ready — prevents race conditions
     // where spy_mode and other profile flags are read before they're populated.
