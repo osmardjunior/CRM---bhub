@@ -158,7 +158,7 @@ function DeviceRow({ device, onEdit, onConnect, onSyncPhone, onDisconnect, onDel
 export default function FolderNumbers() {
   const { departmentId, projectId } = useParams<{ departmentId: string; projectId: string }>();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, companyId } = useAuth();
   const canManage = role === 'admin' || role === 'supervisor';
 
   const { data: projects = [] } = useProjects(departmentId);
