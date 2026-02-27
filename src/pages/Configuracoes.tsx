@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Building2, Users, Save, Plus, ImageIcon,
   Shield, Eye, Headphones, Lock, Trash2, Tag as TagIcon, Layers,
-  Pencil, Clock, EyeOff, CheckSquare, Square, RotateCcw, XCircle,
+  Pencil, Clock, EyeOff, CheckSquare, Square, RotateCcw, XCircle, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -600,6 +600,19 @@ export default function ConfiguracoesPage() {
   const [newTagDeptId, setNewTagDeptId] = useState<string>('');
   const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string } | null>(null);
 
+  // Departamentos: expandir para ver usuários
+  const [expandedDeptId, setExpandedDeptId] = useState<string | null>(null);
+  const [deptMembersMap, setDeptMembersMap] = useState<Record<string, string[]>>({});
+
+  const toggleDeptExpand = async (deptId: string) => {
+    if (expandedDeptId === deptId) { setExpandedDeptId(null); return; }
+    setExpandedDeptId(deptId);
+    if (!deptMembersMap[deptId]) {
+      const { data } = await supabase.from('profile_departments' as any).select('profile_id').eq('department_id', deptId);
+      setDeptMembersMap(prev => ({ ...prev, [deptId]: (data ?? []).map((r: any) => r.profile_id) }));
+    }
+  };
+
   const [companyName, setCompanyName] = useState('');
   const [roundRobinMode, setRoundRobinMode] = useState<'weight' | 'percentage'>('weight');
   const [priorityOnline, setPriorityOnline] = useState(false);
@@ -747,76 +760,10 @@ export default function ConfiguracoesPage() {
                     <Input value={company?.plan ?? 'free'} readOnly className="bg-secondary border-0 opacity-60 capitalize" />
                   </div>
                 </div>
-                {/* Rodízio mode */}
-                <div className="mt-4 space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Modo de distribuição (rodízio)</Label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRoundRobinMode('weight')}
-                      className={`flex-1 rounded-lg border px-3 py-2.5 text-left transition-colors ${roundRobinMode === 'weight' ? 'border-primary bg-primary/5' : 'border-border bg-secondary hover:border-primary/50'}`}
-                    >
-                      <p className={`text-xs font-semibold ${roundRobinMode === 'weight' ? 'text-primary' : 'text-foreground'}`}>Por Peso</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Cada agente tem peso 1–10. Peso 3 recebe 3× mais que peso 1.</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRoundRobinMode('percentage')}
-                      className={`flex-1 rounded-lg border px-3 py-2.5 text-left transition-colors ${roundRobinMode === 'percentage' ? 'border-primary bg-primary/5' : 'border-border bg-secondary hover:border-primary/50'}`}
-                    >
-                      <p className={`text-xs font-semibold ${roundRobinMode === 'percentage' ? 'text-primary' : 'text-foreground'}`}>Por Porcentagem</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Defina exatamente qual % de leads cada agente recebe (soma = 100%).</p>
-                    </button>
-                  </div>
-                </div>
-                {/* Prioridade online */}
-                <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium">Priorizar agentes online</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Novos leads são distribuídos primeiro para agentes ativos nos últimos 5 minutos. Se nenhum estiver online, distribui normalmente.
-                    </p>
-                  </div>
-                  <Switch checked={priorityOnline} onCheckedChange={setPriorityOnline} />
-                </div>
                 </>
               )}
               <Button className="mt-5 gap-1.5" size="sm" onClick={handleSaveCompany} disabled={updateCompany.isPending || !permissions.canManageUsers}>
                 <Save size={14} /> {updateCompany.isPending ? 'Salvando...' : 'Salvar'}
-              </Button>
-            </div>
-
-            {/* Configuração de Distribuição de Leads */}
-            <div className="rounded-xl border border-border bg-card card-shadow p-6">
-              <h2 className="text-base font-semibold text-foreground mb-4">Distribuição de Leads (Rodízio)</h2>
-              <p className="text-sm text-muted-foreground mb-4">Configure como os novos leads serão distribuídos entre os agentes da sua equipe.</p>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Modo de Distribuição</Label>
-                  <Select defaultValue="peso">
-                    <SelectTrigger className="bg-secondary border-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="peso">Por Peso (1-10)</SelectItem>
-                      <SelectItem value="porcentagem">Por Porcentagem (%)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="rounded-lg bg-secondary/30 p-4 border border-border">
-                  <p className="text-xs font-medium text-foreground mb-3">Distribuição Atual</p>
-                  <div className="space-y-2">
-                    {(teamMembers ?? []).filter(m => m.role === 'agent').map(agent => (
-                      <div key={agent.id} className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">{agent.name}</span>
-                        <Input placeholder="Peso ou %" className="w-20 h-8 text-xs bg-background border-0" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <Button className="mt-5 gap-1.5" size="sm">
-                <Save size={14} /> Salvar Configuração
               </Button>
             </div>
           </TabsContent>
@@ -953,6 +900,56 @@ export default function ConfiguracoesPage() {
                 ))}
               </div>
             </div>
+
+            {/* Rodízio de Atendimento */}
+            <div className="rounded-xl border border-border bg-card card-shadow p-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <RotateCcw size={16} className="text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Rodízio de Atendimento</h3>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Defina como novos leads são distribuídos entre os agentes. O peso/porcentagem de cada agente é configurado no perfil do usuário (aba Rodízio).
+              </p>
+              {loadingCompany ? (
+                <div className="space-y-3"><Skeleton className="h-20 w-full" /><Skeleton className="h-10 w-full" /></div>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Modo de distribuição</Label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRoundRobinMode('weight')}
+                        className={`flex-1 rounded-lg border px-3 py-2.5 text-left transition-colors ${roundRobinMode === 'weight' ? 'border-primary bg-primary/5' : 'border-border bg-secondary hover:border-primary/50'}`}
+                      >
+                        <p className={`text-xs font-semibold ${roundRobinMode === 'weight' ? 'text-primary' : 'text-foreground'}`}>Por Peso</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Peso 1–10. Peso 3 recebe 3× mais que peso 1.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRoundRobinMode('percentage')}
+                        className={`flex-1 rounded-lg border px-3 py-2.5 text-left transition-colors ${roundRobinMode === 'percentage' ? 'border-primary bg-primary/5' : 'border-border bg-secondary hover:border-primary/50'}`}
+                      >
+                        <p className={`text-xs font-semibold ${roundRobinMode === 'percentage' ? 'text-primary' : 'text-foreground'}`}>Por Porcentagem</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Defina qual % de leads cada agente recebe (soma = 100%).</p>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">Priorizar agentes online</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Distribui novos leads para agentes ativos nos últimos 5 minutos. Se nenhum online, distribui normalmente.
+                      </p>
+                    </div>
+                    <Switch checked={priorityOnline} onCheckedChange={setPriorityOnline} />
+                  </div>
+                  <Button size="sm" className="gap-1.5" onClick={handleSaveCompany} disabled={updateCompany.isPending || !permissions.canManageUsers}>
+                    <Save size={14} /> {updateCompany.isPending ? 'Salvando...' : 'Salvar configuração'}
+                  </Button>
+                </>
+              )}
+            </div>
           </TabsContent>
 
           {/* ===== DEPARTAMENTOS ===== */}
@@ -990,25 +987,62 @@ export default function ConfiguracoesPage() {
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {departments.map(d => (
-                    <div key={d.id} className="flex items-center justify-between px-4 py-3 hover:bg-accent/20 transition-colors">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Layers size={14} className="text-primary" />
+                  {departments.map(d => {
+                    const isExpanded = expandedDeptId === d.id;
+                    const memberIds = deptMembersMap[d.id];
+                    const deptUsers = isExpanded && memberIds
+                      ? (teamMembers ?? []).filter(m => memberIds.includes(m.id))
+                      : [];
+                    return (
+                      <div key={d.id}>
+                        <div className="flex items-center justify-between px-4 py-3 hover:bg-accent/20 transition-colors">
+                          <button
+                            className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                            onClick={() => toggleDeptExpand(d.id)}
+                          >
+                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                              <Layers size={14} className="text-primary" />
+                            </div>
+                            <span className="text-sm font-medium text-foreground truncate">{d.name}</span>
+                            {isExpanded
+                              ? <ChevronDown size={14} className="text-muted-foreground ml-1 shrink-0" />
+                              : <ChevronRight size={14} className="text-muted-foreground ml-1 shrink-0" />
+                            }
+                          </button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                            onClick={() => setConfirmDeleteDeptId(d.id)}
+                            disabled={deleteDept.isPending}
+                          >
+                            <Trash2 size={13} />
+                          </Button>
                         </div>
-                        <span className="text-sm font-medium text-foreground">{d.name}</span>
+                        {isExpanded && (
+                          <div className="px-4 pb-3 bg-secondary/20">
+                            {!memberIds ? (
+                              <p className="text-xs text-muted-foreground italic py-2">Carregando...</p>
+                            ) : deptUsers.length === 0 ? (
+                              <p className="text-xs text-muted-foreground italic py-2">Nenhum usuário neste departamento.</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                {deptUsers.map(u => (
+                                  <div key={u.id} className="flex items-center gap-1.5 rounded-full bg-card border border-border px-2.5 py-1">
+                                    <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
+                                      {(u.display_name || u.name || 'U').slice(0, 2).toUpperCase()}
+                                    </div>
+                                    <span className="text-xs text-foreground">{u.display_name || u.name}</span>
+                                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{roleLabels[u.role] ?? u.role}</Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => setConfirmDeleteDeptId(d.id)}
-                        disabled={deleteDept.isPending}
-                      >
-                        <Trash2 size={13} />
-                      </Button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
