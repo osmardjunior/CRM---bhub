@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Building2, Users, Save, Plus, ImageIcon,
   Shield, Eye, Headphones, Lock, Trash2, Tag as TagIcon, Layers,
@@ -624,6 +624,8 @@ export default function ConfiguracoesPage() {
   const createDept = useCreateDepartment();
   const deleteDept = useDeleteDepartment();
   const [newDeptName, setNewDeptName] = useState('');
+  const [confirmDeleteDeptId, setConfirmDeleteDeptId] = useState<string | null>(null);
+  const confirmDeleteDeptName = departments.find(d => d.id === confirmDeleteDeptId)?.name ?? '';
 
   // Tags
   const { data: tags = [], isLoading: loadingTags } = useTags();
@@ -1025,7 +1027,7 @@ export default function ConfiguracoesPage() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => deleteDept.mutate(d.id)}
+                        onClick={() => setConfirmDeleteDeptId(d.id)}
                         disabled={deleteDept.isPending}
                       >
                         <Trash2 size={13} />
@@ -1036,6 +1038,32 @@ export default function ConfiguracoesPage() {
               )}
             </div>
           </TabsContent>
+
+          {/* ConfirmDialog — excluir departamento */}
+          <Dialog open={!!confirmDeleteDeptId} onOpenChange={v => { if (!v) setConfirmDeleteDeptId(null); }}>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Excluir departamento</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                Tem certeza que deseja excluir o departamento <strong>{confirmDeleteDeptName}</strong>?
+                Esta ação removerá o departamento e todos os vínculos com usuários.
+              </p>
+              <DialogFooter className="mt-2">
+                <Button variant="outline" onClick={() => setConfirmDeleteDeptId(null)}>Cancelar</Button>
+                <Button
+                  variant="destructive"
+                  disabled={deleteDept.isPending}
+                  onClick={() => {
+                    if (confirmDeleteDeptId) deleteDept.mutate(confirmDeleteDeptId);
+                    setConfirmDeleteDeptId(null);
+                  }}
+                >
+                  {deleteDept.isPending ? 'Excluindo...' : 'Excluir'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* ===== TAGS ===== */}
           <TabsContent value="tags" className="mt-0 space-y-6">
