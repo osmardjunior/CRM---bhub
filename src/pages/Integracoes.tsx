@@ -413,52 +413,17 @@ export default function IntegracoesPage() {
         }
       />
 
-      {/* ── Device Grid ─────────────────────────────── */}
-      {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => <Skeleton key={i} className="h-52 rounded-xl" />)}
+      {/* ── Folders CTA ──────────────────────────────── */}
+      <div className="rounded-xl border border-dashed border-primary/30 bg-primary/5 p-8 text-center space-y-3">
+        <FolderOpen size={32} className="mx-auto text-primary/60" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Os números são gerenciados dentro das Pastas</p>
+          <p className="text-xs text-muted-foreground mt-1">Cada número fica vinculado a um projeto. Acesse as Pastas para adicionar, conectar ou gerenciar números.</p>
         </div>
-      ) : whatsappDevices.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-card/50 p-10 text-center">
-          <Smartphone size={32} className="mx-auto mb-3 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">Nenhum aparelho cadastrado.</p>
-          {permissions.isAdmin && (
-            <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => setAddOpen(true)}>
-              <Plus size={14} /> Adicionar primeiro aparelho
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {whatsappDevices.map(d => (
-            <DeviceCard
-              key={d.id}
-              device={d}
-              isAdmin={permissions.isAdmin}
-              departments={departments}
-              onDisconnect={id => setConfirmId(id)}
-              onDelete={id => setDeleteId(id)}
-              onEdit={openEdit}
-              onSyncPhone={handleSyncPhone}
-              liveStatus={liveStatus[d.id]}
-              onConnect={(dev) => {
-                const cfg = dev.config as Record<string, string>;
-                if (cfg.api_url && cfg.api_key) {
-                  setQrModal({
-                    open: true,
-                    integrationId: dev.id,
-                    apiUrl: cfg.api_url,
-                    apiKey: cfg.api_key,
-                    instanceName: cfg.instance_name || dev.device_name || 'default',
-                  });
-                } else {
-                  toast.error('Configure a URL e API Key da Evolution API primeiro');
-                }
-              }}
-            />
-          ))}
-        </div>
-      )}
+        <Button size="sm" onClick={() => navigate('/folders')}>
+          <FolderOpen size={14} className="mr-1.5" /> Abrir Pastas / Projetos
+        </Button>
+      </div>
 
       {/* ── API Info Section ────────────────────────── */}
       <div className="rounded-xl border border-border bg-card card-shadow p-5 space-y-4">
