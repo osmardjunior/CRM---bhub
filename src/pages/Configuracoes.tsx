@@ -220,15 +220,21 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
 
       if (profileErr) throw profileErr;
 
-      // user_roles has no UPDATE policy — use delete + insert instead
-      const { error: roleDelErr } = await supabase.from('user_roles')
-        .delete()
-        .eq('user_id', form.id);
-      if (roleDelErr) throw roleDelErr;
+      // Update user role: upsert new role FIRST (admin check still passes),
+      // then delete any stale rows with different roles.
+      // This avoids the RLS chicken-and-egg: deleting first would remove the
+      // admin's own role before the INSERT, causing the WITH CHECK to fail.
+      const newRole = form.role as 'admin' | 'supervisor' | 'agent';
+      const { error: roleUpsertErr } = await supabase.from('user_roles')
+        .upsert({ user_id: form.id, role: newRole }, { onConflict: 'user_id,role' });
+      if (roleUpsertErr) throw roleUpsertErr;
 
-      const { error: roleInsErr } = await supabase.from('user_roles')
-        .insert({ user_id: form.id, role: form.role as 'admin' | 'supervisor' | 'agent' });
-      if (roleInsErr) throw roleInsErr;
+      // Remove any old role entries with a different role
+      const { error: roleCleanErr } = await supabase.from('user_roles')
+        .delete()
+        .eq('user_id', form.id)
+        .neq('role', newRole);
+      if (roleCleanErr) throw roleCleanErr;
 
       // Save profile_departments — delete all then re-insert selected
       const { error: deptDelErr } = await supabase.from('profile_departments' as any)
