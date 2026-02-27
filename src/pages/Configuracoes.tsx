@@ -220,21 +220,14 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
 
       if (profileErr) throw profileErr;
 
-      // Update user role: upsert new role FIRST (admin check still passes),
-      // then delete any stale rows with different roles.
-      // This avoids the RLS chicken-and-egg: deleting first would remove the
-      // admin's own role before the INSERT, causing the WITH CHECK to fail.
+      // Update user role via SECURITY DEFINER RPC — bypasses RLS on user_roles.
+      // The function enforces admin-only access and same-company validation server-side.
       const newRole = form.role as 'admin' | 'supervisor' | 'agent';
-      const { error: roleUpsertErr } = await supabase.from('user_roles')
-        .upsert({ user_id: form.id, role: newRole }, { onConflict: 'user_id,role' });
-      if (roleUpsertErr) throw roleUpsertErr;
-
-      // Remove any old role entries with a different role
-      const { error: roleCleanErr } = await supabase.from('user_roles')
-        .delete()
-        .eq('user_id', form.id)
-        .neq('role', newRole);
-      if (roleCleanErr) throw roleCleanErr;
+      const { error: roleErr } = await supabase.rpc('admin_set_user_role', {
+        target_user_id: form.id,
+        new_role: newRole,
+      });
+      if (roleErr) throw roleErr;
 
       // Save profile_departments — delete all then re-insert selected
       const { error: deptDelErr } = await supabase.from('profile_departments' as any)
