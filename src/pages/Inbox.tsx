@@ -11,7 +11,7 @@ import {
 } from '@/hooks/useConversations';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
 import { useAuth } from '@/contexts/AuthContext';
-import { useProjects } from '@/hooks/useProjects';
+import { useMyProjects } from '@/hooks/useProjects';
 import { useSelectedProject } from '@/hooks/useSelectedProject';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -27,7 +27,7 @@ export default function InboxPage() {
   const initialSearch = searchParams.get('search');
   const initialProjectId = searchParams.get('projectId') ?? '';
 
-  const { data: projects = [] } = useProjects();
+  const { data: myProjects = [] } = useMyProjects();
   const { projectId, select: selectProject } = useSelectedProject();
 
   // URL param takes priority over localStorage on first load
@@ -41,13 +41,29 @@ export default function InboxPage() {
     project_id: effectiveProjectId || undefined,
   });
 
-  // Agents only see conversations assigned to them
+  // Se o agente pertence a exatamente 1 projeto, aplica automaticamente (sem mostrar seletor)
+  const didAutoProject = useRef(false);
+  useEffect(() => {
+    if (didAutoProject.current) return;
+    if (role === 'agent' && myProjects.length === 1 && !effectiveProjectId) {
+      didAutoProject.current = true;
+      const sole = myProjects[0].id;
+      selectProject(sole);
+      setFilters(prev => ({ ...prev, project_id: sole }));
+    }
+  }, [myProjects, role, effectiveProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Agents only see conversations assigned to them + scoped to their projects
   const effectiveFilters = useMemo<Omit<ConversationFilters, 'page'>>(() => {
     if (role === 'agent' && user?.id) {
       return { ...filters, assigned_user_id: user.id };
     }
     return filters;
   }, [filters, role, user?.id]);
+
+  // O seletor de projeto só aparece quando há > 1 projeto disponível
+  // (para agentes com apenas 1 projeto, aplica silenciosamente; para admins, sempre mostra)
+  const showProjectSelector = myProjects.length > 1 || (role !== 'agent' && myProjects.length > 0);
 
   const {
     data: infiniteData,
@@ -114,8 +130,8 @@ export default function InboxPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2">
-      {/* Project selector bar */}
-      {projects.length > 0 && (
+      {/* Project selector bar — visível para admin sempre, para agente apenas se tiver > 1 projeto */}
+      {showProjectSelector && (
         <div className="flex items-center gap-2 px-3 pb-2">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Projeto:</span>
           <Select
@@ -126,8 +142,10 @@ export default function InboxPage() {
               <SelectValue placeholder="Todos os projetos" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">Todos os projetos</SelectItem>
-              {projects.map((p) => (
+              {role !== 'agent' && (
+                <SelectItem value="__all__">Todos os projetos</SelectItem>
+              )}
+              {myProjects.map((p) => (
                 <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
               ))}
             </SelectContent>

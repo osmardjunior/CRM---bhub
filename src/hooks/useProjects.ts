@@ -75,6 +75,43 @@ export function useUpdateProject() {
   });
 }
 
+/**
+ * Retorna apenas os projetos acessíveis ao usuário atual:
+ * - admin: todos os projetos ativos da company
+ * - supervisor/agent: apenas projetos onde o usuário está em user_projects
+ */
+export function useMyProjects() {
+  const { companyId, user, role } = useAuth();
+  return useQuery({
+    queryKey: ['my-projects', companyId, user?.id, role],
+    enabled: !!companyId && !!user?.id,
+    queryFn: async () => {
+      if (role === 'admin') {
+        const { data, error } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('company_id', companyId!)
+          .eq('active', true)
+          .order('name');
+        if (error) throw error;
+        return (data ?? []) as Project[];
+      }
+
+      // agent / supervisor — apenas projetos em que está cadastrado
+      const { data, error } = await supabase
+        .from('user_projects')
+        .select('project_id, projects(*)')
+        .eq('user_id', user!.id)
+        .eq('active', true);
+      if (error) throw error;
+      return (data ?? [])
+        .map((r: any) => r.projects)
+        .filter(Boolean)
+        .filter((p: Project) => p.active) as Project[];
+    },
+  });
+}
+
 export function useDeleteProject() {
   const qc = useQueryClient();
   return useMutation({
