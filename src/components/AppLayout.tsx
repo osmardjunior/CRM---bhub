@@ -29,7 +29,6 @@ import {
   Archive,
   Puzzle,
   Headphones,
-  TrendingUp,
   FolderOpen,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -95,7 +94,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
       items: [
         { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot, roles: ['admin', 'supervisor'] },
         { to: '/campanhas', label: 'Campanhas', icon: Megaphone, roles: ['admin', 'supervisor'] },
-        { to: '/negocios', label: 'Negócios', icon: TrendingUp },
         { to: '/pipeline', label: 'Funil', icon: Filter },
       ],
     },
