@@ -74,14 +74,28 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const removeContactFromStage = useRemoveContactFromStage();
   const [selectedFunnelId, setSelectedFunnelId] = useState('');
   const [selectedStageId, setSelectedStageId] = useState('');
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editEntryFunnelId, setEditEntryFunnelId] = useState('');
+  const [editEntryStageId, setEditEntryStageId] = useState('');
   const contactFunnelEntries = contactFunnelStages.filter((cfs) => cfs.contact_id === contact.id);
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId);
+  const editEntryFunnel = funnels.find((f) => f.id === editEntryFunnelId);
 
   const handleAddToFunnel = () => {
     if (!selectedFunnelId || !selectedStageId) return;
     addContactToStage.mutate({ contactId: contact.id, funnelId: selectedFunnelId, stageId: selectedStageId });
     setSelectedFunnelId('');
     setSelectedStageId('');
+  };
+
+  const handleMoveEntry = async (entryId: string) => {
+    if (!editEntryFunnelId || !editEntryStageId) return;
+    // Remove from old stage, add to new
+    await removeContactFromStage.mutateAsync(entryId);
+    addContactToStage.mutate({ contactId: contact.id, funnelId: editEntryFunnelId, stageId: editEntryStageId });
+    setEditingEntryId(null);
+    setEditEntryFunnelId('');
+    setEditEntryStageId('');
   };
 
   // Conversation history
@@ -441,6 +455,37 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                   <p className="text-xs text-muted-foreground leading-relaxed">{contact.notes}</p>
                 </div>
               )}
+              {/* Tags inline no perfil */}
+              {contactTags.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Tags</p>
+                    <button
+                      onClick={() => setActiveSection('tags')}
+                      className="text-[10px] text-primary hover:underline"
+                    >
+                      Ver todas
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {contactTags.slice(0, 4).map((ct) => (
+                      <span
+                        key={ct.tag_id}
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border"
+                        style={{ borderColor: ct.tag_color + '80', color: ct.tag_color, backgroundColor: ct.tag_color + '18' }}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: ct.tag_color }} />
+                        {ct.tag_name}
+                      </span>
+                    ))}
+                    {contactTags.length > 4 && (
+                      <button onClick={() => setActiveSection('tags')} className="text-[10px] text-muted-foreground hover:text-primary">
+                        +{contactTags.length - 4} mais
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -503,15 +548,50 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                 {contactFunnelEntries.map((entry) => {
                   const funnel = funnels.find((f) => f.id === entry.funnel_id);
                   const stage = funnel?.stages.find((s) => s.id === entry.stage_id);
+                  const isEditing = editingEntryId === entry.id;
                   return (
-                    <div key={entry.id} className="flex items-center justify-between bg-secondary/60 rounded-lg px-3 py-2.5 border border-border">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-foreground truncate">{funnel?.name ?? 'Funil'}</p>
-                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">{stage?.label ?? 'Etapa'}</p>
+                    <div key={entry.id} className="bg-secondary/60 rounded-lg border border-border overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground truncate">{funnel?.name ?? 'Funil'}</p>
+                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{stage?.label ?? 'Etapa'}</p>
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0 ml-2">
+                          <button
+                            onClick={() => {
+                              if (isEditing) { setEditingEntryId(null); setEditEntryFunnelId(''); setEditEntryStageId(''); }
+                              else { setEditingEntryId(entry.id); setEditEntryFunnelId(entry.funnel_id); setEditEntryStageId(entry.stage_id); }
+                            }}
+                            className="p-1 text-muted-foreground hover:text-primary transition-colors rounded"
+                            title="Mover para outro funil/etapa"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                          <button onClick={() => removeContactFromStage.mutate(entry.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded" title="Remover do funil">
+                            <X size={12} />
+                          </button>
+                        </div>
                       </div>
-                      <button onClick={() => removeContactFromStage.mutate(entry.id)} className="text-muted-foreground hover:text-destructive transition-colors p-1 shrink-0 ml-2" title="Remover do funil">
-                        <X size={13} />
-                      </button>
+                      {isEditing && (
+                        <div className="px-3 pb-3 space-y-2 border-t border-border/60 pt-2.5 bg-background/40">
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Mover para:</p>
+                          <Select value={editEntryFunnelId} onValueChange={(v) => { setEditEntryFunnelId(v); setEditEntryStageId(''); }}>
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar funil..." /></SelectTrigger>
+                            <SelectContent>{funnels.map((f) => <SelectItem key={f.id} value={f.id} className="text-xs">{f.name}</SelectItem>)}</SelectContent>
+                          </Select>
+                          {editEntryFunnel && (
+                            <Select value={editEntryStageId} onValueChange={setEditEntryStageId}>
+                              <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar etapa..." /></SelectTrigger>
+                              <SelectContent>{editEntryFunnel.stages.map((s) => <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                          )}
+                          {editEntryFunnelId && editEntryStageId && (
+                            <Button size="sm" className="w-full h-7 text-xs gap-1" onClick={() => handleMoveEntry(entry.id)} disabled={addContactToStage.isPending || removeContactFromStage.isPending}>
+                              Confirmar mudança
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

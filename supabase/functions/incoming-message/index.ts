@@ -457,16 +457,93 @@ async function willChatbotTriggerForNew(
       .single();
     if (contactData?.chatbot_enabled === false) return false;
 
-    const { data: activeFlow } = await supabase
+    // Get ALL active flows — support multiple simultaneous chatbot flows
+    const { data: activeFlows } = await supabase
       .from("chatbot_flows")
       .select("id, business_hours")
       .eq("company_id", companyId)
       .eq("is_active", true)
-      .maybeSingle();
+      .order("created_at", { ascending: true });
 
-    if (!activeFlow) return false;
+    if (!activeFlows || activeFlows.length === 0) return false;
 
-    const bh = (activeFlow.business_hours || {}) as Record<string, any>;
+    // Check each flow: return true if any flow matches the trigger
+    for (const activeFlow of activeFlows) {
+      const bh = (activeFlow.business_hours || {}) as Record<string, any>;
+      const triggerType: string = bh._trigger?.type || "none";
+      const triggerKeyword: string = bh._trigger?.keyword || "";
+      const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
+
+      const integrationAllowed =
+        allowedIntegrationIds.length === 0 ||
+        (integrationId !== null && allowedIntegrationIds.includes(integrationId));
+
+      if (!integrationAllowed) continue;
+
+      switch (triggerType) {
+        case "any_message":
+        case "first_message":
+          return true;
+        case "keyword": {
+          const keywords = triggerKeyword
+            .split(",")
+            .map((k: string) => k.trim().toLowerCase())
+            .filter(Boolean);
+          const msgLower = messageBody.toLowerCase();
+          if (keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k))) return true;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Find the matching chatbot flow for a given message + integration.
+ * Returns the flow id and its nodes trigger config or null if no match.
+ */
+async function findMatchingFlow(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  integrationId: string | null,
+  messageBody: string,
+  conversationId: string,
+): Promise<{ flowId: string; shouldRun: boolean } | null> {
+  const { data: activeFlows } = await supabase
+    .from("chatbot_flows")
+    .select("id, business_hours")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+
+  if (!activeFlows || activeFlows.length === 0) return null;
+
+  // First check if any conversation already has an active chatbot flow running
+  const { data: convState } = await supabase
+    .from("conversations")
+    .select("chatbot_active, chatbot_current_node, chatbot_flow_id")
+    .eq("id", conversationId)
+    .single();
+
+  // If chatbot already active, continue with the same flow
+  if (convState?.chatbot_active === true) {
+    const activeFlowId = (convState as any).chatbot_flow_id;
+    if (activeFlowId) {
+      return { flowId: activeFlowId, shouldRun: true };
+    }
+    // fallback: use first active flow
+    return { flowId: activeFlows[0].id, shouldRun: true };
+  }
+
+  // Otherwise find first flow whose trigger matches
+  for (const flow of activeFlows) {
+    const bh = (flow.business_hours || {}) as Record<string, any>;
     const triggerType: string = bh._trigger?.type || "none";
     const triggerKeyword: string = bh._trigger?.keyword || "";
     const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
@@ -475,26 +552,37 @@ async function willChatbotTriggerForNew(
       allowedIntegrationIds.length === 0 ||
       (integrationId !== null && allowedIntegrationIds.includes(integrationId));
 
-    if (!integrationAllowed) return false;
+    if (!integrationAllowed) continue;
 
     switch (triggerType) {
       case "any_message":
-      case "first_message":
-        return true;
+        return { flowId: flow.id, shouldRun: true };
+      case "first_message": {
+        const { count } = await supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", conversationId)
+          .eq("sender_type", "user");
+        if ((count ?? 0) <= 1) return { flowId: flow.id, shouldRun: true };
+        break;
+      }
       case "keyword": {
         const keywords = triggerKeyword
           .split(",")
           .map((k: string) => k.trim().toLowerCase())
           .filter(Boolean);
         const msgLower = messageBody.toLowerCase();
-        return keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
+        if (keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k))) {
+          return { flowId: flow.id, shouldRun: true };
+        }
+        break;
       }
       default:
-        return false;
+        break;
     }
-  } catch {
-    return false;
   }
+
+  return null;
 }
 
 serve(async (req) => {
@@ -1200,89 +1288,30 @@ serve(async (req) => {
         const chatbotEnabled = contactData?.chatbot_enabled !== false;
 
         if (chatbotEnabled) {
-          // Get the company's active chatbot flow
-          const { data: activeFlow } = await supabase
-            .from("chatbot_flows")
-            .select("id, business_hours")
-            .eq("company_id", company_id)
-            .eq("is_active", true)
-            .maybeSingle();
+          // Find the matching chatbot flow (supports multiple active flows)
+          const convIntegrationId: string | null = (conversation as any).integration_id ?? null;
+          const matched = await findMatchingFlow(
+            supabase,
+            company_id,
+            convIntegrationId,
+            messageBody,
+            conversation.id,
+          );
 
-          if (activeFlow) {
-            // Get current conversation chatbot state
-            const { data: convState } = await supabase
-              .from("conversations")
-              .select("chatbot_active, chatbot_current_node")
-              .eq("id", conversation.id)
-              .single();
-
-            let shouldRun = false;
-
-            if (convState?.chatbot_active === true) {
-              // Chatbot is already active and waiting for user input — always continue
-              shouldRun = true;
-            } else {
-              // Evaluate the trigger condition to decide whether to start the flow
-              const bh = (activeFlow.business_hours || {}) as Record<string, any>;
-              const triggerType: string = bh._trigger?.type || "none";
-              const triggerKeyword: string = bh._trigger?.keyword || "";
-              const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
-
-              // Filter by integration: [] = all; specific IDs = only those numbers
-              const convIntegrationId: string | null = (conversation as any).integration_id ?? null;
-              const integrationAllowed =
-                allowedIntegrationIds.length === 0 ||
-                (convIntegrationId !== null && allowedIntegrationIds.includes(convIntegrationId));
-
-              if (integrationAllowed) {
-                switch (triggerType) {
-                  case "any_message":
-                    shouldRun = true;
-                    break;
-
-                  case "first_message": {
-                    // Only start if this is the very first user message in this conversation
-                    const { count } = await supabase
-                      .from("messages")
-                      .select("id", { count: "exact", head: true })
-                      .eq("conversation_id", conversation.id)
-                      .eq("sender_type", "user");
-                    shouldRun = (count ?? 0) <= 1;
-                    break;
-                  }
-
-                  case "keyword": {
-                    // Check if any keyword matches the message body
-                    const keywords = triggerKeyword
-                      .split(",")
-                      .map((k: string) => k.trim().toLowerCase())
-                      .filter(Boolean);
-                    const msgLower = messageBody.toLowerCase();
-                    shouldRun = keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k));
-                    break;
-                  }
-
-                  case "none":
-                  default:
-                    shouldRun = false;
-                }
-              }
-            }
-
-            if (shouldRun) {
-              // Invoke chatbot-process asynchronously (fire-and-forget)
-              // We don't await so the webhook responds quickly
-              supabase.functions.invoke("chatbot-process", {
-                body: {
-                  conversation_id: conversation.id,
-                  message_body: messageBody,
-                  company_id,
-                  contact_id: contact.id,
-                },
-              }).catch((e: unknown) =>
-                console.warn("chatbot-process invoke failed:", e instanceof Error ? e.message : e)
-              );
-            }
+          if (matched?.shouldRun) {
+            // Invoke chatbot-process asynchronously (fire-and-forget)
+            // Pass flow_id so chatbot-process uses the correct flow
+            supabase.functions.invoke("chatbot-process", {
+              body: {
+                conversation_id: conversation.id,
+                message_body: messageBody,
+                company_id,
+                contact_id: contact.id,
+                flow_id: matched.flowId,
+              },
+            }).catch((e: unknown) =>
+              console.warn("chatbot-process invoke failed:", e instanceof Error ? e.message : e)
+            );
           }
         }
       } catch (chatbotErr) {

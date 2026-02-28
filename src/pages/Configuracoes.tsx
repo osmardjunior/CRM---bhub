@@ -21,6 +21,7 @@ import { useIntegrations } from '@/hooks/useIntegrations';
 import { useCompany, useUpdateCompany } from '@/hooks/useCompany';
 import { useDepartments, useCreateDepartment, useDeleteDepartment } from '@/hooks/useDepartments';
 import { useTags, useCreateTag, useDeleteTag, useUpdateTag } from '@/hooks/useTags';
+import { useProjects } from '@/hooks/useProjects';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -52,49 +53,141 @@ const WEEK_DAYS = [
   { value: 6, label: 'Sáb' },
 ];
 
-const PERMISSION_GROUPS = [
-  {
-    group: 'Conversas',
-    items: [
-      { key: 'view_all_conversations', label: 'Ver todas as conversas' },
-      { key: 'take_conversation', label: 'Assumir conversas de outros' },
-      { key: 'close_conversation', label: 'Fechar conversas' },
-      { key: 'delete_message', label: 'Excluir mensagens' },
-    ],
-  },
-  {
-    group: 'Contatos',
-    items: [
-      { key: 'create_contact', label: 'Criar contatos' },
-      { key: 'edit_contact', label: 'Editar contatos' },
-      { key: 'delete_contact', label: 'Excluir contatos' },
-      { key: 'export_contacts', label: 'Exportar contatos' },
-    ],
-  },
-  {
-    group: 'Relatórios',
-    items: [
-      { key: 'view_reports', label: 'Ver relatórios' },
-      { key: 'export_reports', label: 'Exportar relatórios' },
-    ],
-  },
-  {
-    group: 'Campanhas',
-    items: [
-      { key: 'view_campaigns', label: 'Ver campanhas' },
-      { key: 'manage_campaigns', label: 'Criar e editar campanhas' },
-    ],
-  },
-  {
-    group: 'Chatbot',
-    items: [
-      { key: 'view_chatbot', label: 'Ver chatbot' },
-      { key: 'manage_chatbot', label: 'Criar e editar fluxos' },
-    ],
-  },
+const FULL_PERMISSION_GROUPS = [
+  { group: 'Tags', col: 1, items: [
+    { key: 'tags_view', label: 'Visualizar Tags' },
+    { key: 'tags_assign', label: 'Atribuir Tag no chat' },
+    { key: 'tags_remove', label: 'Retirar Tag do chat' },
+    { key: 'tags_create', label: 'Criar' },
+    { key: 'tags_delete', label: 'Apagar' },
+  ]},
+  { group: 'Usuários', col: 2, items: [
+    { key: 'users_view', label: 'Ver Usuários' },
+    { key: 'users_assign', label: 'Atribuir ao chat' },
+    { key: 'users_create', label: 'Criar' },
+    { key: 'users_delete', label: 'Apagar' },
+  ]},
+  { group: 'Arquivos', col: 1, items: [
+    { key: 'files_send', label: 'Enviar/Criar' },
+    { key: 'files_caption', label: 'Mudar descrição/legenda' },
+    { key: 'files_tags', label: 'Alterar tags do arquivo' },
+    { key: 'files_delete', label: 'Apagar' },
+  ]},
+  { group: 'Celulares', col: 2, items: [
+    { key: 'phones_view', label: 'Visualizar os Celulares' },
+    { key: 'phones_link', label: 'Link Distribuidor' },
+  ]},
+  { group: 'Login', col: 1, items: [
+    { key: 'login_mobile', label: 'Permitir login através de dispositivos móveis' },
+  ]},
+  { group: 'Mensagens', col: 1, items: [
+    { key: 'messages_schedule', label: 'Agendar Mensagem' },
+    { key: 'messages_reload_recent', label: 'Recarregar Mensagens Recentes' },
+    { key: 'messages_reload_old', label: 'Recarregar Mensagens Antigas (Só texto)' },
+    { key: 'messages_reverify', label: 'Reverificar Mensagens Recentes Editadas' },
+    { key: 'messages_template', label: 'Enviar Mensagens Template' },
+  ]},
+  { group: 'Funis', col: 2, items: [
+    { key: 'funnels_view', label: 'Ver Funis' },
+    { key: 'funnels_create', label: 'Criar Funis' },
+    { key: 'funnels_delete', label: 'Apagar Funis' },
+    { key: 'funnels_edit', label: 'Alterar Funis' },
+    { key: 'funnels_move_chats', label: 'Adicionar/Mover Chats no Funil' },
+    { key: 'funnels_export', label: 'Exportar Funil em CSV' },
+  ]},
+  { group: 'NPS', col: 1, items: [
+    { key: 'nps_view', label: 'Ver NPS' },
+    { key: 'nps_create', label: 'Criar NPS' },
+    { key: 'nps_delete', label: 'Apagar NPS' },
+    { key: 'nps_edit', label: 'Alterar NPS' },
+    { key: 'nps_manual', label: 'Acionar NPS no Chat manualmente' },
+    { key: 'nps_export', label: 'Exportar Respostas do NPS' },
+  ]},
+  { group: 'Campanhas', col: 2, items: [
+    { key: 'campaigns_view', label: 'Ver Campanhas' },
+    { key: 'campaigns_create', label: 'Criar Campanha' },
+    { key: 'campaigns_pause', label: 'Pausar Campanha' },
+    { key: 'campaigns_resume', label: 'Resumir/Iniciar Campanha' },
+    { key: 'campaigns_delete', label: 'Apagar Campanha' },
+  ]},
+  { group: 'Relatórios — Anotações Internas', col: 1, items: [
+    { key: 'reports_notes_view', label: 'Consultar/Ver' },
+  ]},
+  { group: 'Relatórios — Acessos', col: 1, items: [
+    { key: 'reports_access_view', label: 'Consultar/Ver' },
+  ]},
+  { group: 'Relatórios — Chats Adicionados', col: 1, items: [
+    { key: 'reports_chats_added_view', label: 'Consultar/Ver' },
+    { key: 'reports_chats_added_delete', label: 'Apagar Registros' },
+  ]},
+  { group: 'Relatórios — Chats', col: 2, items: [
+    { key: 'reports_chats_graphs', label: 'Ver Gráficos' },
+    { key: 'reports_chats_view', label: 'Consultar/Ver' },
+    { key: 'reports_chats_edit', label: 'Criar/Alterar' },
+    { key: 'reports_chats_delete', label: 'Apagar' },
+    { key: 'reports_chats_export', label: 'Exportar' },
+  ]},
+  { group: 'Relatórios — Mensagens', col: 2, items: [
+    { key: 'reports_messages_view', label: 'Consultar/Ver' },
+    { key: 'reports_messages_delete', label: 'Apagar Registros' },
+  ]},
+  { group: 'Relatórios — Diálogos', col: 1, items: [
+    { key: 'reports_dialogs_view', label: 'Consultar/Ver' },
+  ]},
+  { group: 'Relatórios — Usuários', col: 2, items: [
+    { key: 'reports_users_view', label: 'Consultar/Ver' },
+  ]},
+  { group: 'Relatórios — Chatbot', col: 2, items: [
+    { key: 'reports_chatbot_view', label: 'Consultar/Ver' },
+  ]},
+  { group: 'Chatbot', col: 0, items: [
+    { key: 'chatbot_edit_dialogs', label: 'Criar/Alterar Diálogos' },
+    { key: 'chatbot_execute', label: 'Executar Diálogo' },
+    { key: 'chatbot_process', label: 'Processamento da Mensagem' },
+    { key: 'chatbot_add_example', label: 'Adicionar Exemplo' },
+    { key: 'chatbot_reprocess', label: 'Reprocessar Mensagem' },
+    { key: 'chatbot_approve', label: 'Aprovar Mensagem' },
+    { key: 'chatbot_view_context', label: 'Ver Contexto' },
+    { key: 'chatbot_delete_dialogs', label: 'Deletar Diálogos/Ações' },
+  ]},
+  { group: 'Chats', col: 0, items: [
+    { key: 'chats_filter_user', label: 'Filtrar Chats por Usuário' },
+    { key: 'chats_filter_name', label: 'Filtrar Chats por Nome' },
+    { key: 'chats_filter_whatsapp', label: 'Filtrar Chats por WhatsApp' },
+    { key: 'chats_filter_phone', label: 'Filtrar Chats por Celular' },
+    { key: 'chats_filter_tag', label: 'Filtrar Chats por Tag' },
+    { key: 'chats_filter_archived', label: 'Filtrar Chats Arquivados' },
+    { key: 'chats_filter_broadcast', label: 'Filtrar Chats Broadcasts' },
+    { key: 'chats_filter_unread', label: 'Filtrar Chats Não Lidos' },
+    { key: 'chats_filter_funnel', label: 'Filtrar por Etapa do Funil' },
+    { key: 'chats_filter_favorites', label: 'Filtrar Chats Favoritos' },
+    { key: 'chats_sort', label: 'Ordenar Lista de Chats' },
+    { key: 'chats_delegate', label: 'Delegar Chats' },
+    { key: 'chats_rename', label: 'Mudar nome do Chat' },
+    { key: 'chats_view_notes', label: 'Ver Anotações' },
+    { key: 'chats_add_note', label: 'Adicionar anotação' },
+    { key: 'chats_clear_chatbot', label: 'Apagar Contexto do Chatbot' },
+    { key: 'chats_delete_own_note', label: 'Apagar própria anotação' },
+    { key: 'chats_delete_any_note', label: 'Apagar qualquer anotação' },
+    { key: 'chats_view_all', label: 'Ver Todos os Chats' },
+    { key: 'chats_toggle_chatbot', label: 'Ligar/Desligar Chatbot p/ Chat' },
+    { key: 'chats_archive', label: 'Arquivar/Desarquivar Chat' },
+    { key: 'chats_view_whatsapp_number', label: 'Ver Número do WhatsApp' },
+    { key: 'chats_reverify_read', label: 'Reverificar Leitura das Mensagens' },
+    { key: 'chats_mark_unread', label: 'Marcar Chat Não Lido' },
+    { key: 'chats_mark_read', label: 'Marcar Chat Como Lido' },
+    { key: 'chats_reload', label: 'Recarregar Chats' },
+    { key: 'chats_reload_profile_pic', label: 'Recarregar Foto de Perfil' },
+    { key: 'chats_add', label: 'Adicionar Chats' },
+    { key: 'chats_delete_all_messages', label: 'Apagar Todas as Mensagens do Chats' },
+    { key: 'chats_view_delegate_history', label: 'Ver histórico de delegados do chat' },
+    { key: 'chats_view_dept_delegated', label: 'Ver Chats Delegados ao Depto. que faz parte' },
+  ]},
 ];
 
-const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap(g => g.items.map(i => i.key));
+// Keep backward-compat alias for places that still reference PERMISSION_GROUPS
+const PERMISSION_GROUPS = FULL_PERMISSION_GROUPS;
+const ALL_PERMISSION_KEYS = FULL_PERMISSION_GROUPS.flatMap(g => g.items.map(i => i.key));
 
 type AccessHours = {
   enabled: boolean;
@@ -130,6 +223,7 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
   teamMembers: EditableUser[];
 }) {
   const [tab, setTab] = useState<'dados' | 'permissoes' | 'acesso' | 'rodizio'>('dados');
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<EditableUser>({ ...user });
   const { data: integrations = [] } = useIntegrations();
@@ -346,35 +440,21 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">Selecione as permissões deste usuário</p>
-                  <button
-                    onClick={toggleAll}
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                  >
-                    {allSelected ? <CheckSquare size={13} /> : <Square size={13} />}
-                    {allSelected ? 'Desmarcar todas' : 'Selecionar todas'}
-                  </button>
+                {/* Summary of active permissions */}
+                <div className="rounded-lg border border-border bg-secondary/20 px-4 py-3">
+                  <p className="text-xs text-muted-foreground">
+                    {ALL_PERMISSION_KEYS.filter(k => form.custom_permissions[k]).length} de {ALL_PERMISSION_KEYS.length} permissões ativas
+                  </p>
                 </div>
-                <div className="space-y-4">
-                  {PERMISSION_GROUPS.map(group => (
-                    <div key={group.group}>
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{group.group}</p>
-                      <div className="space-y-2 pl-1">
-                        {group.items.map(item => (
-                          <div key={item.key} className="flex items-center gap-2.5">
-                            <Checkbox
-                              id={item.key}
-                              checked={!!form.custom_permissions[item.key]}
-                              onCheckedChange={() => togglePerm(item.key)}
-                            />
-                            <label htmlFor={item.key} className="text-sm cursor-pointer select-none">{item.label}</label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => setPermissionsDialogOpen(true)}
+                >
+                  <Shield size={15} />
+                  Configurar permissões detalhadas
+                </Button>
               </>
             )}
           </TabsContent>
@@ -547,6 +627,107 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
           </TabsContent>
         </Tabs>
 
+        {/* ── Full Permissions Dialog ── */}
+        {permissionsDialogOpen && (
+          <Dialog open onOpenChange={() => setPermissionsDialogOpen(false)}>
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto w-[95vw]">
+              <DialogHeader>
+                <DialogTitle>Nível / Permissões — {user.name}</DialogTitle>
+              </DialogHeader>
+
+              {/* Top: level select + select all */}
+              <div className="flex items-center justify-between gap-4 pb-4 border-b border-border">
+                <div className="flex items-center gap-3">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Nível:</label>
+                  <select
+                    value={form.role}
+                    onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                    className="h-8 px-2 text-xs border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="admin">Admin (acesso total)</option>
+                    <option value="supervisor">Supervisor</option>
+                    <option value="agent">Normal (Permissões personalizadas)</option>
+                  </select>
+                </div>
+                {!isAdmin && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={ALL_PERMISSION_KEYS.every(k => form.custom_permissions[k])}
+                      onCheckedChange={toggleAll}
+                    />
+                    <span className="text-xs font-medium">Selecionar todas as permissões</span>
+                  </label>
+                )}
+              </div>
+
+              {isAdmin ? (
+                <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-4 my-4">
+                  <Shield size={18} className="text-primary shrink-0" />
+                  <p className="text-sm text-muted-foreground">Admins têm acesso total. Permissões individuais não se aplicam.</p>
+                </div>
+              ) : (
+                <div className="space-y-6 pt-2">
+                  {/* Groups col=1 and col=2 rendered side by side */}
+                  {(() => {
+                    const col1 = FULL_PERMISSION_GROUPS.filter(g => g.col === 1);
+                    const col2 = FULL_PERMISSION_GROUPS.filter(g => g.col === 2);
+                    const fullWidth = FULL_PERMISSION_GROUPS.filter(g => g.col === 0);
+                    const maxRows = Math.max(col1.length, col2.length);
+                    const paired: [typeof col1[0] | null, typeof col2[0] | null][] = Array.from({ length: maxRows }, (_, i) => [col1[i] ?? null, col2[i] ?? null]);
+
+                    const renderGroup = (g: typeof FULL_PERMISSION_GROUPS[0]) => (
+                      <div key={g.group} className="space-y-1.5">
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 mb-2">{g.group}</p>
+                        <div className="space-y-1.5">
+                          {g.items.map(item => (
+                            <label key={item.key} className="flex items-center gap-2 cursor-pointer hover:bg-accent/30 px-1 py-0.5 rounded transition-colors">
+                              <Checkbox
+                                checked={!!form.custom_permissions[item.key]}
+                                onCheckedChange={() => togglePerm(item.key)}
+                              />
+                              <span className="text-xs select-none">{item.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 gap-6">
+                          <div className="space-y-5">{col1.map(renderGroup)}</div>
+                          <div className="space-y-5">{col2.map(renderGroup)}</div>
+                        </div>
+                        {fullWidth.map(g => (
+                          <div key={g.group} className="border-t border-border pt-5">
+                            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 mb-3">{g.group}</p>
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                              {g.items.map(item => (
+                                <label key={item.key} className="flex items-center gap-2 cursor-pointer hover:bg-accent/30 px-1 py-0.5 rounded transition-colors">
+                                  <Checkbox
+                                    checked={!!form.custom_permissions[item.key]}
+                                    onCheckedChange={() => togglePerm(item.key)}
+                                  />
+                                  <span className="text-xs select-none">{item.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
+              <DialogFooter className="mt-4 sticky bottom-0 bg-background pt-3 border-t border-border">
+                <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={() => setPermissionsDialogOpen(false)}>Confirmar permissões</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} disabled={saving}>
@@ -597,6 +778,9 @@ export default function ConfiguracoesPage() {
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
   const [newTagDeptId, setNewTagDeptId] = useState<string>('');
+  const [newTagProjectId, setNewTagProjectId] = useState('');
+  const { data: newTagDeptProjects = [] } = useProjects(newTagDeptId || undefined);
+  const { data: editTagProjects = [] } = useProjects((editingTag as any)?.department_id || undefined);
   const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string } | null>(null);
 
   // Departamentos: expandir para ver usuários
@@ -669,14 +853,14 @@ export default function ConfiguracoesPage() {
       toast.error('Selecione um departamento para a tag');
       return;
     }
-    createTag.mutate({ name: newTagName.trim(), color: newTagColor, department_id: newTagDeptId || null as any }, {
-      onSuccess: () => { setNewTagName(''); setNewTagColor(TAG_COLORS[0]); setNewTagDeptId(''); },
+    createTag.mutate({ name: newTagName.trim(), color: newTagColor, department_id: newTagDeptId || null as any, project_id: newTagProjectId || null }, {
+      onSuccess: () => { setNewTagName(''); setNewTagColor(TAG_COLORS[0]); setNewTagDeptId(''); setNewTagProjectId(''); },
     });
   };
 
   const handleSaveTagEdit = () => {
     if (!editingTag) return;
-    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color, department_id: editingTag.department_id }, {
+    updateTag.mutate({ id: editingTag.id, name: editingTag.name, color: editingTag.color, department_id: editingTag.department_id, project_id: (editingTag as any).project_id || null }, {
       onSuccess: () => setEditingTag(null),
     });
   };
@@ -1095,13 +1279,26 @@ export default function ConfiguracoesPage() {
                   </Button>
                 </div>
                 {departments.length > 0 && (
-                  <Select value={newTagDeptId} onValueChange={setNewTagDeptId}>
+                  <Select value={newTagDeptId} onValueChange={(v) => { setNewTagDeptId(v); setNewTagProjectId(''); }}>
                     <SelectTrigger className="h-8 text-xs bg-background border-border">
                       <SelectValue placeholder="Departamento *" />
                     </SelectTrigger>
                     <SelectContent>
                       {departments.map(d => (
                         <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {newTagDeptId && newTagDeptProjects.length > 0 && (
+                  <Select value={newTagProjectId || '_none'} onValueChange={v => setNewTagProjectId(v === '_none' ? '' : v)}>
+                    <SelectTrigger className="h-8 text-xs bg-background border-border">
+                      <SelectValue placeholder="Projeto (opcional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Todos os projetos</SelectItem>
+                      {newTagDeptProjects.map(p => (
+                        <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1277,6 +1474,26 @@ export default function ConfiguracoesPage() {
                       <SelectItem value="_none">Sem departamento</SelectItem>
                       {departments.map(d => (
                         <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
+              {editingTag.department_id && editTagProjects.length > 0 && (
+                <div>
+                  <Label className="text-xs">Projeto <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+                  <Select
+                    value={(editingTag as any).project_id || '_none'}
+                    onValueChange={v => setEditingTag({ ...editingTag, project_id: v === '_none' ? null : v } as any)}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Todos os projetos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Todos os projetos</SelectItem>
+                      {editTagProjects.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useFunnels, Funnel } from '@/contexts/FunnelContext';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useProjects } from '@/hooks/useProjects';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ── Wave SVG ──────────────────────────────────────────────
@@ -91,12 +92,14 @@ function CreateFunnelModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null }) => void;
+  onCreate: (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null; project_id?: string | null }) => void;
 }) {
   const [name, setName] = useState('');
   const [stages, setStages] = useState<string[]>(['ENTRADA DO LEAD', '']);
   const [funnelDeptId, setFunnelDeptId] = useState('');
+  const [funnelProjectId, setFunnelProjectId] = useState('');
   const { data: departments = [] } = useDepartments();
+  const { data: projects = [] } = useProjects(funnelDeptId || undefined);
 
   const addStage = () => setStages((s) => [...s, '']);
   const removeStage = (idx: number) => setStages((s) => s.filter((_, i) => i !== idx));
@@ -110,10 +113,12 @@ function CreateFunnelModal({
       name: name.trim(),
       stages: validStages.map((label) => ({ label: label.trim(), count: 0 })),
       department_id: funnelDeptId || null,
+      project_id: funnelProjectId || null,
     });
     setName('');
     setStages(['ENTRADA DO LEAD', '']);
     setFunnelDeptId('');
+    setFunnelProjectId('');
     onClose();
   };
 
@@ -152,6 +157,25 @@ function CreateFunnelModal({
               </SelectContent>
             </Select>
           </div>
+
+          {funnelDeptId && projects.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">
+                Projeto <span className="text-muted-foreground font-normal normal-case">(opcional)</span>
+              </label>
+              <Select value={funnelProjectId || '_none'} onValueChange={v => setFunnelProjectId(v === '_none' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos os projetos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Todos os projetos</SelectItem>
+                  {projects.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">

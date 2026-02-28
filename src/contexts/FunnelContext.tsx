@@ -14,6 +14,7 @@ export interface Funnel {
   id: string;
   name: string;
   department_id: string | null;
+  project_id: string | null;
   stages: FunnelStage[];
   expanded: boolean;
 }
@@ -21,7 +22,7 @@ export interface Funnel {
 interface FunnelContextType {
   funnels: Funnel[];
   loading: boolean;
-  addFunnel: (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null }) => Promise<void>;
+  addFunnel: (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null; project_id?: string | null }) => Promise<void>;
   deleteFunnel: (id: string) => Promise<void>;
   getFunnel: (id: string) => Funnel | undefined;
   addStage: (funnelId: string, label: string) => Promise<void>;
@@ -77,6 +78,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
         id: f.id,
         name: f.name,
         department_id: (f as any).department_id ?? null,
+        project_id: (f as any).project_id ?? null,
         expanded: true,
         stages: (stagesData || [])
           .filter((s) => s.funnel_id === f.id)
@@ -95,11 +97,11 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
     fetchFunnels();
   }, [fetchFunnels]);
 
-  const addFunnel = async (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null }) => {
+  const addFunnel = async (data: { name: string; stages: { label: string; count: number }[]; department_id?: string | null; project_id?: string | null }) => {
     // company_id is set automatically by DB trigger
     const { data: newFunnel, error } = await supabase
       .from('funnels')
-      .insert({ name: data.name, department_id: data.department_id || null } as TablesInsert<'funnels'>)
+      .insert({ name: data.name, department_id: data.department_id || null, project_id: data.project_id || null } as TablesInsert<'funnels'>)
       .select()
       .single();
 

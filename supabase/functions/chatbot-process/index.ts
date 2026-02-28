@@ -31,7 +31,7 @@ serve(async (req) => {
     }
 
     // ── Real processing ──────────────────────────────────────────────────────
-    const { conversation_id, message_body, company_id, contact_id } = body;
+    const { conversation_id, message_body, company_id, contact_id, flow_id } = body;
 
     if (!conversation_id || !company_id) {
       return new Response(JSON.stringify({ error: "conversation_id and company_id are required" }), {
@@ -40,13 +40,18 @@ serve(async (req) => {
       });
     }
 
-    // Get active flow for company
-    const { data: flow, error: flowErr } = await supabase
+    // Get flow: if flow_id is provided use that specific flow; otherwise fallback to first active flow
+    const flowQuery = supabase
       .from("chatbot_flows")
       .select("*")
       .eq("company_id", company_id)
-      .eq("is_active", true)
-      .maybeSingle();
+      .eq("is_active", true);
+
+    if (flow_id) {
+      flowQuery.eq("id", flow_id);
+    }
+
+    const { data: flow, error: flowErr } = await flowQuery.maybeSingle();
 
     if (flowErr || !flow) {
       return new Response(JSON.stringify({ action: "no_flow" }), {

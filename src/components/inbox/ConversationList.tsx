@@ -36,7 +36,6 @@ const statusTabs: { label: string; value: Enums<'conversation_status'> | undefin
   { label: 'Atend.', value: 'open' },
   { label: 'Aguard.', value: 'pending' },
   { label: 'Resolv.', value: 'resolved' },
-  { label: 'Fechado', value: 'closed' },
 ];
 
 const statusColors: Record<string, string> = {
@@ -326,7 +325,6 @@ export default function ConversationList({
                     <SelectItem value="open">Em Atendimento</SelectItem>
                     <SelectItem value="pending">Aguardando</SelectItem>
                     <SelectItem value="resolved">Resolvido</SelectItem>
-                    <SelectItem value="closed">Fechado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
