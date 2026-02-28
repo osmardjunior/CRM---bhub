@@ -33,10 +33,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg">
-            AI
+          <div className="mx-auto mb-5 flex items-center justify-center">
+            <img src="/logo-dark.png" alt="ALL·IN" className="h-10 w-auto object-contain" />
           </div>
-          <h1 className="text-xl font-bold text-foreground">All In CRM</h1>
+          <h1 className="text-xl font-bold text-foreground">ALL·IN — Comercial</h1>
           <p className="text-sm text-muted-foreground mt-1">Faça login para continuar</p>
         </div>
 

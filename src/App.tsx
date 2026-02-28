@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy, type ReactNode } from "react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { FunnelProvider } from "./contexts/FunnelContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary";
 import AppLayout from "./components/AppLayout";
@@ -66,6 +67,7 @@ const PageLoader = () => (
 
 const App = () => (
   <ErrorBoundary>
+  <ThemeProvider>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -112,6 +114,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </ThemeProvider>
   </ErrorBoundary>
 );
 

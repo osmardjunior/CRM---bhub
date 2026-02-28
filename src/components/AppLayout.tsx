@@ -1,4 +1,5 @@
 import { useState, useEffect, type ComponentType } from 'react';
+import { useTheme } from '@/contexts/ThemeContext';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebarStats } from '@/hooks/useSidebarStats';
@@ -30,6 +31,8 @@ import {
   Puzzle,
   Headphones,
   FolderOpen,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -58,6 +61,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { profile, role, signOut } = useAuth();
   const { data: stats } = useSidebarStats();
   const { data: company } = useCompany();
+  const { theme, toggleTheme } = useTheme();
 
   const userName = profile?.name || 'Usuário';
   const userInitials = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -137,8 +141,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'w-16' : 'w-64'}`}>
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-bold text-sm">AI</div>
-          {!collapsed && <span className="text-lg font-semibold text-sidebar-accent-foreground whitespace-nowrap">All In CRM</span>}
+          {collapsed ? (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+              <img src="/logo-white.png" alt="ALL·IN" className="h-6 w-auto object-contain" />
+            </div>
+          ) : (
+            <img src="/logo-white.png" alt="ALL·IN" className="h-7 w-auto object-contain" />
+          )}
           <button onClick={() => setSidebarOpen(false)} className="ml-auto text-sidebar-muted hover:text-sidebar-foreground lg:hidden"><X size={20} /></button>
         </div>
 
@@ -217,6 +226,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
               <Building2 size={14} />
               <span className="max-w-[120px] truncate">{companyName}</span>
+            </Button>
+
+            {/* Theme toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Mudar para modo claro' : 'Mudar para modo escuro'}
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </Button>
 
             {/* Notifications */}

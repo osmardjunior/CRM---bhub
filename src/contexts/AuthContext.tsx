@@ -46,6 +46,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // SSO: absorver token vindo do portal ALL-IN via hash da URL
+    const hash = window.location.hash
+    if (hash.includes('type=portal_sso')) {
+      const params = new URLSearchParams(hash.slice(1))
+      const access_token = params.get('access_token')
+      const refresh_token = params.get('refresh_token')
+      if (access_token && refresh_token) {
+        supabase.auth.setSession({ access_token, refresh_token }).then(() => {
+          // limpar hash após absorver
+          history.replaceState(null, '', window.location.pathname)
+        })
+      }
+    }
+
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
