@@ -84,10 +84,7 @@ export function useChatbotFlows() {
 
   const toggleActive = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      if (is_active) {
-        // Deactivate all first, then activate this one
-        await supabase.from('chatbot_flows').update({ is_active: false }).eq('company_id', companyId!);
-      }
+      // Allow multiple flows to be active simultaneously
       const { error } = await supabase.from('chatbot_flows').update({ is_active }).eq('id', id);
       if (error) throw error;
     },

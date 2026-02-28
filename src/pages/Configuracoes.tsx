@@ -779,9 +779,9 @@ export default function ConfiguracoesPage() {
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
   const [newTagDeptId, setNewTagDeptId] = useState<string>('');
   const [newTagProjectId, setNewTagProjectId] = useState('');
+  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string; project_id?: string | null } | null>(null);
   const { data: newTagDeptProjects = [] } = useProjects(newTagDeptId || undefined);
-  const { data: editTagProjects = [] } = useProjects((editingTag as any)?.department_id || undefined);
-  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string } | null>(null);
+  const { data: editTagProjects = [] } = useProjects(editingTag?.department_id || undefined);
 
   // Departamentos: expandir para ver usuários
   const [expandedDeptId, setExpandedDeptId] = useState<string | null>(null);
