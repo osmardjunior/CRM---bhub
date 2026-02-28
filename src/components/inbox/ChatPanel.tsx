@@ -227,7 +227,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const { data: teamMembers } = useTeamMembers();
   const { data: quickReplies = [] } = useQuickReplies();
   const permissions = usePermissions();
-  const { user, companyId } = useAuth();
+  const { user, companyId, role } = useAuth();
   const queryClient = useQueryClient();
   const [closing, setClosing] = useState(false);
   const [changeNumberOpen, setChangeNumberOpen] = useState(false);
@@ -588,9 +588,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           <p className="text-xs text-muted-foreground">
             {isGroup ? 'Conversa em grupo' : conversation.contact.phone}
           </p>
-          <Popover open={changeNumberOpen} onOpenChange={setChangeNumberOpen}>
+          <Popover open={role === 'agent' ? false : changeNumberOpen} onOpenChange={role === 'agent' ? undefined : setChangeNumberOpen}>
             <PopoverTrigger asChild>
-              <button className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit transition-opacity hover:opacity-75 ${
+              <button
+                disabled={role === 'agent'}
+                className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit transition-opacity ${role !== 'agent' ? 'hover:opacity-75' : 'cursor-default'} ${
                 conversation.integration
                   ? conversation.integration.status === 'connected'
                     ? 'bg-green-500/15 text-green-700 dark:text-green-400'
@@ -601,13 +603,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                 {conversation.integration ? (
                   <>
                     <span>{conversation.integration.device_name}</span>
+                    {conversation.integration.phone_number && (
+                      <><span className="opacity-60">·</span><span>{conversation.integration.phone_number}</span></>
+                    )}
                     <span className="opacity-60">·</span>
                     <span>{conversation.integration.status === 'connected' ? 'Conectado' : 'Desconectado'}</span>
                   </>
                 ) : (
                   <span>Sem número vinculado</span>
                 )}
-                <ArrowLeftRight size={8} className="opacity-50 ml-0.5" />
+                {role !== 'agent' && <ArrowLeftRight size={8} className="opacity-50 ml-0.5" />}
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-60 p-2" align="start" side="bottom">

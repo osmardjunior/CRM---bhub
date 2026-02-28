@@ -31,7 +31,7 @@ export function useTeamProfiles() {
     queryFn: async () => {
       const { data: profiles, error: pErr } = await supabase
         .from('profiles')
-        .select('id, name, email, status, display_name, spy_mode, access_hours, custom_permissions, is_active, round_robin_weight, last_seen_at')
+        .select('id, name, email, status, display_name, spy_mode, access_hours, custom_permissions, is_active, round_robin_weight, last_seen_at, allowed_integration_ids')
         .eq('company_id', companyId!);
       if (pErr) throw pErr;
 

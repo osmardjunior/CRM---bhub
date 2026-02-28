@@ -476,6 +476,56 @@ function EditUserModal({ user, onClose, onSaved, roundRobinMode, teamMembers }: 
               />
             </div>
 
+            {/* Números WhatsApp permitidos */}
+            {integrations.length > 0 && (
+              <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Números WhatsApp permitidos</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Sem seleção = acesso a todos os números. Selecione para restringir.</p>
+                </div>
+                <div className="space-y-1.5">
+                  {integrations.map(intg => {
+                    const checked = form.allowed_integration_ids?.includes(intg.id) ?? false;
+                    return (
+                      <label key={intg.id} className="flex items-center gap-2.5 cursor-pointer hover:bg-accent/30 px-1 py-0.5 rounded">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(c) => {
+                            setForm(f => {
+                              const current = f.allowed_integration_ids ?? [];
+                              return {
+                                ...f,
+                                allowed_integration_ids: c
+                                  ? [...current, intg.id]
+                                  : current.filter(id => id !== intg.id),
+                              };
+                            });
+                          }}
+                        />
+                        <span className="text-sm select-none">
+                          {intg.phone_number || intg.device_name}
+                          {intg.phone_number && intg.device_name && (
+                            <span className="text-xs text-muted-foreground ml-1.5">({intg.device_name})</span>
+                          )}
+                        </span>
+                        <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full ${intg.status === 'connected' ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
+                          {intg.status === 'connected' ? 'Conectado' : intg.status}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {(form.allowed_integration_ids?.length ?? 0) > 0 && (
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                    onClick={() => setForm(f => ({ ...f, allowed_integration_ids: null }))}
+                  >
+                    Limpar restrição (liberar todos)
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Horário de Acesso */}
             <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -761,6 +811,7 @@ export default function ConfiguracoesPage() {
   const { data: teamMembers, isLoading: loadingTeam } = useTeamProfiles();
   const { data: company, isLoading: loadingCompany } = useCompany();
   const updateCompany = useUpdateCompany();
+  const { data: allIntegrations = [] } = useIntegrations();
 
   // Departments
   const { data: departments = [], isLoading: loadingDepts } = useDepartments();
@@ -984,6 +1035,7 @@ export default function ConfiguracoesPage() {
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Cargo</th>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden sm:table-cell">Status</th>
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden lg:table-cell">Visto por último</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden xl:table-cell">Números</th>
                     <th className="px-4 py-2.5 w-16 text-right text-xs font-medium text-muted-foreground">Ações</th>
                   </tr>
                 </thead>
@@ -1022,6 +1074,24 @@ export default function ConfiguracoesPage() {
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-xs text-muted-foreground">
                         {formatLastSeen(u.last_seen_at)}
+                      </td>
+                      <td className="px-4 py-3 hidden xl:table-cell">
+                        {(() => {
+                          const ids = (u as any).allowed_integration_ids as string[] | null;
+                          if (!ids || ids.length === 0) {
+                            return <span className="text-xs text-muted-foreground">Todos</span>;
+                          }
+                          const phones = allIntegrations.filter(i => ids.includes(i.id));
+                          return (
+                            <div className="flex flex-wrap gap-1">
+                              {phones.map(p => (
+                                <span key={p.id} className="text-[10px] bg-secondary border border-border rounded px-1.5 py-0.5 text-foreground">
+                                  {p.phone_number || p.device_name}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
