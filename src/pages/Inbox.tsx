@@ -37,6 +37,7 @@ export default function InboxPage() {
   const [profileOpen, setProfileOpen] = useState(true);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
     status: initialStatus ?? undefined,
+    statusIn: initialStatus ? undefined : ['new', 'open', 'pending', 'resolved'],
     search: initialSearch ?? undefined,
     project_id: effectiveProjectId || undefined,
   });

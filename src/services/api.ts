@@ -115,6 +115,7 @@ export async function getMyProfile(): Promise<Profile> {
 // ── Conversations ──────────────────────────────────────
 export interface ConversationFilters {
   status?: Conversation['status'];
+  statusIn?: Conversation['status'][];
   channel?: Conversation['channel'];
   search?: string;
   name?: string;
@@ -154,6 +155,8 @@ export async function listConversations(
 
   if (filters?.status) {
     query = query.eq('status', filters.status);
+  } else if (filters?.statusIn) {
+    query = query.in('status', filters.statusIn);
   }
   if (filters?.channel) {
     query = query.eq('channel', filters.channel);

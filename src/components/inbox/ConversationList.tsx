@@ -36,6 +36,7 @@ const statusTabs: { label: string; value: Enums<'conversation_status'> | undefin
   { label: 'Atend.', value: 'open' },
   { label: 'Aguard.', value: 'pending' },
   { label: 'Resolv.', value: 'resolved' },
+  { label: 'Fechado', value: 'closed' },
 ];
 
 const statusColors: Record<string, string> = {
@@ -325,6 +326,7 @@ export default function ConversationList({
                     <SelectItem value="open">Em Atendimento</SelectItem>
                     <SelectItem value="pending">Aguardando</SelectItem>
                     <SelectItem value="resolved">Resolvido</SelectItem>
+                    <SelectItem value="closed">Fechado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -362,7 +364,14 @@ export default function ConversationList({
         {statusTabs.map((tab) => (
           <button
             key={tab.value ?? 'all'}
-            onClick={() => onFilterChange({ status: tab.value })}
+            onClick={() => {
+              if (tab.value) {
+                onFilterChange({ status: tab.value, statusIn: undefined });
+              } else {
+                // "Todos" exclui conversas fechadas
+                onFilterChange({ status: undefined, statusIn: ['new', 'open', 'pending', 'resolved'] });
+              }
+            }}
             className={`flex-1 min-w-[48px] py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap px-1 ${
               activeStatus === tab.value
                 ? 'border-b-2 border-primary text-primary'
