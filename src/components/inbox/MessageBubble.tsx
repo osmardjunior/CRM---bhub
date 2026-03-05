@@ -77,7 +77,21 @@ function MediaContent({ url, dbType }: { url: string; dbType?: string | null }) 
       );
     case 'video':
       return (
-        <video controls className="rounded-lg max-w-full max-h-64" preload="metadata">
+        <video
+          controls
+          playsInline
+          preload="auto"
+          className="rounded-lg max-w-full max-h-64"
+          onError={(e) => {
+            const el = e.currentTarget;
+            if (!el.dataset.retried && el.src !== url) {
+              el.dataset.retried = '1';
+              el.src = url;
+              el.load();
+            }
+          }}
+        >
+          <source src={url} type="video/mp4" />
           <source src={url} />
         </video>
       );
