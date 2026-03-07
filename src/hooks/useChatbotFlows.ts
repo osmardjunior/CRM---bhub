@@ -13,6 +13,8 @@ export interface ChatbotFlow {
   offline_message: string;
   ai_instructions: string;
   timeout_minutes: number;
+  department_id: string | null;
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,10 +47,11 @@ export function useChatbotFlows() {
   });
 
   const createFlow = useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async (payload: string | { name: string; department_id?: string | null; project_id?: string | null }) => {
+      const insert = typeof payload === 'string' ? { name: payload } : payload;
       const { data, error } = await supabase
         .from('chatbot_flows')
-        .insert([{ name }] as any)
+        .insert([insert] as any)
         .select()
         .single();
       if (error) throw error;

@@ -61,7 +61,7 @@ export default function Chatbot() {
           <FlowList
             flows={flows}
             onSelect={handleSelectFlow}
-            onCreate={name => createFlow.mutate(name)}
+            onCreate={payload => createFlow.mutate(payload)}
             onCreateFromTemplate={handleCreateFromTemplate}
             onDelete={id => deleteFlow.mutate(id)}
             onToggleActive={(id, active) => toggleActive.mutate({ id, is_active: active })}

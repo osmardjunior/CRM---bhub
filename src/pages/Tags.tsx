@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { usePermissions } from '@/hooks/usePermissions';
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/hooks/useTags';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useProjects } from '@/hooks/useProjects';
 import PageHeader from '@/components/shared/PageHeader';
 
 const TAG_COLORS = [
@@ -21,6 +22,7 @@ export default function TagsPage() {
   const permissions = usePermissions();
   const { data: tags = [], isLoading } = useTags();
   const { data: departments = [] } = useDepartments();
+  const { data: allProjects = [] } = useProjects();
   const createTag = useCreateTag();
   const updateTag = useUpdateTag();
   const deleteTag = useDeleteTag();
@@ -28,16 +30,22 @@ export default function TagsPage() {
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
   const [newTagDeptId, setNewTagDeptId] = useState<string>('');
-  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string | null } | null>(null);
+  const [newTagProjectId, setNewTagProjectId] = useState<string>('');
+  const [editingTag, setEditingTag] = useState<{ id: string; name: string; color: string; department_id?: string | null; project_id?: string | null } | null>(null);
+
+  // Projects filtered by selected department
+  const { data: newTagProjects = [] } = useProjects(newTagDeptId || undefined);
+  const { data: editTagProjects = [] } = useProjects(editingTag?.department_id || undefined);
 
   const handleCreateTag = () => {
     const name = newTagName.trim();
     if (!name) return;
-    createTag.mutate({ name, color: newTagColor, department_id: newTagDeptId || null as any }, {
+    createTag.mutate({ name, color: newTagColor, department_id: newTagDeptId || null as any, project_id: newTagProjectId || null as any }, {
       onSuccess: () => {
         setNewTagName('');
         setNewTagColor(TAG_COLORS[0]);
         setNewTagDeptId('');
+        setNewTagProjectId('');
       },
     });
   };
@@ -49,6 +57,7 @@ export default function TagsPage() {
       name: editingTag.name,
       color: editingTag.color,
       department_id: editingTag.department_id,
+      project_id: editingTag.project_id,
     });
     setEditingTag(null);
   };
@@ -93,18 +102,32 @@ export default function TagsPage() {
                 <Plus size={14} /> Criar
               </Button>
             </div>
-            {departments.length > 0 && (
-              <Select value={newTagDeptId} onValueChange={setNewTagDeptId}>
-                <SelectTrigger className="h-8 text-xs bg-secondary border-0">
-                  <SelectValue placeholder="Departamento (opcional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {departments.map(d => (
-                    <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <div className="flex gap-2">
+              {departments.length > 0 && (
+                <Select value={newTagDeptId} onValueChange={v => { setNewTagDeptId(v); setNewTagProjectId(''); }}>
+                  <SelectTrigger className="h-8 text-xs bg-secondary border-0 flex-1">
+                    <SelectValue placeholder="Departamento (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map(d => (
+                      <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {newTagDeptId && newTagProjects.length > 0 && (
+                <Select value={newTagProjectId} onValueChange={setNewTagProjectId}>
+                  <SelectTrigger className="h-8 text-xs bg-secondary border-0 flex-1">
+                    <SelectValue placeholder="Projeto (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {newTagProjects.map(p => (
+                      <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <div className="flex gap-1 items-center flex-wrap">
               {TAG_COLORS.map(c => (
                 <button
@@ -154,14 +177,29 @@ export default function TagsPage() {
                           {departments.length > 0 && (
                             <Select
                               value={editingTag.department_id ?? ''}
-                              onValueChange={v => setEditingTag({ ...editingTag, department_id: v || null })}
+                              onValueChange={v => setEditingTag({ ...editingTag, department_id: v || null, project_id: null })}
                             >
-                              <SelectTrigger className="h-7 text-xs w-32 bg-background">
+                              <SelectTrigger className="h-7 text-xs w-28 bg-background">
                                 <SelectValue placeholder="Depto." />
                               </SelectTrigger>
                               <SelectContent>
                                 {departments.map(d => (
                                   <SelectItem key={d.id} value={d.id} className="text-xs">{d.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {editingTag.department_id && editTagProjects.length > 0 && (
+                            <Select
+                              value={editingTag.project_id ?? ''}
+                              onValueChange={v => setEditingTag({ ...editingTag, project_id: v || null })}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-28 bg-background">
+                                <SelectValue placeholder="Projeto" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {editTagProjects.map(p => (
+                                  <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
@@ -182,10 +220,17 @@ export default function TagsPage() {
                         </>
                       ) : (
                         <>
-                          <span className="text-sm text-foreground flex-1">{tag.name}</span>
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            <span className="text-sm text-foreground">{tag.name}</span>
+                            {tag.project_id && (
+                              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                                {allProjects.find(p => p.id === tag.project_id)?.name ?? 'Projeto'}
+                              </span>
+                            )}
+                          </div>
                           {permissions.isAdmin && (
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id })}>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id, project_id: tag.project_id })}>
                                 <Pencil size={13} />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>

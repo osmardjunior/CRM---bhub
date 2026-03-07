@@ -26,6 +26,7 @@ import {
   Smartphone,
   ArrowLeftRight,
   AlertTriangle,
+  FolderOpen,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
 import MessageBubble from '@/components/inbox/MessageBubble';
 import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import AudioRecorder from '@/components/inbox/AudioRecorder';
+import MediaPickerModal from '@/components/inbox/MediaPickerModal';
 import { useSendMessage } from '@/hooks/useConversations';
 import { useTeamMembers } from '@/hooks/useContacts';
 import { useIntegrations } from '@/hooks/useIntegrations';
@@ -217,6 +219,7 @@ interface Props {
 export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen, onBack }: Props) {
   const [input, setInput] = useState('');
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
   const [isAnnotationMode, setIsAnnotationMode] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -393,6 +396,54 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     }
   }, [conversation, companyId, user, queryClient]);
 
+  // Send file from media library (no re-upload needed)
+  const handleMediaPickerSelect = useCallback(async (url: string, mimeType: string, fileName: string) => {
+    if (!conversation || !companyId || !user) return;
+    try {
+      const body = mimeType.startsWith('image/') ? '📷 Imagem' : mimeType.startsWith('audio/') ? '🎵 Áudio' : mimeType.startsWith('video/') ? '🎬 Vídeo' : `📎 ${fileName.replace(/^\d+_/, '')}`;
+
+      const { error: msgErr } = await supabase.from('messages').insert({
+        conversation_id: conversation.id,
+        company_id: companyId,
+        sender_type: 'agent',
+        sender_id: user.id,
+        body,
+        media_url: url,
+      });
+      if (msgErr) throw new Error(msgErr.message);
+
+      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
+
+      // Send via WhatsApp
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: url }),
+          });
+          const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
+          if (!whatsappData.delivered) {
+            toast.warning('Arquivo salvo, mas não encaminhado via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
+          }
+        }
+      } catch {
+        // WhatsApp send is non-fatal
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      toast.success('Arquivo enviado!');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo');
+    }
+  }, [conversation, companyId, user, queryClient]);
+
   // Audio send
   const handleAudioSend = useCallback(async (blob: Blob) => {
     if (!conversation || !companyId || !user) {
@@ -564,211 +615,221 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   return (
     <div className="flex flex-1 flex-col min-w-0">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 bg-card">
-        {onBack && (
-          <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 shrink-0" onClick={onBack}>
-            <ChevronLeft size={18} />
-          </Button>
-        )}
-        <ConversationAvatar
-          name={conversation.contact.name}
-          avatarUrl={contactAvatarUrl}
-          isGroup={isGroup}
-          size="md"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-foreground">{conversation.contact.name}</span>
-            {isGroup && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">
-                Grupo
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {isGroup ? 'Conversa em grupo' : conversation.contact.phone}
-          </p>
-          <Popover open={role === 'agent' ? false : changeNumberOpen} onOpenChange={role === 'agent' ? undefined : setChangeNumberOpen}>
-            <PopoverTrigger asChild>
-              <button
-                disabled={role === 'agent'}
-                className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit transition-opacity ${role !== 'agent' ? 'hover:opacity-75' : 'cursor-default'} ${
-                conversation.integration
-                  ? conversation.integration.status === 'connected'
-                    ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                    : 'bg-red-500/15 text-red-700 dark:text-red-400'
-                  : 'bg-muted text-muted-foreground'
-              }`}>
-                <Smartphone size={9} />
-                {conversation.integration ? (
-                  <>
-                    <span>{conversation.integration.device_name}</span>
-                    {conversation.integration.phone_number && (
-                      <><span className="opacity-60">·</span><span>{conversation.integration.phone_number}</span></>
-                    )}
-                    <span className="opacity-60">·</span>
-                    <span>{conversation.integration.status === 'connected' ? 'Conectado' : 'Desconectado'}</span>
-                  </>
-                ) : (
-                  <span>Sem número vinculado</span>
-                )}
-                {role !== 'agent' && <ArrowLeftRight size={8} className="opacity-50 ml-0.5" />}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-60 p-2" align="start" side="bottom">
-              <p className="text-xs font-semibold text-foreground mb-1">Trocar número</p>
-              <p className="text-[10px] text-muted-foreground mb-2">O número não muda automaticamente — apenas quando alterado aqui.</p>
-              <div className="space-y-0.5">
-                {whatsappIntegrations.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhum aparelho cadastrado</p>
-                ) : (
-                  whatsappIntegrations.map(integ => (
-                    <button
-                      key={integ.id}
-                      onClick={() => handleChangeIntegration(integ.id)}
-                      className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs transition-colors text-left ${
-                        integ.id === conversation.integration?.id
-                          ? 'bg-primary/10 text-primary font-semibold'
-                          : 'hover:bg-accent text-foreground'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${integ.status === 'connected' ? 'bg-green-500' : 'bg-red-400'}`} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate">{integ.device_name}</p>
-                        {integ.phone_number && (
-                          <p className="text-[10px] text-muted-foreground truncate">{integ.phone_number}</p>
-                        )}
-                      </div>
-                      {integ.id === conversation.integration?.id && (
-                        <span className="text-[9px] text-primary shrink-0">atual</span>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 bg-card">
+        {/* Row 1: Back + Avatar + Name + Action buttons */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {onBack && (
+            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 shrink-0" onClick={onBack}>
+              <ChevronLeft size={18} />
+            </Button>
+          )}
+          <ConversationAvatar
+            name={conversation.contact.name}
+            avatarUrl={contactAvatarUrl}
+            isGroup={isGroup}
+            size="md"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
+              {isGroup && (
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
+                  Grupo
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground truncate">
+              {isGroup ? 'Conversa em grupo' : conversation.contact.phone}
+            </p>
+            <Popover open={role === 'agent' ? false : changeNumberOpen} onOpenChange={role === 'agent' ? undefined : setChangeNumberOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  disabled={role === 'agent'}
+                  className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit max-w-full transition-opacity ${role !== 'agent' ? 'hover:opacity-75' : 'cursor-default'} ${
+                  conversation.integration
+                    ? conversation.integration.status === 'connected'
+                      ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                      : 'bg-red-500/15 text-red-700 dark:text-red-400'
+                    : 'bg-muted text-muted-foreground'
+                }`}>
+                  <Smartphone size={9} className="shrink-0" />
+                  {conversation.integration ? (
+                    <>
+                      <span className="truncate">{conversation.integration.device_name}</span>
+                      {conversation.integration.phone_number && (
+                        <><span className="opacity-60 shrink-0">·</span><span className="truncate hidden sm:inline">{conversation.integration.phone_number}</span></>
                       )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
+                      <span className="opacity-60 shrink-0">·</span>
+                      <span className="shrink-0">{conversation.integration.status === 'connected' ? 'Conectado' : 'Desconectado'}</span>
+                    </>
+                  ) : (
+                    <span>Sem número vinculado</span>
+                  )}
+                  {role !== 'agent' && <ArrowLeftRight size={8} className="opacity-50 ml-0.5 shrink-0" />}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-60 p-2" align="start" side="bottom">
+                <p className="text-xs font-semibold text-foreground mb-1">Trocar número</p>
+                <p className="text-[10px] text-muted-foreground mb-2">O número não muda automaticamente — apenas quando alterado aqui.</p>
+                <div className="space-y-0.5">
+                  {whatsappIntegrations.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhum aparelho cadastrado</p>
+                  ) : (
+                    whatsappIntegrations.map(integ => (
+                      <button
+                        key={integ.id}
+                        onClick={() => handleChangeIntegration(integ.id)}
+                        className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs transition-colors text-left ${
+                          integ.id === conversation.integration?.id
+                            ? 'bg-primary/10 text-primary font-semibold'
+                            : 'hover:bg-accent text-foreground'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${integ.status === 'connected' ? 'bg-green-500' : 'bg-red-400'}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate">{integ.device_name}</p>
+                          {integ.phone_number && (
+                            <p className="text-[10px] text-muted-foreground truncate">{integ.phone_number}</p>
+                          )}
+                        </div>
+                        {integ.id === conversation.integration?.id && (
+                          <span className="text-[9px] text-primary shrink-0">atual</span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
-        {/* Status dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              className={`h-8 gap-1.5 text-xs font-semibold rounded-full px-3 ${statusButtonClass[conversation.status] ?? statusButtonClass.closed}`}
-            >
-              {statusLabel[conversation.status] ?? conversation.status}
-              <ChevronDown size={12} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            {conversation.status !== 'new' && (
-              <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('new')}>
-                <span className="font-semibold text-green-600 dark:text-green-400">Aberto</span>
-                <span className="text-muted-foreground text-[10px]">Uma nova conversa ou reiniciada.</span>
-              </DropdownMenuItem>
-            )}
-            {conversation.status !== 'open' && (
-              <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('open')}>
-                <span className="font-semibold text-blue-600 dark:text-blue-400">Em Atendimento</span>
-                <span className="text-muted-foreground text-[10px]">Cliente está sendo atendido.</span>
-              </DropdownMenuItem>
-            )}
-            {conversation.status !== 'pending' && (
-              <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('pending')}>
-                <span className="font-semibold text-amber-600 dark:text-amber-400">Aguardando</span>
-                <span className="text-muted-foreground text-[10px]">Aguardando uma ação sua ou do cliente.</span>
-              </DropdownMenuItem>
-            )}
-            {conversation.status !== 'resolved' && (
-              <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('resolved')} disabled={closing}>
-                <span className="font-semibold text-purple-600 dark:text-purple-400">Resolvido</span>
-                <span className="text-muted-foreground text-[10px]">Cliente foi atendido e foi resolvido.</span>
-              </DropdownMenuItem>
-            )}
-            {conversation.status !== 'closed' && (
-              <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('closed')} disabled={closing}>
-                <span className="font-semibold text-red-700 dark:text-red-400">Fechado</span>
-                <span className="text-muted-foreground text-[10px]">Cliente foi atendido sem conclusão.</span>
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Assign dropdown */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div>
-              <Select
-                value={conversation.assigned_user_id ?? ''}
-                disabled={!canReassign && conversation.assigned_user_id === user?.id}
-                onValueChange={handleAssignAgent}
+        {/* Row 2: Status + Assign + Actions (wraps to new line on small screens) */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Status dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                className={`h-7 gap-1 text-[11px] font-semibold rounded-full px-2.5 shrink-0 min-w-fit ${statusButtonClass[conversation.status] ?? statusButtonClass.closed}`}
               >
-                <SelectTrigger className={`h-8 w-[140px] text-xs ${!canReassign ? 'opacity-60' : ''}`}>
-                  <SelectValue placeholder="Atribuir agente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableMembers.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </TooltipTrigger>
-          {reassignTooltip && (
-            <TooltipContent side="bottom">
-              <p className="text-xs">{reassignTooltip}</p>
-            </TooltipContent>
-          )}
-        </Tooltip>
+                {statusLabel[conversation.status] ?? conversation.status}
+                <ChevronDown size={11} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              {conversation.status !== 'new' && (
+                <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('new')}>
+                  <span className="font-semibold text-green-600 dark:text-green-400">Aberto</span>
+                  <span className="text-muted-foreground text-[10px]">Uma nova conversa ou reiniciada.</span>
+                </DropdownMenuItem>
+              )}
+              {conversation.status !== 'open' && (
+                <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('open')}>
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">Em Atendimento</span>
+                  <span className="text-muted-foreground text-[10px]">Cliente está sendo atendido.</span>
+                </DropdownMenuItem>
+              )}
+              {conversation.status !== 'pending' && (
+                <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('pending')}>
+                  <span className="font-semibold text-amber-600 dark:text-amber-400">Aguardando</span>
+                  <span className="text-muted-foreground text-[10px]">Aguardando uma ação sua ou do cliente.</span>
+                </DropdownMenuItem>
+              )}
+              {conversation.status !== 'resolved' && (
+                <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('resolved')} disabled={closing}>
+                  <span className="font-semibold text-purple-600 dark:text-purple-400">Resolvido</span>
+                  <span className="text-muted-foreground text-[10px]">Cliente foi atendido e foi resolvido.</span>
+                </DropdownMenuItem>
+              )}
+              {conversation.status !== 'closed' && (
+                <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('closed')} disabled={closing}>
+                  <span className="font-semibold text-red-700 dark:text-red-400">Fechado</span>
+                  <span className="text-muted-foreground text-[10px]">Cliente foi atendido sem conclusão.</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-primary" onClick={() => setAIDrawerOpen(true)}>
-              <Sparkles size={16} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom"><p className="text-xs">Assistente IA</p></TooltipContent>
-        </Tooltip>
+          {/* Assign dropdown */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Select
+                  value={conversation.assigned_user_id ?? ''}
+                  disabled={!canReassign && conversation.assigned_user_id === user?.id}
+                  onValueChange={handleAssignAgent}
+                >
+                  <SelectTrigger className={`h-7 w-[110px] sm:w-[140px] text-[11px] ${!canReassign ? 'opacity-60' : ''}`}>
+                    <SelectValue placeholder="Atribuir" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableMembers.map((m) => (
+                      <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </TooltipTrigger>
+            {reassignTooltip && (
+              <TooltipContent side="bottom">
+                <p className="text-xs">{reassignTooltip}</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
 
-        <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={onToggleProfile}>
-          {profileOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-        </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7 text-primary" onClick={() => setAIDrawerOpen(true)}>
+                <Sparkles size={15} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p className="text-xs">Assistente IA</p></TooltipContent>
+          </Tooltip>
 
-        {/* Mais Opções */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8">
-              <MoreVertical size={16} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem className="text-xs gap-2" onClick={() => queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] })}>
-              <RefreshCw size={13} /> Recarregar mensagens
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs gap-2" onClick={() => setIsAnnotationMode(true)}>
-              <StickyNote size={13} /> Escrever uma anotação
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs gap-2" onClick={() => setAIDrawerOpen(true)}>
-              <Bot size={13} /> Executar Diálogo / Chatbot
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
-              try {
-                await markConversationUnread(conversation.id);
-                queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
-                queryClient.invalidateQueries({ queryKey: ['unread-counts'] });
-                queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
-                toast.success('Conversa marcada como não lida');
-                if (onBack) onBack();
-              } catch {
-                toast.error('Erro ao marcar como não lido');
-              }
-            }}>
-              <BellRing size={13} /> Marcar como não lida
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7 hidden sm:flex" onClick={onToggleProfile}>
+            {profileOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+          </Button>
+
+          {/* Mais Opções */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7">
+                <MoreVertical size={15} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem className="text-xs gap-2" onClick={() => queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] })}>
+                <RefreshCw size={13} /> Recarregar mensagens
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-xs gap-2" onClick={() => setIsAnnotationMode(true)}>
+                <StickyNote size={13} /> Escrever uma anotação
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-xs gap-2" onClick={() => setAIDrawerOpen(true)}>
+                <Bot size={13} /> Executar Diálogo / Chatbot
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-xs gap-2 sm:hidden" onClick={onToggleProfile}>
+                {profileOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+                {profileOpen ? 'Fechar perfil' : 'Ver perfil'}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
+                try {
+                  await markConversationUnread(conversation.id);
+                  queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                  queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+                  queryClient.invalidateQueries({ queryKey: ['unread-counts'] });
+                  queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
+                  toast.success('Conversa marcada como não lida');
+                  if (onBack) onBack();
+                } catch {
+                  toast.error('Erro ao marcar como não lido');
+                }
+              }}>
+                <BellRing size={13} /> Marcar como não lida
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* AI Chat Assist Drawer */}
@@ -776,13 +837,9 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
 
       {/* Messages area */}
       <div
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-1 chat-messages-bg"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
-        style={{
-          background: 'hsl(var(--secondary) / 0.5)',
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-        }}
       >
         {mergedItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -947,6 +1004,21 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  onClick={() => setMediaPickerOpen(true)}
+                >
+                  <FolderOpen size={17} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p className="text-xs">Biblioteca de arquivos</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
                   variant={isAnnotationMode ? 'default' : 'ghost'}
                   size="icon"
                   className={`h-8 w-8 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
@@ -1052,7 +1124,12 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         </div>
       </div>
 
-      {/* Hidden file input */}
+      {/* Media Picker Modal */}
+      <MediaPickerModal
+        open={mediaPickerOpen}
+        onClose={() => setMediaPickerOpen(false)}
+        onSelect={handleMediaPickerSelect}
+      />
     </div>
   );
 }
