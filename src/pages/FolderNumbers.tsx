@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { getAreaUserIds } from '@/lib/areaFilter';
 import { useProjects } from '@/hooks/useProjects';
 import {
   useIntegrations, useAddDevice, useUpdateDevice,
@@ -310,12 +311,15 @@ export default function FolderNumbers() {
     setEditConfig(d.config as Record<string, string> ?? {});
     setEditAgentsList([]);
     if (companyId) {
-      const { data: profiles } = await supabase
+      const areaUserIds = await getAreaUserIds();
+      let q = supabase
         .from('profiles')
         .select('id, name, allowed_integration_ids')
         .eq('company_id', companyId)
         .eq('is_active', true)
         .order('name');
+      if (areaUserIds) q = q.in('id', areaUserIds);
+      const { data: profiles } = await q;
       if (profiles) {
         setEditAgentsList(profiles.map((p: any) => ({
           id: p.id,
@@ -410,6 +414,20 @@ export default function FolderNumbers() {
             </Button>
           </div>
         )}
+      </div>
+
+      {/* Status Legend */}
+      <div className="mx-6 mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground text-xs">Legenda:</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Conectado — chip online e operacional
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Desconectado — chip offline, necessita reconexão
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" /> Verificando — checando status do chip
+        </span>
       </div>
 
       {/* Numbers list */}

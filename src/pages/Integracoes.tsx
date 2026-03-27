@@ -13,8 +13,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations, useAddDevice, useUpdateDevice, useDisconnectDevice, useDeleteDevice, type Integration } from '@/hooks/useIntegrations';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useProjects } from '@/hooks/useProjects';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { getAreaUserIds } from '@/lib/areaFilter';
 import PageHeader from '@/components/shared/PageHeader';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import EvolutionQRModal from '@/components/integracoes/EvolutionQRModal';
@@ -197,7 +199,8 @@ export default function IntegracoesPage() {
   const navigate = useNavigate();
   const permissions = usePermissions();
   const { companyId } = useAuth();
-  const { data: integrations, isLoading } = useIntegrations();
+  const { projectId } = useProjectContext();
+  const { data: integrations, isLoading } = useIntegrations(projectId || undefined);
   const { data: departments = [] } = useDepartments();
   const { data: allProjects = [] } = useProjects();
   const addDevice = useAddDevice();
@@ -344,12 +347,15 @@ export default function IntegracoesPage() {
     setEditConfig(device.config as Record<string, string> ?? {});
     setEditAgentsList([]); // reset while loading
     if (companyId) {
-      const { data: profiles } = await supabase
+      const areaUserIds = await getAreaUserIds();
+      let q = supabase
         .from('profiles')
         .select('id, name, allowed_integration_ids')
         .eq('company_id', companyId)
         .eq('is_active', true)
         .order('name');
+      if (areaUserIds) q = q.in('id', areaUserIds);
+      const { data: profiles } = await q;
       if (profiles) {
         const deviceId = device.id;
         setEditAgentsList(profiles.map((p: any) => ({

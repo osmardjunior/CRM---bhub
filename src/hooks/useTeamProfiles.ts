@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { getAreaUserIds } from '@/lib/areaFilter';
 
 type AccessHours = {
   enabled: boolean;
@@ -23,16 +24,20 @@ export interface TeamMember {
   last_seen_at: string | null;
 }
 
-export function useTeamProfiles() {
+export function useTeamProfiles(includeInactive = false) {
   const { companyId } = useAuth();
 
   return useQuery({
-    queryKey: ['team-profiles', companyId],
+    queryKey: ['team-profiles', companyId, includeInactive],
     queryFn: async () => {
-      const { data: profiles, error: pErr } = await supabase
+      const areaUserIds = await getAreaUserIds();
+      let query = supabase
         .from('profiles')
         .select('id, name, email, status, display_name, spy_mode, access_hours, custom_permissions, is_active, round_robin_weight, last_seen_at, allowed_integration_ids')
         .eq('company_id', companyId!);
+      if (areaUserIds) query = query.in('id', areaUserIds);
+      if (!includeInactive) query = query.eq('is_active', true);
+      const { data: profiles, error: pErr } = await query;
       if (pErr) throw pErr;
 
       const { data: roles, error: rErr } = await supabase
@@ -55,5 +60,7 @@ export function useTeamProfiles() {
       })) as TeamMember[];
     },
     enabled: !!companyId,
+    refetchInterval: 60_000, // was 15s — team rarely changes
+    staleTime: 30_000,
   });
 }

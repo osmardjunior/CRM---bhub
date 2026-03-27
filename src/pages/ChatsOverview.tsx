@@ -1,11 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Users } from 'lucide-react';
+import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { getAreaUserIds } from '@/lib/areaFilter';
+import { useUserProjects } from '@/hooks/useUserProjects';
 import ConversationList from '@/components/inbox/ConversationList';
 import {
   useInfiniteConversations,
@@ -13,7 +17,16 @@ import {
   useMarkConversationRead,
 } from '@/hooks/useConversations';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
 import type { ConversationFilters } from '@/services/api';
+
+function derivePresence(lastSeenAt: string | null): 'online' | 'away' | 'offline' {
+  if (!lastSeenAt) return 'offline';
+  const secsAgo = (Date.now() - new Date(lastSeenAt).getTime()) / 1000;
+  if (secsAgo < 180) return 'online';
+  if (secsAgo < 360) return 'away';
+  return 'offline';
+}
 
 // ── Types ────────────────────────────────────────────────
 interface AgentChatSummary {
@@ -29,22 +42,54 @@ interface AgentChatSummary {
 // ── Hook ─────────────────────────────────────────────────
 function useChatsOverview() {
   const { companyId } = useAuth();
+  const { projectId } = useProjectContext();
 
   return useQuery({
-    queryKey: ['chats-overview', companyId],
+    queryKey: ['chats-overview', companyId, projectId],
     enabled: !!companyId,
     queryFn: async () => {
-      const { data: conversations, error } = await supabase
+      let query = supabase
         .from('conversations')
         .select('id, status, assigned_user_id, profiles:assigned_user_id(id, name, email)')
         .eq('company_id', companyId!)
         .in('status', ['new', 'open', 'pending']);
+
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+
+      const { data: conversations, error } = await query;
 
       if (error) throw error;
 
       const agentMap: Record<string, AgentChatSummary> = {
         __unassigned__: { id: null, name: 'Ninguém Delegado', email: null, open: 0, inProgress: 0, waiting: 0, total: 0 },
       };
+
+      // Pre-populate with active team members from this area
+      const areaUserIds = await getAreaUserIds();
+      let profilesQuery = supabase
+        .from('profiles')
+        .select('id, name, email, is_active')
+        .eq('company_id', companyId!);
+      if (areaUserIds) profilesQuery = profilesQuery.in('id', areaUserIds);
+      const { data: allProfiles } = await profilesQuery;
+
+      let allowedMemberIds: Set<string> | null = null;
+      if (projectId) {
+        const { data: pm } = await supabase
+          .from('user_projects')
+          .select('user_id')
+          .eq('project_id', projectId)
+          .eq('active', true);
+        allowedMemberIds = new Set((pm ?? []).map(r => r.user_id));
+      }
+
+      for (const p of allProfiles ?? []) {
+        if (p.is_active === false) continue;
+        if (allowedMemberIds && !allowedMemberIds.has(p.id)) continue;
+        agentMap[p.id] = { id: p.id, name: p.name ?? 'Sem nome', email: p.email ?? null, open: 0, inProgress: 0, waiting: 0, total: 0 };
+      }
 
       for (const conv of conversations ?? []) {
         const userId = conv.assigned_user_id ?? '__unassigned__';
@@ -87,9 +132,42 @@ function useChatsOverview() {
 
 // ── Overview table ───────────────────────────────────────
 function OverviewTable() {
+  const navigate = useNavigate();
   const { data, isLoading } = useChatsOverview();
+  const { data: allTeamMembers = [] } = useTeamProfiles();
+  const { projectId } = useProjectContext();
+  const { data: projectMembers } = useUserProjects(projectId ?? '');
+  const teamMembers = useMemo(() => {
+    if (!projectId || !projectMembers) return allTeamMembers;
+    const memberSet = new Set(projectMembers.map(pm => pm.user_id));
+    return allTeamMembers.filter(m => memberSet.has(m.id));
+  }, [allTeamMembers, projectId, projectMembers]);
+  const [, setTick] = useState(0);
   const totals = data?.totals;
   const rows = data?.rows ?? [];
+
+  // Force re-render every 15s so presence dots update
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 15_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const getPresence = (agentId: string | null) => {
+    if (!agentId) return 'offline';
+    const tm = teamMembers.find(m => m.id === agentId);
+    return derivePresence(tm?.last_seen_at ?? null);
+  };
+
+  const presenceColor = (p: string) =>
+    p === 'online' ? 'bg-green-500' : p === 'away' ? 'bg-amber-500' : 'bg-red-400';
+
+  const handleCellClick = (agentId: string | null, status: string) => {
+    const params = new URLSearchParams();
+    params.set('status', status);
+    if (agentId) params.set('assigned', agentId);
+    else params.set('assigned', 'none');
+    navigate(`/inbox?${params.toString()}`);
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -97,7 +175,7 @@ function OverviewTable() {
       <div className="px-5 py-4 border-b border-border shrink-0">
         <h2 className="text-base font-bold text-foreground">Chats não resolvidos/fechados</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Visualize todos os chats que ainda não tiveram o atendimento concluído.
+          Visualize todos os chats que ainda não tiveram o atendimento concluído. Clique nos números para ver no Inbox.
         </p>
       </div>
 
@@ -114,12 +192,12 @@ function OverviewTable() {
                   Aberto{totals ? ` (${totals.open})` : ''}
                 </span>
               </th>
-              <th className="px-4 py-3 text-center min-w-[200px]">
+              <th className="px-4 py-3 text-center min-w-[200px] hidden lg:table-cell">
                 <span className="inline-flex items-center justify-center gap-1 bg-info/15 text-info rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
                   Em Atendimento{totals ? ` (${totals.inProgress})` : ''}
                 </span>
               </th>
-              <th className="px-4 py-3 text-center min-w-[170px]">
+              <th className="px-4 py-3 text-center min-w-[170px] hidden lg:table-cell">
                 <span className="inline-flex items-center justify-center gap-1 bg-warning/15 text-warning rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
                   Aguardando{totals ? ` (${totals.waiting})` : ''}
                 </span>
@@ -150,68 +228,90 @@ function OverviewTable() {
                     ))}
                   </tr>
                 ))
-              : rows.map((row, idx) => (
-                  <tr key={row.id ?? idx} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
-                    {/* Agent */}
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        {row.id === null ? (
-                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                            <Users size={14} className="text-muted-foreground" />
+              : rows.map((row, idx) => {
+                  const presence = getPresence(row.id);
+                  return (
+                    <tr key={row.id ?? idx} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
+                      {/* Agent + online indicator */}
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          {row.id === null ? (
+                            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                              <Users size={14} className="text-muted-foreground" />
+                            </div>
+                          ) : (
+                            <div className="relative shrink-0">
+                              <Avatar className="h-8 w-8">
+                                <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
+                                  {row.name[0]}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card ${presenceColor(presence)}`} />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium text-foreground truncate">{row.name}</p>
+                              {row.id && (
+                                <span className={`text-[9px] font-medium ${presence === 'online' ? 'text-green-500' : presence === 'away' ? 'text-amber-500' : 'text-red-400'}`}>
+                                  {presence === 'online' ? 'Online' : presence === 'away' ? 'Ausente' : 'Offline'}
+                                </span>
+                              )}
+                            </div>
+                            {row.email && <p className="text-xs text-muted-foreground truncate">{row.email}</p>}
                           </div>
+                        </div>
+                      </td>
+
+                      {/* Aberto — clickable */}
+                      <td className="px-4 py-3 text-center">
+                        {row.open > 0 ? (
+                          <button
+                            onClick={() => handleCellClick(row.id, 'new')}
+                            className="inline-flex items-center justify-center min-w-[52px] bg-destructive/10 text-destructive rounded-md px-3 py-1.5 text-sm font-semibold hover:bg-destructive/20 transition-colors cursor-pointer"
+                          >
+                            {row.open}
+                          </button>
                         ) : (
-                          <Avatar className="h-8 w-8 shrink-0">
-                            <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
-                              {row.name[0]}
-                            </AvatarFallback>
-                          </Avatar>
+                          <span className="text-muted-foreground text-sm">0</span>
                         )}
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{row.name}</p>
-                          {row.email && <p className="text-xs text-muted-foreground truncate">{row.email}</p>}
-                        </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Aberto */}
-                    <td className="px-4 py-3 text-center">
-                      {row.open > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[52px] bg-destructive/10 text-destructive rounded-md px-3 py-1.5 text-sm font-semibold">
-                          {row.open}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">0</span>
-                      )}
-                    </td>
+                      {/* Em Atendimento — clickable */}
+                      <td className="px-4 py-3 text-center hidden lg:table-cell">
+                        {row.inProgress > 0 ? (
+                          <button
+                            onClick={() => handleCellClick(row.id, 'open')}
+                            className="inline-flex items-center justify-center min-w-[52px] bg-info/10 text-info rounded-md px-3 py-1.5 text-sm font-semibold hover:bg-info/20 transition-colors cursor-pointer"
+                          >
+                            {row.inProgress}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">0</span>
+                        )}
+                      </td>
 
-                    {/* Em Atendimento */}
-                    <td className="px-4 py-3 text-center">
-                      {row.inProgress > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[52px] bg-info/10 text-info rounded-md px-3 py-1.5 text-sm font-semibold">
-                          {row.inProgress}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">0</span>
-                      )}
-                    </td>
+                      {/* Aguardando — clickable */}
+                      <td className="px-4 py-3 text-center hidden lg:table-cell">
+                        {row.waiting > 0 ? (
+                          <button
+                            onClick={() => handleCellClick(row.id, 'pending')}
+                            className="inline-flex items-center justify-center min-w-[52px] bg-warning/10 text-warning rounded-md px-3 py-1.5 text-sm font-semibold hover:bg-warning/20 transition-colors cursor-pointer"
+                          >
+                            {row.waiting}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">0</span>
+                        )}
+                      </td>
 
-                    {/* Aguardando */}
-                    <td className="px-4 py-3 text-center">
-                      {row.waiting > 0 ? (
-                        <div className="inline-flex items-center justify-center min-w-[52px] bg-warning/10 text-warning rounded-md px-3 py-1.5 text-sm font-semibold">
-                          {row.waiting}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">0</span>
-                      )}
-                    </td>
-
-                    {/* Total */}
-                    <td className="px-5 py-3 text-center">
-                      <span className="text-sm font-semibold text-foreground">{row.total}</span>
-                    </td>
-                  </tr>
-                ))}
+                      {/* Total */}
+                      <td className="px-5 py-3 text-center">
+                        <span className="text-sm font-semibold text-foreground">{row.total}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
           </tbody>
         </table>
       </div>
@@ -238,7 +338,8 @@ export default function ChatsOverview() {
   const markRead = useMarkConversationRead();
 
   const effectiveSelectedId = selectedId ?? conversations[0]?.id ?? null;
-  useInboxRealtime(effectiveSelectedId);
+  const { play: playNotification } = useNotificationSound();
+  useInboxRealtime(effectiveSelectedId, playNotification);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -251,7 +352,7 @@ export default function ChatsOverview() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] -mt-2 gap-0 rounded-xl border border-border bg-card card-shadow overflow-hidden">
+    <div className="flex flex-col md:flex-row h-[calc(100dvh-7rem)] -mt-2 gap-0 rounded-xl border border-border bg-card card-shadow overflow-hidden">
       {/* Left: Conversation List */}
       <ConversationList
         conversations={conversations}
@@ -267,7 +368,7 @@ export default function ChatsOverview() {
       />
 
       {/* Right: Overview table */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-w-0 overflow-hidden hidden md:flex flex-col">
         <OverviewTable />
       </div>
     </div>

@@ -32,6 +32,7 @@ export type IntegrationSummary = {
   phone_number: string | null;
   status: string;
   provider: string;
+  project_id: string | null;
 };
 
 export type ConversationDetail = ConversationWithRelations & {
@@ -69,29 +70,32 @@ export async function sendViaWhatsApp(
   conversationId: string,
   body: string,
   mediaUrl?: string,
-): Promise<{ delivered: boolean; messageId?: string; error?: string; reason?: string }> {
+  replyToId?: string | null,
+  dbMessageId?: string,
+): Promise<{ delivered: boolean; messageId?: string; error?: string; reason?: string; detail?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return { delivered: false, reason: 'not_authenticated' };
-    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+    const { data, error } = await supabase.functions.invoke('send-whatsapp', {
+      body: {
+        conversation_id: conversationId,
+        body,
+        ...(mediaUrl ? { media_url: mediaUrl } : {}),
+        ...(replyToId ? { reply_to_id: replyToId } : {}),
+        ...(dbMessageId ? { message_id: dbMessageId } : {}),
       },
-      body: JSON.stringify({ conversation_id: conversationId, body, ...(mediaUrl ? { media_url: mediaUrl } : {}) }),
-    }).catch(() => null);
-    if (!res) return { delivered: false, reason: 'network_error' };
-    const data = await res.json().catch(() => null);
-    if (!res.ok) return { delivered: false, error: data?.error ?? `http_${res.status}` };
+    });
+    if (error) {
+      console.error('[sendViaWhatsApp] invoke error:', error);
+      return { delivered: false, error: error.message ?? 'invoke_error' };
+    }
     return {
       delivered: data?.delivered === true,
       messageId: data?.message_id ?? undefined,
       error: data?.error ?? undefined,
       reason: data?.reason ?? undefined,
+      detail: data?.detail ?? undefined,
     };
   } catch (e: any) {
+    console.error('[sendViaWhatsApp] exception:', e);
     return { delivered: false, error: e?.message ?? 'exception' };
   }
 }
@@ -103,7 +107,7 @@ export async function getMyProfile(): Promise<Profile> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, name, email, company_id, status, display_name, spy_mode, is_active')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -122,7 +126,9 @@ export interface ConversationFilters {
   phone?: string;
   tag?: string;
   assigned_user_id?: string;
+  integration_id?: string;
   project_id?: string;
+  conversation_ids?: string[];
   sort?: 'recent' | 'oldest' | 'name';
   page?: number;
   limit?: number;
@@ -146,12 +152,22 @@ export async function listConversations(
   let query = supabase
     .from('conversations')
     .select(`
-      *,
-      contact:contacts!conversations_contact_id_fkey(*),
-      assigned_user:profiles!conversations_assigned_user_id_fkey(*)
+      id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, created_at, updated_at,
+      contact:contacts!conversations_contact_id_fkey(id, name, phone, phone_e164, email, wa_identifier_raw, tags, is_group, source, responsible_user_id, avatar_url),
+      assigned_user:profiles!conversations_assigned_user_id_fkey(id, name, email, display_name)
     `)
-    .order('last_message_at', { ascending: false })
     .range(from, to);
+
+  // Sort order — must be applied before other clauses
+  if (filters?.sort === 'oldest') {
+    query = query.order('last_message_at', { ascending: true });
+  } else if (filters?.sort === 'name') {
+    // Will sort client-side after fetch since it's a joined column
+    query = query.order('last_message_at', { ascending: false });
+  } else {
+    // default: 'recent'
+    query = query.order('last_message_at', { ascending: false });
+  }
 
   if (filters?.status) {
     query = query.eq('status', filters.status);
@@ -162,27 +178,30 @@ export async function listConversations(
     query = query.eq('channel', filters.channel);
   }
   if (filters?.assigned_user_id) {
-    query = query.eq('assigned_user_id', filters.assigned_user_id);
+    if (filters.assigned_user_id === '__none__') {
+      query = query.is('assigned_user_id', null);
+    } else {
+      query = query.eq('assigned_user_id', filters.assigned_user_id);
+    }
+  }
+  if (filters?.integration_id) {
+    query = query.eq('integration_id', filters.integration_id);
   }
   if (filters?.project_id) {
     query = query.eq('project_id', filters.project_id);
   }
-
-  // Sort order
-  if (filters?.sort === 'oldest') {
-    query = query.order('last_message_at', { ascending: true });
-  } else if (filters?.sort === 'name') {
-    // Will sort client-side after fetch since it's a joined column
+  if (filters?.conversation_ids && filters.conversation_ids.length > 0) {
+    // '__none__' sentinel means "no results" (e.g. 0 unread conversations)
+    if (filters.conversation_ids.length === 1 && filters.conversation_ids[0] === '__none__') {
+      return [];
+    }
+    query = query.in('id', filters.conversation_ids);
   }
-  // default is already 'recent' (desc) set above
 
-  // Apply name/phone filters at the DB level via contact_id subquery
+  // Apply name/phone/search filters at the DB level
   if (filters?.name || filters?.phone || filters?.search) {
-    // We need to filter by contact fields — use a separate contacts query approach
-    // Since Supabase doesn't support .ilike on joined columns directly in the main query,
-    // we fetch contact IDs first, then filter conversations
     let contactQuery = supabase.from('contacts').select('id');
-    
+
     if (filters?.name) {
       contactQuery = contactQuery.ilike('name', `%${filters.name}%`);
     }
@@ -190,15 +209,33 @@ export async function listConversations(
       contactQuery = contactQuery.ilike('phone', `%${filters.phone}%`);
     }
     if (filters?.search) {
-      contactQuery = contactQuery.or(`name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`);
+      contactQuery = contactQuery.or(
+        `name.ilike.%${filters.search}%,phone.ilike.%${filters.search}%,email.ilike.%${filters.search}%,phone_e164.ilike.%${filters.search}%`
+      );
     }
-    
-    const { data: matchingContacts } = await contactQuery;
-    if (matchingContacts && matchingContacts.length > 0) {
-      const contactIds = matchingContacts.map((c) => c.id);
-      query = query.in('contact_id', contactIds);
+
+    // Parallel search: contacts + messages at the same time
+    const messageSearchPromise = (filters?.search && filters.search.length >= 3)
+      ? supabase.from('messages').select('conversation_id').ilike('body', `%${filters.search}%`).limit(200)
+      : Promise.resolve({ data: [] as { conversation_id: string }[] });
+
+    const [{ data: matchingContacts }, { data: matchingMessages }] = await Promise.all([
+      contactQuery,
+      messageSearchPromise,
+    ]);
+    const contactIds = (matchingContacts ?? []).map((c) => c.id);
+    const messageConvIds = [...new Set((matchingMessages ?? []).map((m) => m.conversation_id))];
+
+    if (contactIds.length > 0 || messageConvIds.length > 0) {
+      // Combine: conversations matching by contact OR by message content
+      if (messageConvIds.length > 0 && contactIds.length > 0) {
+        query = query.or(`contact_id.in.(${contactIds.join(',')}),id.in.(${messageConvIds.join(',')})`);
+      } else if (contactIds.length > 0) {
+        query = query.in('contact_id', contactIds);
+      } else {
+        query = query.in('id', messageConvIds);
+      }
     } else {
-      // No contacts match — return empty
       return [];
     }
   }
@@ -225,29 +262,29 @@ export async function listConversations(
 export async function getConversation(
   conversationId: string,
 ): Promise<ConversationDetail> {
-  const { data: conv, error: convErr } = await supabase
-    .from('conversations')
-    .select(`
-      *,
-      contact:contacts!conversations_contact_id_fkey(*),
-      assigned_user:profiles!conversations_assigned_user_id_fkey(*),
-      integration:integrations!conversations_integration_id_fkey(id,device_name,phone_number,status,provider)
-    `)
-    .eq('id', conversationId)
-    .maybeSingle();
+  // Parallel fetch: conversation + messages (saves ~1 DB round-trip)
+  const [{ data: conv, error: convErr }, { data: msgs, error: msgErr }] = await Promise.all([
+    supabase
+      .from('conversations')
+      .select(`
+        id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, created_at, updated_at,
+        contact:contacts!conversations_contact_id_fkey(id, name, phone, phone_e164, email, wa_identifier_raw, tags, is_group, source, responsible_user_id, avatar_url, created_at),
+        assigned_user:profiles!conversations_assigned_user_id_fkey(id, name, email, display_name),
+        integration:integrations!conversations_integration_id_fkey(id,device_name,phone_number,status,provider,project_id)
+      `)
+      .eq('id', conversationId)
+      .maybeSingle(),
+    supabase
+      .from('messages')
+      .select(`*, sender:profiles!messages_sender_id_fkey(id, name, email, display_name)`)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(300),
+  ]);
 
   if (convErr) handleError(convErr);
   if (!conv) throw new ApiError('Conversa não encontrada.', 'NOT_FOUND');
-
-  const { data: msgs, error: msgErr } = await supabase
-    .from('messages')
-    .select(`
-      *,
-      sender:profiles!messages_sender_id_fkey(*)
-    `)
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
-
   if (msgErr) handleError(msgErr);
 
   // Build a map of id → message for resolving reply_to context client-side
@@ -322,13 +359,11 @@ export async function sendMessage(
 
   if (msgErr) handleError(msgErr);
 
-  // Auto-move conversation from "new" (Aberto) → "open" (Em Atendimento)
-  // when an agent sends the first reply. Only changes if still "new".
-  await supabase
-    .from('conversations')
-    .update({ status: 'open' })
-    .eq('id', conversationId)
-    .eq('status', 'new');
+  // Auto-move + auto-assign in parallel (saves ~1 DB round-trip)
+  await Promise.all([
+    supabase.from('conversations').update({ status: 'open' as any }).eq('id', conversationId).in('status', ['new']),
+    supabase.from('conversations').update({ assigned_user_id: userId } as any).eq('id', conversationId).is('assigned_user_id', null),
+  ]);
 
   // last_message_at is now updated by DB trigger — no extra UPDATE needed.
   // WhatsApp delivery is handled by the caller (useSendMessage) to enable toast feedback.
@@ -360,7 +395,7 @@ export async function listContacts(
 
   let query = supabase
     .from('contacts')
-    .select('*, responsible:profiles!contacts_responsible_user_id_fkey(id, name)', { count: 'exact' })
+    .select('id, name, phone, phone_e164, email, tags, source, responsible_user_id, company_id, is_group, wa_identifier_raw, created_at, last_contact_at, responsible:profiles!contacts_responsible_user_id_fkey(id, name)', { count: 'exact' })
     .order('created_at', { ascending: false });
 
   if (filters?.source && filters.source !== 'all') {
@@ -406,9 +441,32 @@ export async function listContacts(
   const { data, error, count } = await query;
   if (error) handleError(error);
 
+  const contactRows = data ?? [];
   const total = count ?? 0;
+
+  // Fetch tags from normalized contact_tags table for all returned contacts
+  let contactTagsMap: Record<string, { name: string; color: string }[]> = {};
+  if (contactRows.length > 0) {
+    const contactIds = contactRows.map(c => c.id);
+    const { data: ctData } = await supabase
+      .from('contact_tags')
+      .select('contact_id, tags:tag_id(name, color)')
+      .in('contact_id', contactIds);
+    for (const row of (ctData ?? []) as any[]) {
+      const cid = row.contact_id;
+      if (!contactTagsMap[cid]) contactTagsMap[cid] = [];
+      if (row.tags) contactTagsMap[cid].push({ name: row.tags.name, color: row.tags.color });
+    }
+  }
+
+  // Enrich contacts with fetched tags
+  const enriched = contactRows.map(c => ({
+    ...c,
+    _tags: contactTagsMap[c.id] || [],
+  }));
+
   return {
-    data: (data ?? []) as (Contact & { responsible: { id: string; name: string } | null })[],
+    data: enriched as any,
     total,
     page,
     totalPages: Math.ceil(total / limit),
@@ -421,7 +479,7 @@ export async function exportAllContacts(
 ): Promise<(Contact & { responsible: { id: string; name: string } | null })[]> {
   let query = supabase
     .from('contacts')
-    .select('*, responsible:profiles!contacts_responsible_user_id_fkey(id, name)')
+    .select('id, name, phone, phone_e164, email, tags, source, responsible_user_id, company_id, is_group, wa_identifier_raw, created_at, last_contact_at, responsible:profiles!contacts_responsible_user_id_fkey(id, name)')
     .order('created_at', { ascending: false })
     .range(0, 9999); // up to 10 k contacts
 
@@ -504,10 +562,14 @@ export async function deleteContact(contactId: string): Promise<void> {
 
 // ── Team members ───────────────────────────────────────
 export async function listTeamMembers(): Promise<Pick<Profile, 'id' | 'name' | 'email' | 'status'>[]> {
-  const { data, error } = await supabase
+  const { getAreaUserIds } = await import('@/lib/areaFilter');
+  const areaUserIds = await getAreaUserIds();
+  let query = supabase
     .from('profiles')
     .select('id, name, email, status')
     .order('name');
+  if (areaUserIds) query = query.in('id', areaUserIds);
+  const { data, error } = await query;
 
   if (error) handleError(error);
   return data ?? [];
@@ -563,16 +625,20 @@ export async function markConversationRead(
 export async function getUnreadCounts(
   conversationIds: string[],
   userId: string,
+  spyMode = false,
 ): Promise<Record<string, number>> {
   if (conversationIds.length === 0) return {};
 
-  const { data, error } = await supabase.rpc('get_unread_counts', {
+  const rpcParams = {
     p_user_id: userId,
     p_conversation_ids: conversationIds,
-  });
+    p_spy_mode: spyMode,
+  };
+
+  const { data, error } = await supabase.rpc('get_unread_counts', rpcParams as Record<string, unknown>);
 
   if (error) {
-    console.warn('[api] get_unread_counts RPC failed:', error.message);
+    console.warn('[api] get_unread_counts RPC failed:', error.message, { rpcParams });
     return {};
   }
 
@@ -581,6 +647,28 @@ export async function getUnreadCounts(
     counts[row.conversation_id] = Number(row.unread_count);
   }
   return counts;
+}
+
+// ── Unread conversation IDs (server-side) ─────────────
+export async function getUnreadConversationIds(
+  userId: string,
+  companyId: string,
+  projectId?: string | null,
+  spyMode = false,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc('get_unread_conversation_ids', {
+    p_user_id: userId,
+    p_company_id: companyId,
+    p_project_id: projectId ?? null,
+    p_spy_mode: spyMode,
+  } as Record<string, unknown>);
+
+  if (error) {
+    console.warn('[api] get_unread_conversation_ids RPC failed:', error.message);
+    return [];
+  }
+
+  return (data ?? []) as string[];
 }
 
 // ── Close conversation ────────────────────────────────
@@ -632,10 +720,10 @@ export async function listAnnotations(conversationId: string): Promise<Annotatio
 }
 
 // ── Message deletion (soft-delete) ────────────────────
-export async function deleteMessage(messageId: string): Promise<void> {
+export async function deleteMessage(messageId: string, deletedByUserId?: string): Promise<void> {
   const { error } = await supabase
     .from('messages')
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: new Date().toISOString(), deleted_by: deletedByUserId ?? null })
     .eq('id', messageId);
   if (error) handleError(error);
 }
@@ -650,6 +738,22 @@ export async function markConversationUnread(conversationId: string): Promise<vo
     .delete()
     .eq('conversation_id', conversationId)
     .eq('user_id', user.id);
+  if (error) handleError(error);
+}
+
+export async function updateAnnotation(annotationId: string, body: string): Promise<void> {
+  const { error } = await supabase
+    .from('annotations')
+    .update({ body })
+    .eq('id', annotationId);
+  if (error) handleError(error);
+}
+
+export async function deleteAnnotation(annotationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('annotations')
+    .delete()
+    .eq('id', annotationId);
   if (error) handleError(error);
 }
 
