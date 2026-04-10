@@ -1115,7 +1115,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <Button
               size="icon"
               onClick={handleSend}
-              disabled={!input.trim() || sendMessage.isPending || (isLidContact && !isAnnotationMode)}
+              disabled={!input.trim()}
               className={`h-8 w-8 rounded-full shrink-0 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600' : ''}`}
             >
               <Send size={15} />
