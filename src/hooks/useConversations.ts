@@ -55,6 +55,7 @@ export function useSendMessage() {
   const { user, companyId, profile } = useAuth();
 
   return useMutation({
+    // Only awaits the DB insert — WhatsApp delivery is fire-and-forget
     mutationFn: async ({ conversationId, body, replyToId }: { conversationId: string; body: string; replyToId?: string | null }) => {
       const msg = await sendMessage(
         conversationId,
@@ -62,9 +63,7 @@ export function useSendMessage() {
         replyToId,
         user && companyId ? { userId: user.id, companyId } : undefined,
       );
-      // Deliver via WhatsApp and capture result for toast feedback
-      const delivery = await sendViaWhatsApp(conversationId, body);
-      return { msg, delivery };
+      return { msg };
     },
 
     // ── Optimistic update: message appears instantly ──────────────────────
@@ -109,23 +108,24 @@ export function useSendMessage() {
       toast.error('Erro ao enviar mensagem. Tente novamente.');
     },
 
-    onSuccess: (data, variables) => {
-      const { msg, delivery } = data;
+    onSuccess: ({ msg }, variables) => {
+      // Fire-and-forget: WhatsApp delivery runs in background without blocking UI
+      sendViaWhatsApp(variables.conversationId, variables.body).then((delivery) => {
+        if (!delivery.delivered) {
+          const reason = delivery.reason === 'No active integration found'
+            ? 'Nenhuma integração WhatsApp conectada.'
+            : (delivery.error ?? delivery.reason ?? 'Erro desconhecido');
+          toast.warning(`Mensagem salva, mas não enviada via WhatsApp: ${reason}`);
 
-      // Show delivery failure toast with reason
-      if (!delivery.delivered) {
-        const reason = delivery.reason === 'No active integration found'
-          ? 'Nenhuma integração WhatsApp conectada.'
-          : (delivery.error ?? delivery.reason ?? 'Erro desconhecido');
-        toast.warning(`Mensagem salva, mas não enviada via WhatsApp: ${reason}`);
-
-        // Mark message as failed in DB so the red tick appears
-        if (msg?.id) {
-          import('@/integrations/supabase/client').then(({ supabase }) => {
-            supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).catch(() => {});
-          });
+          if (msg?.id) {
+            import('@/integrations/supabase/client').then(({ supabase }) => {
+              supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).catch(() => {});
+            });
+          }
         }
-      }
+      }).catch(() => {
+        toast.warning('Não foi possível verificar entrega via WhatsApp.');
+      });
 
       // Mark as read unless spy_mode is enabled
       if (!(profile as any)?.spy_mode) {
