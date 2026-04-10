@@ -359,11 +359,11 @@ export async function sendMessage(
 
   if (msgErr) handleError(msgErr);
 
-  // Auto-move + auto-assign in parallel (saves ~1 DB round-trip)
-  await Promise.all([
+  // Auto-move + auto-assign: fire-and-forget (don't block the send response)
+  Promise.all([
     supabase.from('conversations').update({ status: 'open' as any }).eq('id', conversationId).in('status', ['new']),
     supabase.from('conversations').update({ assigned_user_id: userId } as any).eq('id', conversationId).is('assigned_user_id', null),
-  ]);
+  ]).catch(() => {});
 
   // last_message_at is now updated by DB trigger — no extra UPDATE needed.
   // WhatsApp delivery is handled by the caller (useSendMessage) to enable toast feedback.
