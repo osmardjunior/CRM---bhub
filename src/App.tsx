@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy, type ReactNode } from "react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { FunnelProvider } from "./contexts/FunnelContext";
+import { ProjectProvider } from "./contexts/ProjectContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary";
@@ -75,6 +76,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <FunnelProvider>
+          <ProjectProvider>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/" element={<Navigate to="/inbox" replace />} />
@@ -109,6 +111,7 @@ const App = () => (
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+          </ProjectProvider>
           </FunnelProvider>
         </AuthProvider>
       </BrowserRouter>
