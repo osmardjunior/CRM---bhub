@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -47,6 +47,9 @@ export function useConversationDetail(conversationId: string | null) {
     refetchInterval: 3_000,
     refetchIntervalInBackground: false,
     staleTime: 0,
+    // Keep previous data during refetch so conversation never becomes null
+    // (prevents handleSend from returning early on the second send)
+    placeholderData: keepPreviousData,
   });
 }
 
