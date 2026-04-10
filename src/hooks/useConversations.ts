@@ -137,14 +137,8 @@ export function useSendMessage() {
         ).catch(() => {});
       }
 
-      // Defer invalidations to avoid blocking consecutive sends.
-      // The refetchInterval on useConversationDetail (3s) will sync real data.
-      // conversations-infinite and sidebar-stats update in background.
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
-        queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
-        queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
-      }, 1500);
+      // No invalidations here — refetchInterval (3s) and realtime subscription
+      // handle syncing server data without disrupting consecutive sends.
     },
   });
 }
