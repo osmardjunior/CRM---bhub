@@ -225,6 +225,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const [uploading, setUploading] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageWithSender | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sendMessage = useSendMessage();
   const { data: teamMembers } = useTeamMembers();
@@ -301,6 +302,8 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       setInput('');
       setReplyingTo(null);
     }
+    // Re-focus textarea so the user can type the next message immediately
+    textareaRef.current?.focus();
   };
 
   const handleQuickReply = (text: string) => {
@@ -1090,6 +1093,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </div>
 
           <Textarea
+            ref={textareaRef}
             placeholder={isAnnotationMode ? 'Escreva uma anotação interna...' : 'Digite uma mensagem...'}
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
@@ -1115,7 +1119,6 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <Button
               size="icon"
               onClick={handleSend}
-              disabled={!input.trim()}
               className={`h-8 w-8 rounded-full shrink-0 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600' : ''}`}
             >
               <Send size={15} />
