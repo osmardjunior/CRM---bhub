@@ -72,8 +72,11 @@ export function useSendMessage() {
 
     // ── Optimistic update: message appears instantly ──────────────────────
     onMutate: async ({ conversationId, body, replyToId }) => {
-      // Cancel any in-flight refetch so it can't overwrite the optimistic message
-      await queryClient.cancelQueries({ queryKey: ['conversation', conversationId] });
+      // Cancel any in-flight refetch so it can't overwrite the optimistic message.
+      // No await — cancelQueries marks the query as cancelled synchronously in React Query state;
+      // the actual HTTP response is discarded when it arrives. Awaiting would delay onMutate
+      // (and therefore mutationFn start) by the full round-trip time of the in-flight request.
+      queryClient.cancelQueries({ queryKey: ['conversation', conversationId] });
 
       const previous = queryClient.getQueryData<ConversationDetail>(['conversation', conversationId]);
       const optimisticId = `optimistic-${Date.now()}`;
