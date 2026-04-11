@@ -227,6 +227,9 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Stable ref — always holds the last known conversation ID so handleSend works
+  // even if the `conversation` prop briefly flickers to null during React Query refetches.
+  const conversationIdRef = useRef<string | null>(null);
   const sendMessage = useSendMessage();
   const { data: teamMembers } = useTeamMembers();
   const { data: quickReplies = [] } = useQuickReplies();
@@ -283,22 +286,33 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   );
   const grouped = useMemo(() => groupMessagesByDate(mergedItems), [mergedItems]);
 
+  // Keep the ref in sync so handleSend never misses the conversation ID
+  useEffect(() => {
+    if (conversation?.id) conversationIdRef.current = conversation.id;
+  }, [conversation?.id]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [mergedItems.length]);
 
   const handleSend = async () => {
-    if (!input.trim() || !conversation) return;
+    // Use ref as primary source of conversationId — it survives brief `conversation` prop flickers
+    // caused by React Query background refetches (which temporarily set data to undefined).
+    const convId = conversationIdRef.current ?? conversation?.id ?? null;
+    if (!input.trim() || !convId) {
+      console.warn('[handleSend] blocked — inputEmpty:', !input.trim(), '| noConvId:', !convId);
+      return;
+    }
     if (isAnnotationMode) {
       try {
-        await createAnnotation(conversation.id, input.trim());
+        await createAnnotation(convId, input.trim());
         setInput('');
-        queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
+        queryClient.invalidateQueries({ queryKey: ['annotations', convId] });
       } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Erro ao salvar anotação');
       }
     } else {
-      sendMessage.mutate({ conversationId: conversation.id, body: input.trim(), replyToId: replyingTo?.id });
+      sendMessage.mutate({ conversationId: convId, body: input.trim(), replyToId: replyingTo?.id });
       setInput('');
       setReplyingTo(null);
     }

@@ -124,18 +124,18 @@ export function useSendMessage() {
       // Replace optimistic placeholder with the real DB message id so subsequent
       // polls and realtime events don't cause a duplicate or flash.
       if (optimisticId) {
-        queryClient.setQueryData<ConversationDetail>(
-          ['conversation', variables.conversationId],
-          (old) => {
-            if (!old) return old;
-            return {
-              ...old,
-              messages: old.messages.map((m) =>
+        const current = queryClient.getQueryData<ConversationDetail>(['conversation', variables.conversationId]);
+        if (current) {
+          queryClient.setQueryData<ConversationDetail>(
+            ['conversation', variables.conversationId],
+            {
+              ...current,
+              messages: current.messages.map((m) =>
                 m.id === optimisticId ? { ...m, id: msg.id } : m,
               ),
-            };
-          },
-        );
+            },
+          );
+        }
       }
 
       // Fire-and-forget: WhatsApp delivery runs in background without blocking UI
