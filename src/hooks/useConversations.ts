@@ -43,8 +43,9 @@ export function useConversationDetail(conversationId: string | null) {
     queryKey: ['conversation', conversationId],
     enabled: !!conversationId,
     queryFn: () => getConversation(conversationId!),
-    // Polling mais agressivo para o chat aberto: mensagens aparecem em até 3s
-    refetchInterval: 3_000,
+    // Realtime handles sub-50ms updates; this is just a safety net for when realtime fails.
+    // 15s is enough — reducing from 3s avoids race-conditions with optimistic updates.
+    refetchInterval: 15_000,
     refetchIntervalInBackground: false,
     staleTime: 0,
     // Keep previous data during refetch so conversation never becomes null
@@ -71,10 +72,14 @@ export function useSendMessage() {
 
     // ── Optimistic update: message appears instantly ──────────────────────
     onMutate: async ({ conversationId, body, replyToId }) => {
+      // Cancel any in-flight refetch so it can't overwrite the optimistic message
+      await queryClient.cancelQueries({ queryKey: ['conversation', conversationId] });
+
       const previous = queryClient.getQueryData<ConversationDetail>(['conversation', conversationId]);
+      const optimisticId = `optimistic-${Date.now()}`;
 
       const optimisticMsg: MessageWithSender = {
-        id: `optimistic-${Date.now()}`,
+        id: optimisticId,
         conversation_id: conversationId,
         company_id: companyId ?? '',
         body,
@@ -100,17 +105,36 @@ export function useSendMessage() {
         });
       }
 
-      return { previous };
+      return { previous, optimisticId };
     },
 
-    onError: (_err, variables, context: { previous?: ConversationDetail } | undefined) => {
+    onError: (_err, variables, context: { previous?: ConversationDetail; optimisticId?: string } | undefined) => {
       if (context?.previous) {
         queryClient.setQueryData(['conversation', variables.conversationId], context.previous);
       }
       toast.error('Erro ao enviar mensagem. Tente novamente.');
     },
 
-    onSuccess: ({ msg }, variables) => {
+    onSuccess: ({ msg }, variables, context) => {
+      const { optimisticId } = (context ?? {}) as { optimisticId?: string };
+
+      // Replace optimistic placeholder with the real DB message id so subsequent
+      // polls and realtime events don't cause a duplicate or flash.
+      if (optimisticId) {
+        queryClient.setQueryData<ConversationDetail>(
+          ['conversation', variables.conversationId],
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              messages: old.messages.map((m) =>
+                m.id === optimisticId ? { ...m, id: msg.id } : m,
+              ),
+            };
+          },
+        );
+      }
+
       // Fire-and-forget: WhatsApp delivery runs in background without blocking UI
       sendViaWhatsApp(variables.conversationId, variables.body).then((delivery) => {
         if (!delivery.delivered) {
@@ -137,8 +161,8 @@ export function useSendMessage() {
         ).catch(() => {});
       }
 
-      // No invalidations here — refetchInterval (3s) and realtime subscription
-      // handle syncing server data without disrupting consecutive sends.
+      // No invalidations here — realtime subscription handles syncing without
+      // disrupting consecutive sends. refetchInterval (15s) is the fallback.
     },
   });
 }
