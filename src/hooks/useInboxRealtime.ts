@@ -79,15 +79,24 @@ export function useInboxRealtime(selectedConversationId: string | null) {
               ['conversation', selectedIdRef.current],
               (old) => {
                 if (!old) return old;
-                // Replace optimistic placeholder if exists, otherwise append
-                const withoutOptimistic = old.messages.filter(
-                  (m) => !(m.id as string).startsWith('optimistic-'),
-                );
-                const alreadyExists = withoutOptimistic.some((m) => m.id === msg.id);
+                // If onSuccess already replaced the optimistic with this real ID, skip
+                const alreadyExists = old.messages.some((m) => m.id === msg.id);
                 if (alreadyExists) return old;
+                // Remove only the FIRST optimistic entry (FIFO: oldest pending = this message).
+                // Do NOT remove all optimistics — concurrent sends have their own pending entries.
+                const firstOptIdx = old.messages.findIndex(
+                  (m) => (m.id as string).startsWith('optimistic-'),
+                );
+                const withoutOneOptimistic =
+                  firstOptIdx >= 0
+                    ? [
+                        ...old.messages.slice(0, firstOptIdx),
+                        ...old.messages.slice(firstOptIdx + 1),
+                      ]
+                    : old.messages;
                 return {
                   ...old,
-                  messages: [...withoutOptimistic, msg as unknown as MessageWithSender],
+                  messages: [...withoutOneOptimistic, msg as unknown as MessageWithSender],
                 };
               },
             );
