@@ -93,6 +93,21 @@ export default function InboxPage() {
   const { data: unreadCounts } = useUnreadCounts(conversations);
   const markRead = useMarkConversationRead();
 
+  // Stable detail: once a conversation is loaded, never pass null back to ChatPanel
+  // while the same conversation is selected. This prevents the textarea from
+  // unmounting/remounting (losing focus) during React Query background refetches.
+  const stableDetailRef = useRef<typeof detail>(undefined);
+  const stableDetailConvIdRef = useRef<string | null>(null);
+  if (effectiveSelectedId !== stableDetailConvIdRef.current) {
+    // Conversation changed — reset so the new conversation shows loading state
+    stableDetailRef.current = undefined;
+    stableDetailConvIdRef.current = effectiveSelectedId;
+  }
+  if (detail !== undefined) {
+    stableDetailRef.current = detail;
+  }
+  const stableDetail = stableDetailRef.current;
+
   useInboxRealtime(effectiveSelectedId);
 
   useEffect(() => {
@@ -174,17 +189,17 @@ export default function InboxPage() {
       {/* Chat panel — hidden on mobile when no chat is selected */}
       <div className={`${hasSelection ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
         <ChatPanel
-          conversation={effectiveSelectedId ? (detail ?? null) : null}
-          loading={detailLoading && !!effectiveSelectedId}
+          conversation={effectiveSelectedId ? (stableDetail ?? null) : null}
+          loading={detailLoading && !stableDetail && !!effectiveSelectedId}
           onToggleProfile={() => setProfileOpen((p) => !p)}
           profileOpen={profileOpen}
           onBack={() => setSelectedId(null)}
         />
       </div>
 
-      {profileOpen && detail && (
+      {profileOpen && stableDetail && (
         <ContactProfilePanel
-          conversation={detail}
+          conversation={stableDetail}
           onClose={() => setProfileOpen(false)}
         />
       )}
