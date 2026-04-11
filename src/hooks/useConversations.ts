@@ -138,23 +138,28 @@ export function useSendMessage() {
         }
       }
 
-      // Fire-and-forget: WhatsApp delivery runs in background without blocking UI
-      sendViaWhatsApp(variables.conversationId, variables.body).then((delivery) => {
-        if (!delivery.delivered) {
-          const reason = delivery.reason === 'No active integration found'
-            ? 'Nenhuma integração WhatsApp conectada.'
-            : (delivery.error ?? delivery.reason ?? 'Erro desconhecido');
-          toast.warning(`Mensagem salva, mas não enviada via WhatsApp: ${reason}`);
+      // Fire-and-forget: only attempt WhatsApp delivery for WhatsApp conversations.
+      // Skipping for other channels avoids a ~2s edge function call that always fails
+      // and a toast.warning() that appears on top of the send button (bottom-right).
+      const cachedConv = queryClient.getQueryData<ConversationDetail>(['conversation', variables.conversationId]);
+      const isWhatsApp = cachedConv?.integration?.provider === 'whatsapp';
+      if (isWhatsApp) {
+        sendViaWhatsApp(variables.conversationId, variables.body).then((delivery) => {
+          if (!delivery.delivered) {
+            // 'No active integration found' = expected for non-whatsapp, already filtered above
+            const reason = delivery.error ?? delivery.reason ?? 'Erro desconhecido';
+            toast.warning(`Mensagem não enviada via WhatsApp: ${reason}`);
 
-          if (msg?.id) {
-            import('@/integrations/supabase/client').then(({ supabase }) => {
-              supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).catch(() => {});
-            });
+            if (msg?.id) {
+              import('@/integrations/supabase/client').then(({ supabase }) => {
+                supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).catch(() => {});
+              });
+            }
           }
-        }
-      }).catch(() => {
-        toast.warning('Não foi possível verificar entrega via WhatsApp.');
-      });
+        }).catch(() => {
+          toast.warning('Não foi possível verificar entrega via WhatsApp.');
+        });
+      }
 
       // Mark as read unless spy_mode is enabled
       if (!(profile as any)?.spy_mode) {
