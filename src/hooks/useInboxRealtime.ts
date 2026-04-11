@@ -120,9 +120,21 @@ export function useInboxRealtime(selectedConversationId: string | null) {
         },
         (payload: any) => {
           const updated = payload.new as Record<string, unknown>;
-          // Update selected conversation detail if it changed
           if (updated?.id === selectedIdRef.current) {
-            queryClient.invalidateQueries({ queryKey: ['conversation', selectedIdRef.current] });
+            // Surgical patch: merge conversation fields into cache WITHOUT triggering a
+            // full refetch. A full refetch (invalidateQueries) would race with optimistic
+            // messages — it could return server data that doesn't yet include a just-sent
+            // message and overwrite the optimistic entry, causing the message to flash or
+            // disappear. The 15s refetchInterval is the eventual-consistency safety net.
+            queryClient.setQueryData<ConversationDetail>(
+              ['conversation', selectedIdRef.current],
+              (old) => {
+                if (!old) return old;
+                // Spread updated conversation fields over the cached detail,
+                // but preserve the messages array (which may contain optimistic entries).
+                return { ...old, ...(updated as Partial<ConversationDetail>) };
+              },
+            );
           }
           scheduleListInvalidate();
           scheduleStatsInvalidate();
