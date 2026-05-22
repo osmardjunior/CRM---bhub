@@ -9,8 +9,39 @@ import {
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-webhook-secret",
+    "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-evolution-signature",
 };
+
+/**
+ * Verify HMAC-SHA256 webhook signature.
+ * Returns true if valid or if secret is not configured (backwards compat).
+ */
+async function verifyWebhookSignature(
+  bodyText: string,
+  signatureHeader: string | null,
+  secret: string,
+): Promise<boolean> {
+  if (!signatureHeader) return false;
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(bodyText));
+  const expected = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  // Constant-time comparison to prevent timing attacks
+  if (expected.length !== signatureHeader.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ signatureHeader.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
 
 /**
  * Normalize WhatsApp phone for storage — returns digits-only string (no "+").
@@ -48,6 +79,7 @@ function parseEvolutionPayload(body: any): {
   from_me?: boolean;
   from_jid_kind?: string;
   remote_jid_raw?: string;
+  quoted_stanza_id?: string;
 } {
   // Evolution API v2 sends: { event, instance, data, ... }
   if (body.event && body.instance) {
@@ -92,6 +124,28 @@ function parseEvolutionPayload(body: any): {
         message.documentMessage?.caption ||
         data.body ||
         "";
+
+      // Extract quoted message stanza ID (for reply threading)
+      // Evolution API v2 may place contextInfo in different locations depending
+      // on the message type — cover all known sub-objects AND top-level fallbacks.
+      const contextInfo =
+        message.extendedTextMessage?.contextInfo ||
+        message.imageMessage?.contextInfo ||
+        message.videoMessage?.contextInfo ||
+        message.audioMessage?.contextInfo ||
+        message.documentMessage?.contextInfo ||
+        message.stickerMessage?.contextInfo ||
+        message.contactMessage?.contextInfo ||
+        message.locationMessage?.contextInfo ||
+        message.listResponseMessage?.contextInfo ||
+        message.buttonsResponseMessage?.contextInfo ||
+        message.templateButtonReplyMessage?.contextInfo ||
+        data.contextInfo ||
+        null;
+      const quotedStanzaId = contextInfo?.stanzaId || null;
+      if (quotedStanzaId) {
+        console.log(`[incoming] Reply detected — quoted stanzaId: ${quotedStanzaId}`);
+      }
 
       // Extract media URL — Evolution may place it in different locations
       const mediaUrl =
@@ -154,6 +208,7 @@ function parseEvolutionPayload(body: any): {
         from_me: isFromMe,
         from_jid_kind: isGroupJid(remoteJid) ? "group" : parsedJid.kind,
         remote_jid_raw: remoteJid,
+        quoted_stanza_id: quotedStanzaId || undefined,
       };
     }
 
@@ -206,9 +261,12 @@ async function pickRoundRobinAgent(
 
     const eligibleRoleIds = new Set((roles ?? []).map((r: any) => r.user_id));
 
-    // Filter agents: must have eligible role AND pass integration filter
-    const eligible = agents.filter((a: any) => {
+    // Filter agents: must have eligible role, pass integration filter,
+    // and NOT have round_robin_weight = 0 (excluded from auto-assign)
+    let eligible = agents.filter((a: any) => {
       if (!eligibleRoleIds.has(a.id)) return false;
+      // weight = 0 means "manual delegation only"
+      if ((a as any).round_robin_weight === 0) return false;
       // If agent has allowed_integration_ids set, check if current integration is allowed
       if (a.allowed_integration_ids && a.allowed_integration_ids.length > 0) {
         if (!integrationId) return false;
@@ -218,6 +276,33 @@ async function pickRoundRobinAgent(
     });
 
     if (eligible.length === 0) return null;
+
+    // Project filter: if the integration belongs to a project, only pick agents
+    // who are active members of that project.
+    if (integrationId) {
+      const { data: integ } = await supabase
+        .from("integrations")
+        .select("project_id")
+        .eq("id", integrationId)
+        .maybeSingle();
+      if (integ?.project_id) {
+        const { data: projectMembers } = await supabase
+          .from("user_projects")
+          .select("user_id")
+          .eq("project_id", integ.project_id)
+          .eq("active", true);
+        if (projectMembers && projectMembers.length > 0) {
+          const memberSet = new Set(projectMembers.map((m: any) => m.user_id));
+          const projectEligible = eligible.filter((a: any) => memberSet.has(a.id));
+          if (projectEligible.length > 0) {
+            console.log(`[round-robin] project filter: ${projectEligible.length}/${eligible.length} agents in project ${integ.project_id}`);
+            eligible = projectEligible;
+          } else {
+            console.log(`[round-robin] project filter: no eligible agents in project, using all eligible`);
+          }
+        }
+      }
+    }
 
     // Online-first: if prioritizeOnline is true, prefer agents active in the last 5 minutes.
     // Falls back to all eligible agents if no online agents are found.
@@ -280,13 +365,11 @@ async function pickRoundRobinAgent(
 }
 
 /**
- * Pick the supervisor for a given integration's department, or fall back to
- * any company supervisor, then to admin.
+ * Pick an agent or supervisor for a given integration's PROJECT.
+ * NEVER delegates to admins — only agents/supervisors connected to the project.
  *
- * Chain:
- *   1. profile_departments supervisor in integration's department
- *   2. Any active user with role=supervisor in the company
- *   3. Any active user with role=admin in the company
+ * Optimized for scale: pre-fetches all active profiles + roles in parallel,
+ * then filters in-memory. Max 5 queries regardless of team size.
  */
 async function pickSupervisorOrAdmin(
   supabase: ReturnType<typeof createClient>,
@@ -295,7 +378,8 @@ async function pickSupervisorOrAdmin(
   prioritizeOnline = false,
 ): Promise<string | null> {
   try {
-    // Step 1: resolve department from integration → project → department
+    // Step 1: resolve project_id and department_id from integration
+    let projectId: string | null = null;
     let departmentId: string | null = null;
     if (integrationId) {
       const { data: integ } = await supabase
@@ -304,6 +388,7 @@ async function pickSupervisorOrAdmin(
         .eq("id", integrationId)
         .maybeSingle();
       if (integ?.project_id) {
+        projectId = integ.project_id;
         const { data: project } = await supabase
           .from("projects")
           .select("department_id")
@@ -313,119 +398,173 @@ async function pickSupervisorOrAdmin(
       }
     }
 
-    // Helper: among a list of profile IDs, pick one that is online (if prioritizeOnline),
-    // otherwise pick any. Returns null if the list is empty.
-    const pickFromIds = async (ids: string[]): Promise<string | null> => {
+    // Step 2a: fetch active profiles first (needed to scope roles query)
+    const profilesRes = await supabase
+      .from("profiles")
+      .select("id, last_seen_at")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+
+    const profiles = profilesRes.data ?? [];
+    const activeIds = profiles.map((p: any) => p.id);
+
+    // Step 2b: fetch roles + project members in parallel (scoped by active user IDs)
+    const [rolesRes, projectMembersRes] = await Promise.all([
+      activeIds.length > 0
+        ? supabase.from("user_roles").select("user_id, role").in("user_id", activeIds)
+        : Promise.resolve({ data: [] as any[] }),
+      projectId
+        ? supabase.from("user_projects").select("user_id").eq("project_id", projectId).eq("active", true)
+        : Promise.resolve({ data: null }),
+    ]);
+    if (profiles.length === 0) return null;
+
+    const activeSet = new Set(profiles.map((p: any) => p.id));
+    const lastSeenMap = new Map(profiles.map((p: any) => [p.id, p.last_seen_at || ""]));
+
+    // Build role sets
+    const adminSet = new Set<string>();
+    const supervisorSet = new Set<string>();
+    for (const r of (rolesRes.data ?? [])) {
+      if (!activeSet.has(r.user_id)) continue;
+      if (r.role === "admin") adminSet.add(r.user_id);
+      if (r.role === "supervisor") supervisorSet.add(r.user_id);
+    }
+
+    const projectMemberSet = projectMembersRes.data
+      ? new Set((projectMembersRes.data as any[]).map((m: any) => m.user_id))
+      : null;
+
+    // Helper: pick from filtered IDs, prefer online
+    const pickFrom = (ids: string[]): string | null => {
       if (ids.length === 0) return null;
       if (prioritizeOnline) {
         const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const { data: onlineRows } = await supabase
-          .from("profiles")
-          .select("id, last_seen_at")
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .in("id", ids)
-          .gt("last_seen_at", fiveMinAgo)
-          .limit(1);
-        if (onlineRows?.[0]) {
-          console.log(`[supervisor-route] online-first: → ${onlineRows[0].id}`);
-          return onlineRows[0].id;
+        const online = ids.filter(id => (lastSeenMap.get(id) || "") > fiveMinAgo);
+        if (online.length > 0) {
+          const pick = online[Math.floor(Math.random() * online.length)];
+          console.log(`[project-route] online pick → ${pick}`);
+          return pick;
         }
-        // No online supervisor — fallback to any
       }
-      // Return first in list (already ordered by DB)
-      return ids[0];
+      return ids[Math.floor(Math.random() * ids.length)];
     };
 
+    // Chain 1: project members (not admin)
+    if (projectMemberSet && projectMemberSet.size > 0) {
+      const eligible = [...projectMemberSet].filter(uid => activeSet.has(uid) && !adminSet.has(uid));
+      const picked = pickFrom(eligible);
+      if (picked) {
+        console.log(`[project-route] project=${projectId} → ${picked}`);
+        return picked;
+      }
+    }
+
+    // Chain 2: department supervisors (not admin) — must be project member if project exists
     if (departmentId) {
-      // Supervisors in this specific department (profile_departments)
       const { data: deptMembers } = await supabase
         .from("profile_departments")
         .select("profile_id")
         .eq("department_id", departmentId)
         .eq("role_in_department", "supervisor");
-
-      const memberIds = (deptMembers ?? []).map((r: any) => r.profile_id);
-      if (memberIds.length > 0) {
-        const { data: active } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .in("id", memberIds);
-        const activeIds = (active ?? []).map((p: any) => p.id);
-        const picked = await pickFromIds(activeIds);
-        if (picked) {
-          console.log(`[supervisor-route] dept=${departmentId} → ${picked}`);
-          return picked;
-        }
-      }
-    }
-
-    // Step 2: any supervisor in the company (via user_roles)
-    const { data: allProfiles } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("is_active", true);
-
-    const profileIds = (allProfiles ?? []).map((p: any) => p.id);
-    if (profileIds.length === 0) return null;
-
-    for (const roleToFind of ["supervisor", "admin"] as const) {
-      const { data: roleRows } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .in("user_id", profileIds)
-        .eq("role", roleToFind);
-      const roleIds = (roleRows ?? []).map((r: any) => r.user_id);
-      const picked = await pickFromIds(roleIds);
+      const eligible = (deptMembers ?? [])
+        .map((m: any) => m.profile_id)
+        .filter((uid: string) => activeSet.has(uid) && !adminSet.has(uid) && (!projectMemberSet || projectMemberSet.has(uid)));
+      const picked = pickFrom(eligible);
       if (picked) {
-        console.log(`[supervisor-route] fallback role=${roleToFind} → ${picked}`);
+        console.log(`[project-route] dept supervisor → ${picked}`);
         return picked;
       }
     }
 
+    // Chain 3: any supervisor in company (not admin) — must be project member if project exists
+    const allSupervisors = [...supervisorSet].filter(uid => !adminSet.has(uid) && (!projectMemberSet || projectMemberSet.has(uid)));
+    const picked = pickFrom(allSupervisors);
+    if (picked) {
+      console.log(`[project-route] fallback supervisor → ${picked}`);
+      return picked;
+    }
+
+    // Chain 4 (last resort): if project filtering left nobody, try ANY project member regardless of role
+    if (projectMemberSet && projectMemberSet.size > 0) {
+      const anyProjectMember = [...projectMemberSet].filter(uid => activeSet.has(uid) && !adminSet.has(uid));
+      const lastResort = pickFrom(anyProjectMember);
+      if (lastResort) {
+        console.log(`[project-route] last-resort project member → ${lastResort}`);
+        return lastResort;
+      }
+    }
+
+    console.log(`[project-route] no eligible agent found (company=${companyId})`);
     return null;
   } catch (err: any) {
-    console.warn("[supervisor-route] error:", err.message);
+    console.warn("[project-route] error:", err.message);
     return null;
   }
 }
 
 /**
  * Returns the assigned_user_id from the most recent conversation this contact
- * ever had (regardless of integration or status), if the agent is still active.
- * Used to re-route returning leads back to their previous agent.
+ * had on the SAME integration, if the agent is still active, belongs to the
+ * project, and is NOT admin.
+ *
+ * Optimized: 2 queries (conversation + profile+role check in parallel).
  */
 async function getLastAssignedAgent(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   contactId: string,
+  integrationId: string | null,
 ): Promise<string | null> {
   try {
-    const { data } = await supabase
+    // Query 1: find previous agent from same integration
+    let query = supabase
       .from("conversations")
       .select("assigned_user_id")
       .eq("company_id", companyId)
       .eq("contact_id", contactId)
       .not("assigned_user_id", "is", null)
       .order("last_message_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
 
+    if (integrationId) {
+      query = query.eq("integration_id", integrationId);
+    }
+
+    const { data } = await query.maybeSingle();
     if (!data?.assigned_user_id) return null;
 
-    // Verify agent is still active
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, is_active")
-      .eq("id", data.assigned_user_id)
-      .eq("company_id", companyId)
-      .maybeSingle();
+    const agentId = data.assigned_user_id;
 
-    if (!profile?.is_active) return null;
-    return profile.id;
+    // Query 2+3 in parallel: verify active + not admin + in project
+    const [profileRes, roleRes, projectRes] = await Promise.all([
+      supabase.from("profiles").select("id, is_active").eq("id", agentId).eq("company_id", companyId).maybeSingle(),
+      supabase.from("user_roles").select("role").eq("user_id", agentId).eq("role", "admin").maybeSingle(),
+      integrationId
+        ? supabase.from("integrations").select("project_id").eq("id", integrationId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    if (!profileRes.data?.is_active) return null;
+    if (roleRes.data) { console.log(`[routing] agent ${agentId} is admin — skip`); return null; }
+
+    // Check project membership if project is known
+    const projectId = (projectRes.data as any)?.project_id;
+    if (projectId) {
+      const { data: membership } = await supabase
+        .from("user_projects")
+        .select("user_id")
+        .eq("user_id", agentId)
+        .eq("project_id", projectId)
+        .eq("active", true)
+        .maybeSingle();
+      if (!membership) {
+        console.log(`[routing] agent ${agentId} not in project ${projectId} — skip`);
+        return null;
+      }
+    }
+
+    return agentId;
   } catch {
     return null;
   }
@@ -447,15 +586,11 @@ async function willChatbotTriggerForNew(
   contactId: string,
   integrationId: string | null,
   messageBody: string,
+  chatbotEnabled?: boolean,
 ): Promise<boolean> {
   try {
-    // Respect per-contact chatbot disable flag
-    const { data: contactData } = await supabase
-      .from("contacts")
-      .select("chatbot_enabled")
-      .eq("id", contactId)
-      .single();
-    if (contactData?.chatbot_enabled === false) return false;
+    // Respect per-contact chatbot disable flag (passed from caller to avoid extra DB query)
+    if (chatbotEnabled === false) return false;
 
     // Get ALL active flows — support multiple simultaneous chatbot flows
     const { data: activeFlows } = await supabase
@@ -465,8 +600,12 @@ async function willChatbotTriggerForNew(
       .eq("is_active", true)
       .order("created_at", { ascending: true });
 
-    if (!activeFlows || activeFlows.length === 0) return false;
+    if (!activeFlows || activeFlows.length === 0) {
+      console.log(`[willChatbotTrigger] no active flows for company=${companyId}`);
+      return false;
+    }
 
+    console.log(`[willChatbotTrigger] checking ${activeFlows.length} flows, msg="${messageBody}", integ=${integrationId}`);
     // Check each flow: return true if any flow matches the trigger
     for (const activeFlow of activeFlows) {
       const bh = (activeFlow.business_hours || {}) as Record<string, any>;
@@ -474,11 +613,16 @@ async function willChatbotTriggerForNew(
       const triggerKeyword: string = bh._trigger?.keyword || "";
       const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
 
+      console.log(`[willChatbotTrigger] flow=${activeFlow.id} trigger=${triggerType} keyword="${triggerKeyword}" allowedIntegs=${JSON.stringify(allowedIntegrationIds)}`);
+
       const integrationAllowed =
         allowedIntegrationIds.length === 0 ||
         (integrationId !== null && allowedIntegrationIds.includes(integrationId));
 
-      if (!integrationAllowed) continue;
+      if (!integrationAllowed) {
+        console.log(`[willChatbotTrigger] flow=${activeFlow.id} SKIPPED — integration ${integrationId} not in allowed list`);
+        continue;
+      }
 
       switch (triggerType) {
         case "any_message":
@@ -514,7 +658,7 @@ async function findMatchingFlow(
   integrationId: string | null,
   messageBody: string,
   conversationId: string,
-): Promise<{ flowId: string; shouldRun: boolean } | null> {
+): Promise<{ flowId: string; shouldRun: boolean; triggerType: string } | null> {
   const { data: activeFlows } = await supabase
     .from("chatbot_flows")
     .select("id, business_hours")
@@ -527,43 +671,57 @@ async function findMatchingFlow(
   // First check if any conversation already has an active chatbot flow running
   const { data: convState } = await supabase
     .from("conversations")
-    .select("chatbot_active, chatbot_current_node, chatbot_flow_id")
+    .select("chatbot_active, chatbot_current_node")
     .eq("id", conversationId)
     .single();
 
-  // If chatbot already active, continue with the same flow
-  if (convState?.chatbot_active === true) {
-    const activeFlowId = (convState as any).chatbot_flow_id;
-    if (activeFlowId) {
-      return { flowId: activeFlowId, shouldRun: true };
+  // If chatbot already active, find which flow owns the current node
+  if (convState?.chatbot_active === true && convState?.chatbot_current_node) {
+    const { data: nodeFlow } = await supabase
+      .from("chatbot_nodes")
+      .select("flow_id")
+      .eq("id", convState.chatbot_current_node)
+      .maybeSingle();
+    if (nodeFlow?.flow_id) {
+      return { flowId: nodeFlow.flow_id, shouldRun: true, triggerType: "active_session" };
     }
     // fallback: use first active flow
-    return { flowId: activeFlows[0].id, shouldRun: true };
+    return { flowId: activeFlows[0].id, shouldRun: true, triggerType: "active_session" };
   }
 
   // Otherwise find first flow whose trigger matches
+  console.log(`[findMatchingFlow] checking ${activeFlows.length} flows, msg="${messageBody}", integ=${integrationId}`);
   for (const flow of activeFlows) {
     const bh = (flow.business_hours || {}) as Record<string, any>;
     const triggerType: string = bh._trigger?.type || "none";
     const triggerKeyword: string = bh._trigger?.keyword || "";
     const allowedIntegrationIds: string[] = bh._trigger?.integration_ids || [];
 
+    console.log(`[findMatchingFlow] flow=${flow.id} trigger=${triggerType} keyword="${triggerKeyword}" allowedIntegs=${JSON.stringify(allowedIntegrationIds)}`);
+
     const integrationAllowed =
       allowedIntegrationIds.length === 0 ||
       (integrationId !== null && allowedIntegrationIds.includes(integrationId));
 
-    if (!integrationAllowed) continue;
+    if (!integrationAllowed) {
+      console.log(`[findMatchingFlow] flow=${flow.id} SKIPPED — integration not allowed`);
+      continue;
+    }
 
     switch (triggerType) {
       case "any_message":
-        return { flowId: flow.id, shouldRun: true };
+        console.log(`[findMatchingFlow] flow=${flow.id} MATCHED any_message`);
+        return { flowId: flow.id, shouldRun: true, triggerType: "any_message" };
       case "first_message": {
         const { count } = await supabase
           .from("messages")
           .select("id", { count: "exact", head: true })
           .eq("conversation_id", conversationId)
           .eq("sender_type", "user");
-        if ((count ?? 0) <= 1) return { flowId: flow.id, shouldRun: true };
+        if ((count ?? 0) <= 1) {
+          console.log(`[findMatchingFlow] flow=${flow.id} MATCHED first_message (count=${count})`);
+          return { flowId: flow.id, shouldRun: true, triggerType: "first_message" };
+        }
         break;
       }
       case "keyword": {
@@ -572,16 +730,21 @@ async function findMatchingFlow(
           .map((k: string) => k.trim().toLowerCase())
           .filter(Boolean);
         const msgLower = messageBody.toLowerCase();
+        console.log(`[findMatchingFlow] flow=${flow.id} keyword check: keywords=${JSON.stringify(keywords)} msg="${msgLower}"`);
         if (keywords.length > 0 && keywords.some((k: string) => msgLower.includes(k))) {
-          return { flowId: flow.id, shouldRun: true };
+          console.log(`[findMatchingFlow] flow=${flow.id} MATCHED keyword`);
+          return { flowId: flow.id, shouldRun: true, triggerType: "keyword" };
         }
+        console.log(`[findMatchingFlow] flow=${flow.id} keyword NO MATCH`);
         break;
       }
       default:
+        console.log(`[findMatchingFlow] flow=${flow.id} trigger=${triggerType} — skipping`);
         break;
     }
   }
 
+  console.log(`[findMatchingFlow] NO flow matched`);
   return null;
 }
 
@@ -598,13 +761,28 @@ serve(async (req) => {
   }
 
   try {
-    const rawBody = await req.json();
+    // Read raw body text first for HMAC signature validation
+    const bodyText = await req.text();
+    const rawBody = JSON.parse(bodyText);
 
     // Detect if this is an Evolution API webhook (has event + instance fields)
     const isEvolutionWebhook = !!(rawBody.event && rawBody.instance);
 
-    // ── Auth: X-WEBHOOK-SECRET (skip for Evolution webhooks, validated by instance lookup) ──
-    if (!isEvolutionWebhook) {
+    // ── Auth: Webhook signature validation ──────────────────────────────────
+    if (isEvolutionWebhook) {
+      const evolutionSecret = Deno.env.get("EVOLUTION_WEBHOOK_SECRET");
+      if (evolutionSecret) {
+        const sig = req.headers.get("x-evolution-signature");
+        const valid = await verifyWebhookSignature(bodyText, sig, evolutionSecret);
+        if (!valid) {
+          console.warn("[incoming] Evolution webhook signature mismatch");
+          return new Response(JSON.stringify({ error: "Invalid signature" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } else {
       const secret = req.headers.get("x-webhook-secret");
       const expected = Deno.env.get("WEBHOOK_SECRET");
       if (!expected || secret !== expected) {
@@ -617,6 +795,27 @@ serve(async (req) => {
 
     // ── Try to parse as Evolution API payload ──────────
     const evolution = parseEvolutionPayload(rawBody);
+
+    // ── Log every incoming webhook for diagnostics ──
+    if (evolution.isEvolution) {
+      console.log(`[incoming] event=${evolution.event} instance=${evolution.instance_name} from=${evolution.from_phone} group=${evolution.is_group} fromMe=${evolution.from_me} jid=${evolution.remote_jid_raw} body="${(evolution.body || '').slice(0, 50)}"`);
+    }
+
+    // ── Ultra-early group rejection — BEFORE any DB work ──
+    if (evolution.isEvolution && evolution.is_group) {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: "group_message" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ── Ultra-early: reject non-message events quickly ──
+    if (evolution.isEvolution && evolution.event && !["messages_upsert", "messages.update", "MESSAGES_UPDATE", "messages.delete", "MESSAGES_DELETE", "presence.update", "PRESENCE_UPDATE", "connection.update", "CONNECTION_UPDATE", "qrcode.updated", "QRCODE_UPDATED"].includes(evolution.event)) {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, event: evolution.event }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     let company_id: string;
     let channel: string;
@@ -640,6 +839,124 @@ serve(async (req) => {
     let remoteJidRaw: string | null = null;
 
     if (evolution.isEvolution) {
+      // ── Handle MESSAGES_UPDATE (edit from WhatsApp) ──
+      if (evolution.event === "messages.update" || evolution.event === "MESSAGES_UPDATE") {
+        const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const updates = Array.isArray(rawBody.data) ? rawBody.data : [rawBody.data];
+        for (const upd of updates) {
+          const msgId = upd?.key?.id;
+          const newText = upd?.update?.message?.conversation || upd?.update?.message?.extendedTextMessage?.text;
+          if (msgId && newText) {
+            await supabaseAdmin.from("messages")
+              .update({ body: newText, edited_at: new Date().toISOString() })
+              .eq("external_message_id", msgId);
+            console.log(`[incoming-message] Edited message ${msgId}`);
+          }
+        }
+        return new Response(JSON.stringify({ ok: true, handled: "messages_update" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // ── Handle MESSAGES_DELETE (delete from WhatsApp) ──
+      if (evolution.event === "messages.delete" || evolution.event === "MESSAGES_DELETE") {
+        const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const keys = Array.isArray(rawBody.data) ? rawBody.data : [rawBody.data];
+        for (const item of keys) {
+          const msgId = item?.key?.id || item?.id || item?.message?.key?.id;
+          if (msgId) {
+            await supabaseAdmin.from("messages")
+              .update({ deleted_at: new Date().toISOString() })
+              .eq("external_message_id", msgId);
+            console.log(`[incoming-message] Deleted message ${msgId}`);
+          }
+        }
+        return new Response(JSON.stringify({ ok: true, handled: "messages_delete" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // ── Handle PRESENCE_UPDATE (typing indicator) ──
+      if (evolution.event === "presence.update" || evolution.event === "PRESENCE_UPDATE") {
+        const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const presenceData = rawBody.data || {};
+        const remoteJid = presenceData.id || Object.keys(presenceData.presences || {})[0] || "";
+        const rawPhone = remoteJid.replace(/@.*$/, "").replace(/:.*$/, "");
+        const presences = presenceData.presences || {};
+        const presenceEntry = Object.values(presences)[0] as any;
+        const lastPresence = presenceEntry?.lastKnownPresence || "available";
+        const isTyping = lastPresence === "composing";
+
+        // Find integration by instance name
+        const { data: foundInteg } = await supabaseAdmin
+          .from("integrations")
+          .select("id, company_id")
+          .eq("channel", "whatsapp")
+          .eq("provider", "evolution")
+          .filter("config->>instance_name", "eq", rawBody.instance)
+          .maybeSingle();
+
+        if (foundInteg && rawPhone) {
+          // Find contact by phone
+          const { data: contact } = await supabaseAdmin
+            .from("contacts")
+            .select("id")
+            .eq("company_id", foundInteg.company_id)
+            .or(`phone.eq.${rawPhone},phone_e164.eq.+${rawPhone}`)
+            .maybeSingle();
+
+          if (contact) {
+            // Find open conversation
+            const { data: conv } = await supabaseAdmin
+              .from("conversations")
+              .select("id")
+              .eq("contact_id", contact.id)
+              .eq("company_id", foundInteg.company_id)
+              .not("status", "eq", "closed")
+              .order("last_message_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (conv) {
+              // Broadcast typing state via Realtime
+              const channel = supabaseAdmin.channel(`typing-${conv.id}`);
+              await channel.send({
+                type: "broadcast",
+                event: "typing",
+                payload: { conversation_id: conv.id, is_typing: isTyping },
+              });
+              supabaseAdmin.removeChannel(channel);
+            }
+          }
+        }
+        return new Response(JSON.stringify({ ok: true, handled: "presence_update" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // ── Handle CONNECTION_UPDATE (instance connect/disconnect) ──
+      if (evolution.event === "connection.update" || evolution.event === "CONNECTION_UPDATE") {
+        const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const connData = rawBody.data || {};
+        const state = connData.state || "unknown";
+        // "open" / "connected" = connected; "close" / "disconnected" = disconnected; "connecting" = transitional (ignore)
+        if (state !== "connecting") {
+          const isConnected = state === "open" || state === "connected";
+          const newStatus = isConnected ? "connected" : "disconnected";
+
+          const { data: foundInteg } = await supabaseAdmin
+            .from("integrations")
+            .select("id")
+            .eq("channel", "whatsapp")
+            .eq("provider", "evolution")
+            .filter("config->>instance_name", "eq", rawBody.instance)
+            .maybeSingle();
+
+          if (foundInteg) {
+            await supabaseAdmin
+              .from("integrations")
+              .update({ status: newStatus })
+              .eq("id", foundInteg.id);
+            console.log(`[incoming-message] CONNECTION_UPDATE: ${rawBody.instance} → ${newStatus} (state=${state})`);
+          }
+        }
+        return new Response(JSON.stringify({ ok: true, handled: "connection_update" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       // Skip non-message events
       if (evolution.event !== "messages_upsert") {
         return new Response(
@@ -647,6 +964,8 @@ serve(async (req) => {
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+
+      // Group messages already rejected at ultra-early check above
 
       // For Evolution, we need to look up the company_id from the integration
       const supabaseAdmin = createClient(
@@ -669,10 +988,10 @@ serve(async (req) => {
       if (foundInteg?.config) evolutionIntegConfig = foundInteg.config;
 
       if (!foundCompanyId) {
-        console.error(`No integration found for instance: ${evolution.instance_name}`);
+        console.warn(`[incoming] No integration found for instance: ${evolution.instance_name} — ignoring`);
         return new Response(
-          JSON.stringify({ error: "No integration found for this instance" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          JSON.stringify({ ok: true, skipped: true, reason: "unknown_instance" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
@@ -799,12 +1118,11 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // ── Validate company exists ────────────────────────
-    const { data: company, error: companyErr } = await supabase
-      .from("companies")
-      .select("id, priority_online_agents")
-      .eq("id", company_id)
-      .maybeSingle();
+    // ── Validate company + idempotency check (parallel) ──
+    const [{ data: company, error: companyErr }, { data: existing }] = await Promise.all([
+      supabase.from("companies").select("id, priority_online_agents").eq("id", company_id).maybeSingle(),
+      supabase.from("messages").select("id, conversation_id").eq("external_message_id", external_message_id).maybeSingle(),
+    ]);
 
     if (companyErr) throw companyErr;
     if (!company) {
@@ -813,13 +1131,6 @@ serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-
-    // ── Idempotency check ──────────────────────────────
-    const { data: existing } = await supabase
-      .from("messages")
-      .select("id, conversation_id")
-      .eq("external_message_id", external_message_id)
-      .maybeSingle();
 
     if (existing) {
       return new Response(
@@ -835,7 +1146,7 @@ serve(async (req) => {
       // LID contacts: use wa_identifier_raw for lookup — phone is NOT available
       const { data: lidContact } = await supabase
         .from("contacts")
-        .select("id, name, is_group, avatar_url")
+        .select("id, name, is_group, avatar_url, chatbot_enabled")
         .eq("company_id", company_id)
         .eq("wa_identifier_raw", remoteJidRaw)
         .maybeSingle();
@@ -853,7 +1164,6 @@ serve(async (req) => {
             wa_identifier_raw: remoteJidRaw,
             remote_jid_raw: remoteJidRaw,
             source: channel,
-            tags: [],
             is_group: false,
             avatar_url: null,
           })
@@ -864,53 +1174,90 @@ serve(async (req) => {
       }
     } else {
       // Regular phone-based contact
-      let { data: phoneContact } = await supabase
-        .from("contacts")
-        .select("id, name, is_group, avatar_url")
-        .eq("company_id", company_id)
-        .eq("phone", from_phone)
-        .maybeSingle();
+      const contactSelect = "id, name, is_group, avatar_url, chatbot_enabled, phone";
+      let phoneContact: any = null;
+      let needsPhoneSync = false;
 
+      // 1) Exact match on phone column
+      { const { data } = await supabase
+          .from("contacts").select(contactSelect)
+          .eq("company_id", company_id).eq("phone", from_phone).maybeSingle();
+        if (data) phoneContact = data;
+      }
+
+      // 2) Normalized phone variant
       if (!phoneContact) {
-        // Try normalized phone lookup (indexed query instead of full table scan)
         const normalizedAttempt = normalizeWhatsAppPhone(from_phone);
         if (normalizedAttempt !== from_phone) {
-          const { data: contact2 } = await supabase
-            .from("contacts")
-            .select("id, name, is_group, avatar_url")
-            .eq("company_id", company_id)
-            .eq("phone", normalizedAttempt)
-            .maybeSingle();
-          if (contact2) phoneContact = contact2;
+          const { data } = await supabase
+            .from("contacts").select(contactSelect)
+            .eq("company_id", company_id).eq("phone", normalizedAttempt).maybeSingle();
+          if (data) phoneContact = data;
         }
+      }
 
-        if (!phoneContact) {
-          // Compute E.164 and capture raw JID for the new contact
-          const phoneE164 = normalizeWhatsAppNumberSafe(from_phone);
-          const capturedJidRaw = remoteJidRaw ?? rawBody?.data?.key?.remoteJid ?? null;
-
-          const { data: newContact, error: contactErr } = await supabase
-            .from("contacts")
-            .upsert(
-              {
-                company_id,
-                name: from_name || from_phone,
-                phone: from_phone,
-                phone_e164: phoneE164,
-                remote_jid_raw: capturedJidRaw,
-                source: channel,
-                tags: [],
-                is_group: is_group,
-                avatar_url: is_group ? null : (profile_picture_url || null),
-              },
-              { onConflict: "company_id,phone" }
-            )
-            .select("id, name, is_group")
-            .single();
-
-          if (contactErr) throw contactErr;
-          phoneContact = newContact;
+      // 3) phone_e164 fallback — catches the 9th-digit mismatch where
+      //    send-whatsapp updated phone_e164 but phone stayed with old format
+      if (!phoneContact) {
+        const e164Attempt = normalizeWhatsAppNumberSafe(from_phone);
+        if (e164Attempt) {
+          const { data } = await supabase
+            .from("contacts").select(contactSelect)
+            .eq("company_id", company_id).eq("phone_e164", e164Attempt).maybeSingle();
+          if (data) { phoneContact = data; needsPhoneSync = true; }
         }
+      }
+
+      // 4) 9th digit variant — BR numbers may exist with or without the 9th digit
+      if (!phoneContact) {
+        const digits = from_phone.replace(/\D/g, "");
+        let variant: string | null = null;
+        if (digits.startsWith("55") && digits.length === 13) {
+          // Has 9th digit → try without it: 55 + DDD(2) + 9 + local(8) → 55 + DDD(2) + local(8)
+          variant = digits.slice(0, 4) + digits.slice(5);
+        } else if (digits.startsWith("55") && digits.length === 12) {
+          // No 9th digit → try with it: 55 + DDD(2) + local(8) → 55 + DDD(2) + 9 + local(8)
+          variant = digits.slice(0, 4) + "9" + digits.slice(4);
+        }
+        if (variant) {
+          const { data } = await supabase
+            .from("contacts").select(contactSelect)
+            .eq("company_id", company_id).eq("phone", variant).maybeSingle();
+          if (data) { phoneContact = data; needsPhoneSync = true; }
+        }
+      }
+
+      if (phoneContact) {
+        // Sync phone column so future lookups hit on the first try
+        if (needsPhoneSync && phoneContact.phone !== from_phone) {
+          console.log(`[incoming] syncing phone: ${phoneContact.phone} → ${from_phone} (contact ${phoneContact.id})`);
+          await supabase.from("contacts").update({ phone: from_phone }).eq("id", phoneContact.id);
+        }
+      } else {
+        // No existing contact found → create new one
+        const phoneE164 = normalizeWhatsAppNumberSafe(from_phone);
+        const capturedJidRaw = remoteJidRaw ?? rawBody?.data?.key?.remoteJid ?? null;
+
+        const { data: newContact, error: contactErr } = await supabase
+          .from("contacts")
+          .upsert(
+            {
+              company_id,
+              name: from_name || from_phone,
+              phone: from_phone,
+              phone_e164: phoneE164,
+              remote_jid_raw: capturedJidRaw,
+              source: channel,
+              is_group: is_group,
+              avatar_url: is_group ? null : (profile_picture_url || null),
+            },
+            { onConflict: "company_id,phone" }
+          )
+          .select("id, name, is_group")
+          .single();
+
+        if (contactErr) throw contactErr;
+        phoneContact = newContact;
       }
       contact = phoneContact;
     }
@@ -949,14 +1296,16 @@ serve(async (req) => {
     {
       let query = supabase
         .from("conversations")
-        .select("id, status, integration_id")
+        .select("id, status, integration_id, assigned_user_id, archived_at")
         .eq("company_id", company_id)
         .eq("contact_id", contact.id)
         .eq("channel", channel);
 
-      // Scope to the specific integration/number when known
+      // Scope to the specific integration/number when known,
+      // BUT also match conversations with NULL integration_id (from imports/sync)
+      // to prevent duplicates when a contact already has an unlinked conversation.
       if (integrationId) {
-        query = query.eq("integration_id", integrationId);
+        query = query.or(`integration_id.eq.${integrationId},integration_id.is.null`);
       }
 
       var { data: conversation } = await query
@@ -965,25 +1314,27 @@ serve(async (req) => {
         .maybeSingle();
     }
 
+    const isConvArchived = !!(conversation as any)?.archived_at;
+
     if (conversation) {
       // Reopen closed/resolved conversations when a new inbound message arrives
       const isClosed = conversation.status === "closed" || conversation.status === "resolved";
       const updates: Record<string, any> = {};
-      if (isClosed && !from_me) {
+
+      // Fix orphaned conversations: assign integration_id if it was NULL
+      if (!conversation.integration_id && integrationId) {
+        updates.integration_id = integrationId;
+        console.log(`[routing] fixed NULL integration_id → ${integrationId} on conversation ${conversation.id}`);
+      }
+
+      if (isClosed && !from_me && !isConvArchived) {
         updates.status = "new";
         updates.close_reason = null;
         // Re-assign only if previously unassigned.
         // If the conversation already has an assigned agent, keep it (returning lead → same agent).
-        const currentConv = await supabase
-          .from("conversations")
-          .select("assigned_user_id")
-          .eq("id", conversation.id)
-          .maybeSingle();
-        if (!currentConv.data?.assigned_user_id) {
-          // Unassigned closed conversation → route to supervisor/admin (not random agent)
-          const priorityOnline = !!(company as any)?.priority_online_agents;
-          const supervisorId = await pickSupervisorOrAdmin(supabase, company_id, integrationId, priorityOnline);
-          if (supervisorId) updates.assigned_user_id = supervisorId;
+        if (!conversation.assigned_user_id) {
+          // Unassigned closed conversation → keep unassigned (manual distribution)
+          console.log(`[routing] reopened conversation ${conversation.id} → stays unassigned`);
         }
         // else: has assigned_user_id → keep it (returning lead goes back to same agent)
       }
@@ -1002,8 +1353,8 @@ serve(async (req) => {
       let assignedAgentId: string | null = null;
 
       if (!from_me) {
-        // 1. Check if this contact has been previously assigned to an agent
-        const previousAgent = await getLastAssignedAgent(supabase, company_id, contact.id);
+        // 1. Check if this contact has been previously assigned to an agent (same integration/project)
+        const previousAgent = await getLastAssignedAgent(supabase, company_id, contact.id, integrationId);
         if (previousAgent) {
           assignedAgentId = previousAgent;
           console.log(`[routing] returning lead → same agent ${previousAgent}`);
@@ -1011,16 +1362,16 @@ serve(async (req) => {
           // 2. Check if chatbot would trigger for this new message
           const chatbotWillHandle = await willChatbotTriggerForNew(
             supabase, company_id, contact.id, integrationId, messageBody,
+            contact?.chatbot_enabled,
           );
           if (chatbotWillHandle) {
             // Chatbot is in charge — no agent assignment yet (chatbot flow will delegate)
             assignedAgentId = null;
             console.log(`[routing] chatbot trigger matched → no assignment`);
           } else {
-            // 3. No keyword match and no chatbot trigger → route to supervisor/admin
-            const priorityOnline = !!(company as any)?.priority_online_agents;
-            assignedAgentId = await pickSupervisorOrAdmin(supabase, company_id, integrationId, priorityOnline);
-            console.log(`[routing] no trigger → supervisor/admin ${assignedAgentId}`);
+            // 3. No chatbot trigger → stays unassigned (manual distribution by supervisor)
+            assignedAgentId = null;
+            console.log(`[routing] no chatbot trigger → unassigned (manual distribution)`);
           }
         }
       }
@@ -1047,79 +1398,9 @@ serve(async (req) => {
       }
     }
 
-    // ── Download media from Evolution and store in our bucket ───
-    if (evolution.isEvolution && media_url && media_type !== "text") {
-      try {
-        // Use cached integration config (fetched during company lookup)
-        if (evolutionIntegConfig) {
-          const ec = evolutionIntegConfig as any;
-          let evoUrl = (ec?.api_url || "").trim().replace(/\/+$/, "");
-          if (evoUrl && !/^https?:\/\//i.test(evoUrl)) evoUrl = `https://${evoUrl}`;
-          evoUrl = evoUrl.replace(/\/(manager|api)\/?$/i, "");
-          const evoKey = ec?.api_key || "";
-
-          if (evoUrl && evoKey) {
-            // Use getBase64FromMediaMessage to get decoded media
-            const mediaResp = await fetch(
-              `${evoUrl}/chat/getBase64FromMediaMessage/${evolution.instance_name}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", apikey: evoKey },
-                body: JSON.stringify({ message: { key: { id: external_message_id } }, convertToMp4: false }),
-              },
-            );
-
-            if (mediaResp.ok) {
-              const mediaData = await mediaResp.json();
-              const base64 = mediaData.base64 || mediaData.data;
-              const mimetype = mediaData.mimetype || mediaData.mediaType || "application/octet-stream";
-
-              if (base64) {
-                // Determine file extension
-                const extMap: Record<string, string> = {
-                  "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a",
-                  "audio/aac": "aac", "audio/opus": "opus",
-                  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-                  "video/mp4": "mp4", "video/3gpp": "3gp",
-                  "application/pdf": "pdf",
-                };
-                const ext = extMap[mimetype] || mimetype.split("/")[1] || "bin";
-                const fileName = `${company_id}/${conversation.id}/${external_message_id}.${ext}`;
-
-                // Decode base64 and upload
-                const binaryStr = atob(base64);
-                const bytes = new Uint8Array(binaryStr.length);
-                for (let i = 0; i < binaryStr.length; i++) {
-                  bytes[i] = binaryStr.charCodeAt(i);
-                }
-
-                const { data: uploadData, error: uploadErr } = await supabase.storage
-                  .from("chat-media")
-                  .upload(fileName, bytes.buffer, {
-                    contentType: mimetype,
-                    upsert: true,
-                  });
-
-                if (!uploadErr && uploadData) {
-                  const { data: publicUrl } = supabase.storage
-                    .from("chat-media")
-                    .getPublicUrl(fileName);
-                  media_url = publicUrl.publicUrl;
-                  console.log(`Media stored: ${media_url}`);
-                } else {
-                  console.warn("Upload failed:", uploadErr?.message);
-                }
-              }
-            } else {
-              console.warn(`getBase64FromMediaMessage failed: ${mediaResp.status}`);
-            }
-          }
-        }
-      } catch (mediaErr: any) {
-        console.warn("Media download/upload failed:", mediaErr.message);
-        // Continue with original URL as fallback
-      }
-    }
+    // Media download moved to fire-and-forget AFTER message INSERT (see below)
+    const shouldDownloadMedia = evolution.isEvolution && media_url && media_type !== "text" && evolutionIntegConfig;
+    const originalMediaUrl = media_url;
 
     // ── Deduplication for fromMe messages ────────────
     // Messages sent from the phone (fromMe) may already exist in the DB
@@ -1153,6 +1434,18 @@ serve(async (req) => {
       }
     }
 
+    // ── Resolve reply_to_id from quoted stanza ───
+    let replyToId: string | null = null;
+    if (evolution.quoted_stanza_id) {
+      const { data: quotedDbMsg } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", conversation.id)
+        .eq("external_message_id", evolution.quoted_stanza_id)
+        .maybeSingle();
+      replyToId = quotedDbMsg?.id ?? null;
+    }
+
     // ── Insert message (with sender_name for groups) ───
     const { error: msgErr } = await supabase.from("messages").insert({
       company_id,
@@ -1166,10 +1459,75 @@ serve(async (req) => {
       external_message_id,
       direction: from_me ? "outbound" : "inbound",
       created_at: timestamp || new Date().toISOString(),
+      ...(replyToId ? { reply_to_id: replyToId } : {}),
     });
 
     if (msgErr) throw msgErr;
     // last_message_at is kept up-to-date by the DB trigger on messages INSERT
+
+    // ── Fire-and-forget: download media from Evolution and store in our bucket ──
+    // Runs AFTER the message is saved so media download never delays delivery.
+    // The message appears immediately with Evolution's temporary URL; we update
+    // it in the background with our permanent Storage URL.
+    if (shouldDownloadMedia) {
+      const _convId = conversation.id;
+      const _extMsgId = external_message_id;
+      const _cfg = evolutionIntegConfig as any;
+      const _instName = evolution.instance_name;
+      (async () => {
+        try {
+          let evoUrl = (_cfg?.api_url || "").trim().replace(/\/+$/, "");
+          if (evoUrl && !/^https?:\/\//i.test(evoUrl)) evoUrl = `https://${evoUrl}`;
+          evoUrl = evoUrl.replace(/\/(manager|api)\/?$/i, "");
+          const evoKey = _cfg?.api_key || "";
+          if (!evoUrl || !evoKey) return;
+
+          const mediaResp = await fetch(
+            `${evoUrl}/chat/getBase64FromMediaMessage/${_instName}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: evoKey },
+              body: JSON.stringify({ message: { key: { id: _extMsgId } }, convertToMp4: false }),
+            },
+          );
+          if (!mediaResp.ok) return;
+
+          const mediaData = await mediaResp.json();
+          const base64 = mediaData.base64 || mediaData.data;
+          const mimetype = mediaData.mimetype || mediaData.mediaType || "application/octet-stream";
+          if (!base64) return;
+
+          const extMap: Record<string, string> = {
+            "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a",
+            "audio/aac": "aac", "audio/opus": "opus",
+            "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+            "video/mp4": "mp4", "video/3gpp": "3gp",
+            "application/pdf": "pdf",
+          };
+          const ext = extMap[mimetype] || mimetype.split("/")[1] || "bin";
+          const fileName = `${company_id}/${_convId}/${_extMsgId}.${ext}`;
+
+          const binaryStr = atob(base64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from("chat-media")
+            .upload(fileName, bytes.buffer, { contentType: mimetype, upsert: true });
+
+          if (!uploadErr && uploadData) {
+            const { data: publicUrl } = supabase.storage.from("chat-media").getPublicUrl(fileName);
+            await supabase.from("messages")
+              .update({ media_url: publicUrl.publicUrl })
+              .eq("external_message_id", _extMsgId)
+              .eq("conversation_id", _convId);
+            console.log(`[media] Stored async: ${publicUrl.publicUrl}`);
+          }
+        } catch (e: any) {
+          console.warn("[media] Async download failed:", e.message);
+        }
+      })();
+    }
 
     // ── Fire-and-forget: enrich contact from Evolution API ─────────────────
     // Runs AFTER the message is saved so it never delays delivery.
@@ -1276,20 +1634,18 @@ serve(async (req) => {
 
     // ── Chatbot processing ──────────────────────────────────────────────────
     // Only process incoming messages (not messages sent by agents/system)
-    if (!from_me) {
+    console.log(`[chatbot] from_me=${from_me} messageBody="${messageBody}" contactId=${contact.id}`);
+    if (!from_me && !isConvArchived) {
       try {
-        // Skip chatbot if contact has it disabled
-        const { data: contactData } = await supabase
-          .from("contacts")
-          .select("chatbot_enabled")
-          .eq("id", contact.id)
-          .single();
-
-        const chatbotEnabled = contactData?.chatbot_enabled !== false;
+        // Use chatbot_enabled from the contact already fetched above (no extra query)
+        const chatbotEnabled = contact?.chatbot_enabled !== false;
+        console.log(`[chatbot] chatbotEnabled=${chatbotEnabled}`);
 
         if (chatbotEnabled) {
           // Find the matching chatbot flow (supports multiple active flows)
-          const convIntegrationId: string | null = (conversation as any).integration_id ?? null;
+          // Use the global integrationId (from Evolution webhook) — conversation object may not have it
+          const convIntegrationId: string | null = integrationId ?? (conversation as any).integration_id ?? null;
+          console.log(`[chatbot] calling findMatchingFlow convId=${conversation.id} integId=${convIntegrationId}`);
           const matched = await findMatchingFlow(
             supabase,
             company_id,
@@ -1298,20 +1654,40 @@ serve(async (req) => {
             conversation.id,
           );
 
+          console.log(`[chatbot] findMatchingFlow result: ${JSON.stringify(matched)}`);
           if (matched?.shouldRun) {
-            // Invoke chatbot-process asynchronously (fire-and-forget)
-            // Pass flow_id so chatbot-process uses the correct flow
-            supabase.functions.invoke("chatbot-process", {
-              body: {
-                conversation_id: conversation.id,
-                message_body: messageBody,
-                company_id,
-                contact_id: contact.id,
-                flow_id: matched.flowId,
-              },
-            }).catch((e: unknown) =>
-              console.warn("chatbot-process invoke failed:", e instanceof Error ? e.message : e)
-            );
+            // ── Guard: skip chatbot re-trigger when conversation already has an assigned agent ──
+            // If the lead sends the trigger keyword again on the same conversation,
+            // the delegate/smart_router node would randomly reassign to a different agent.
+            // We only allow re-trigger for active chatbot sessions (user is mid-flow).
+            const alreadyAssigned = !!(conversation as any).assigned_user_id;
+            const isRetrigger = matched.triggerType === "keyword" || matched.triggerType === "any_message";
+            if (alreadyAssigned && isRetrigger) {
+              console.log(`[chatbot] SKIPPED — conversation ${conversation.id} already assigned to ${(conversation as any).assigned_user_id}, trigger=${matched.triggerType}`);
+            } else {
+              // Only keyword triggers should reopen pending conversations
+              // any_message and first_message triggers should NOT change pending status
+              if (conversation.status === "pending" && matched.triggerType === "keyword") {
+                await supabase
+                  .from("conversations")
+                  .update({ status: "open" })
+                  .eq("id", conversation.id);
+                console.log(`[chatbot] conversation ${conversation.id} was pending → reopened to open (keyword trigger)`);
+              }
+              // Invoke chatbot-process asynchronously (fire-and-forget)
+              // Pass flow_id so chatbot-process uses the correct flow
+              supabase.functions.invoke("chatbot-process", {
+                body: {
+                  conversation_id: conversation.id,
+                  message_body: messageBody,
+                  company_id,
+                  contact_id: contact.id,
+                  flow_id: matched.flowId,
+                },
+              }).catch((e: unknown) =>
+                console.warn("chatbot-process invoke failed:", e instanceof Error ? e.message : e)
+              );
+            }
           }
         }
       } catch (chatbotErr) {
@@ -1325,7 +1701,15 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
-    console.error("Webhook error:", err);
+    // Log full context so we can diagnose 500s from Evolution webhooks
+    let debugCtx = "";
+    try {
+      const clonedBody = await req.clone().json().catch(() => null);
+      debugCtx = clonedBody
+        ? ` | event=${clonedBody.event} instance=${clonedBody.instance} dataKeys=${JSON.stringify(Object.keys(clonedBody.data || {}))}`
+        : "";
+    } catch { /* ignore */ }
+    console.error(`Webhook error:${debugCtx}`, err?.stack || err);
     return new Response(
       JSON.stringify({ error: err.message || "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

@@ -1,19 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 
 export function useSidebarStats() {
-  const { user, companyId } = useAuth();
+  const { user, companyId, profile } = useAuth();
+  const { projectId } = useProjectContext();
+  const spyMode = !!profile?.spy_mode;
 
   return useQuery({
-    queryKey: ['sidebar-stats', companyId],
+    queryKey: ['sidebar-stats', companyId, projectId, spyMode],
     queryFn: async () => {
+      const rpcParams: Record<string, unknown> = {
+        p_user_id: user!.id,
+        p_company_id: companyId!,
+        p_spy_mode: spyMode,
+      };
+      if (projectId) {
+        rpcParams.p_project_id = projectId;
+      }
+
       const [unreadRes, taskRes] = await Promise.all([
-        // Single server-side aggregation replacing full table scan + client comparison
-        supabase.rpc('get_sidebar_unread_count', {
-          p_user_id: user!.id,
-          p_company_id: companyId!,
-        }),
+        supabase.rpc('get_sidebar_unread_count', rpcParams),
         supabase
           .from('tasks')
           .select('id', { count: 'exact', head: true })
@@ -29,6 +37,7 @@ export function useSidebarStats() {
       };
     },
     enabled: !!user && !!companyId,
-    refetchInterval: 10_000, // fallback polling — realtime invalida via useInboxRealtime
+    refetchInterval: 60_000, // was 10s — Realtime invalidates, this is just safety net
+    staleTime: 30_000,
   });
 }

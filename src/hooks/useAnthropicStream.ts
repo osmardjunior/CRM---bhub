@@ -20,6 +20,9 @@ export function useAnthropicStream({ endpoint, onComplete }: UseAnthropicStreamO
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
+      const controller = new AbortController();
+      let inactivityTimer = setTimeout(() => controller.abort(), 30_000);
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${endpoint}`,
         {
@@ -30,16 +33,21 @@ export function useAnthropicStream({ endpoint, onComplete }: UseAnthropicStreamO
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         }
       );
 
       if (!response.ok) {
+        clearTimeout(inactivityTimer);
         const errBody = await response.text();
         throw new Error(errBody || `HTTP ${response.status}`);
       }
 
       const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      if (!reader) {
+        clearTimeout(inactivityTimer);
+        throw new Error('No response body');
+      }
 
       const decoder = new TextDecoder();
       let accumulated = '';
@@ -47,7 +55,10 @@ export function useAnthropicStream({ endpoint, onComplete }: UseAnthropicStreamO
 
       while (true) {
         const { done, value } = await reader.read();
+        clearTimeout(inactivityTimer);
         if (done) break;
+        // Reset inactivity timer on each chunk received
+        inactivityTimer = setTimeout(() => controller.abort(), 30_000);
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -76,7 +87,10 @@ export function useAnthropicStream({ endpoint, onComplete }: UseAnthropicStreamO
 
       onComplete?.(accumulated);
     } catch (err: any) {
-      setError(err.message ?? 'AI request failed');
+      const message = err?.name === 'AbortError'
+        ? 'Stream interrompido por inatividade (timeout 30s)'
+        : (err.message ?? 'AI request failed');
+      setError(message);
     } finally {
       setIsStreaming(false);
     }

@@ -5,14 +5,19 @@ const CRM_AREA_IDS = ['crm'];
 
 /**
  * Retorna os IDs dos usuários que têm permissão na área do CRM.
- * Usado para filtrar listagens de membros — só mostra quem pertence a esta área.
+ * Usa RPC SECURITY DEFINER para bypassar a RLS (que limita SELECT a auth.uid()).
+ * Retorna null se a RPC não existir ou não tiver dados (fallback: sem filtro).
  */
 export async function getAreaUserIds(): Promise<string[] | null> {
-  const { data, error } = await supabase
-    .from('user_micro_area_permissions')
-    .select('user_id')
-    .in('micro_area_id', CRM_AREA_IDS);
+  try {
+    const { data, error } = await supabase.rpc('get_area_user_ids', {
+      p_micro_area_ids: CRM_AREA_IDS,
+    });
 
-  if (error || !data || data.length === 0) return null;
-  return [...new Set(data.map(r => r.user_id))];
+    if (error) return null;
+    if (!data || data.length === 0) return null;
+    return [...new Set((data as { user_id: string }[]).map(r => r.user_id))];
+  } catch {
+    return null;
+  }
 }

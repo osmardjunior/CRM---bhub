@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import type { Json } from '@/integrations/supabase/types';
 
 export interface Integration {
   id: string;
@@ -27,9 +28,10 @@ export function useIntegrations(projectId?: string) {
     queryFn: async () => {
       let query = supabase
         .from('integrations')
-        .select('*')
+        .select('id, company_id, channel, provider, config, status, phone_number, device_name, restrict_users, department_id, project_id, created_at')
         .eq('company_id', companyId!)
-        .order('created_at');
+        .order('created_at')
+        .limit(50);
       if (projectId) {
         query = query.eq('project_id', projectId);
       }
@@ -37,6 +39,7 @@ export function useIntegrations(projectId?: string) {
       if (error) throw error;
       return (data ?? []) as Integration[];
     },
+    staleTime: 60_000,
   });
 }
 
@@ -57,13 +60,13 @@ export function useAddDevice() {
         .insert({
           channel: payload.channel,
           provider: payload.provider,
-          config: payload.config as any,
+          config: payload.config as unknown as Json,
           phone_number: payload.phone_number,
           device_name: payload.device_name,
           department_id: payload.department_id || null,
           project_id: payload.project_id || null,
           status: 'connected',
-        } as any);
+        });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -77,7 +80,7 @@ export function useAddDevice() {
 export function useUpdateDevice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { id: string; updates: Record<string, any> }) => {
+    mutationFn: async (payload: { id: string; updates: Record<string, unknown> }) => {
       const { error } = await supabase
         .from('integrations')
         .update(payload.updates)
@@ -98,7 +101,7 @@ export function useDisconnectDevice() {
     mutationFn: async (id: string) => {
       const { error } = await supabase
         .from('integrations')
-        .update({ status: 'disconnected', config: {} as any })
+        .update({ status: 'disconnected', config: {} as unknown as Json })
         .eq('id', id);
       if (error) throw error;
     },

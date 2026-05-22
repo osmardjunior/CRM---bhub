@@ -25,7 +25,7 @@ export default function AIAnnotationHelper({ conversation, onInsert }: Props) {
       content: m.body,
     }));
 
-    const tags = ((conversation.contact as any).tags as string[]) || [];
+    const tags = (conversation.contact.tags as string[] | null) || [];
 
     invoke({
       conversationId: conversation.id,

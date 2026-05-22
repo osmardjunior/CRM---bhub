@@ -13,7 +13,7 @@ const TRIGGER_OPTIONS = [
   { value: 'none', label: 'Nenhum (manual)' },
   { value: 'first_message', label: 'Primeira mensagem do contato' },
   { value: 'any_message', label: 'Qualquer mensagem recebida' },
-  { value: 'keyword', label: 'Palavra-chave' },
+  { value: 'keyword', label: 'Frase-chave' },
   { value: 'status_resolved', label: 'Status: Resolvido' },
   { value: 'status_opened', label: 'Status: Em Atendimento' },
   { value: 'new_contact', label: 'Novo contato cadastrado' },
@@ -100,7 +100,7 @@ export default function FlowSettings({ flow, onSave }: FlowSettingsProps) {
           </div>
           {triggerType === 'keyword' && (
             <div className="space-y-2">
-              <Label>Palavra-chave</Label>
+              <Label>Frase-chave</Label>
               <Input
                 placeholder="Ex: olá, oi, começar"
                 value={triggerKeyword}

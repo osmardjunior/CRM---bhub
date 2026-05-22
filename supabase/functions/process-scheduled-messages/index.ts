@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
       .is("sent_at", null)
       .is("cancelled_at", null)
       .lte("scheduled_at", new Date().toISOString())
-      .limit(50);
+      .limit(20);
 
     if (fetchError) {
       console.error("Error fetching scheduled messages:", fetchError);
@@ -41,7 +41,12 @@ Deno.serve(async (req) => {
 
     let processed = 0;
 
-    for (const scheduled of pendingMessages) {
+    for (let i = 0; i < pendingMessages.length; i++) {
+      const scheduled = pendingMessages[i];
+      // Delay between messages to avoid WhatsApp spam detection (skip first)
+      // 3-8s random delay — mimics human pacing and avoids ban triggers
+      if (i > 0) await new Promise(r => setTimeout(r, 3000 + Math.random() * 5000));
+
       try {
         const conv = scheduled.conversations as any;
         if (!conv) continue;
@@ -96,6 +101,16 @@ Deno.serve(async (req) => {
       } catch (err) {
         console.error(`Error processing scheduled message ${scheduled.id}:`, err);
       }
+    }
+
+    // Cleanup old rate limit logs (older than 25 hours) to prevent table bloat
+    try {
+      await supabase
+        .from("send_rate_log")
+        .delete()
+        .lt("sent_at", new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString());
+    } catch (cleanupErr) {
+      console.warn("Rate log cleanup failed (non-critical):", cleanupErr);
     }
 
     return new Response(JSON.stringify({ processed }), {

@@ -20,7 +20,7 @@ export function useProjects(departmentId?: string) {
     queryFn: async () => {
       let query = supabase
         .from('projects')
-        .select('*')
+        .select('id, company_id, department_id, name, active, created_at')
         .eq('company_id', companyId!)
         .eq('active', true)
         .order('name');
@@ -33,6 +33,7 @@ export function useProjects(departmentId?: string) {
       if (error) throw error;
       return (data ?? []) as Project[];
     },
+    staleTime: 120_000,
   });
 }
 
@@ -89,7 +90,7 @@ export function useMyProjects() {
       if (role === 'admin') {
         const { data, error } = await supabase
           .from('projects')
-          .select('*')
+          .select('id, company_id, department_id, name, active, created_at')
           .eq('company_id', companyId!)
           .eq('active', true)
           .order('name');

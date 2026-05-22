@@ -18,6 +18,9 @@ export interface ReportFilters {
   botStatus?: 'active' | 'inactive' | 'any';
   funnelId?: string;
   stageId?: string;
+  excludeFunnelId?: string;
+  excludeStageId?: string;
+  integrationIds?: string[];
   registeredLastDays?: number | null;
   registeredFrom?: string;
   registeredTo?: string;
@@ -47,7 +50,7 @@ export function useSavedReports() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('saved_reports')
-        .select('*')
+        .select('id, name, report_type, filters, show_on_home, created_at, updated_at')
         .eq('company_id', companyId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -70,11 +73,11 @@ export function useSaveReport() {
       const { error } = await supabase.from('saved_reports').insert({
         name: payload.name,
         report_type: payload.report_type,
-        filters: payload.filters as any,
+        filters: payload.filters as unknown as Record<string, unknown>,
         show_on_home: payload.show_on_home ?? false,
         created_by: user?.id,
         company_id: companyId,
-      } as any);
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -108,38 +111,48 @@ export function useReportQuery(
   page: number,
   enabled: boolean,
 ) {
-  const { companyId } = useAuth();
+  const { companyId, user, role } = useAuth();
+  // Non-admin users only see their own data
+  const agentUserId = role !== 'admin' ? user?.id : undefined;
+
   return useQuery({
-    queryKey: ['report-results', reportType, filters, page],
+    queryKey: ['report-results', reportType, filters, page, agentUserId],
     enabled: enabled && !!companyId,
     queryFn: async () => {
       const offset = (page - 1) * PAGE_SIZE;
 
       if (reportType === 'chats') {
-        return queryChats(filters, offset, companyId!);
+        return queryChats(filters, offset, companyId!, agentUserId);
       }
-      if (reportType === 'contacts' || reportType === 'messages') {
-        return queryContacts(filters, offset, companyId!);
+      if (reportType === 'messages') {
+        return queryMessages(filters, offset, companyId!, agentUserId);
+      }
+      if (reportType === 'contacts') {
+        return queryContacts(filters, offset, companyId!, agentUserId);
       }
       return { rows: [], total: 0 };
     },
   });
 }
 
-async function queryChats(filters: ReportFilters, offset: number, companyId: string) {
+async function queryChats(filters: ReportFilters, offset: number, companyId: string, agentUserId?: string) {
   let query = supabase
     .from('conversations')
-    .select('*, contact:contacts!inner(*)', { count: 'exact' })
+    .select('id, status, channel, assigned_user_id, department_id, chatbot_active, last_message_at, created_at, contact:contacts(id, name, phone, tags, created_at, last_contact_at)', { count: 'exact' })
     .eq('company_id', companyId);
+
+  // Non-admin: force filter to only their assigned conversations
+  if (agentUserId) {
+    query = query.eq('assigned_user_id', agentUserId);
+  } else if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
+    query = query.in('assigned_user_id', filters.assignedUserIds);
+  }
 
   if (filters.status && filters.status !== 'any') {
     query = query.eq('status', filters.status);
   }
   if (filters.channels && filters.channels.length > 0) {
     query = query.in('channel', filters.channels as ('whatsapp' | 'instagram' | 'webchat')[]);
-  }
-  if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
-    query = query.in('assigned_user_id', filters.assignedUserIds);
   }
   if (filters.departmentIds && filters.departmentIds.length > 0) {
     query = query.in('department_id', filters.departmentIds);
@@ -150,30 +163,35 @@ async function queryChats(filters: ReportFilters, offset: number, companyId: str
     query = query.eq('chatbot_active', false);
   }
 
+  // Integration (phone number) filter
+  if (filters.integrationIds && filters.integrationIds.length > 0) {
+    query = query.in('integration_id', filters.integrationIds);
+  }
+
   // Tag filters on contact — use JSONB @> operator via .contains()
   // Pass an array, not JSON.stringify (PostgREST handles serialization)
   if (filters.includeTags && filters.includeTags.length > 0) {
     for (const tag of filters.includeTags) {
-      query = (query as any).contains('contact.tags', [tag]);
+      query = query.filter('contact.tags', 'cs', JSON.stringify([tag]));
     }
   }
   if (filters.excludeTags && filters.excludeTags.length > 0) {
     for (const tag of filters.excludeTags) {
-      query = (query as any).filter('contact.tags', 'not.cs', JSON.stringify([tag]));
+      query = query.filter('contact.tags', 'not.cs', JSON.stringify([tag]));
     }
   }
 
   // Date filters on contact
   if (filters.registeredFrom) {
-    query = (query as any).gte('contact.created_at', filters.registeredFrom);
+    query = query.filter('contact.created_at', 'gte', filters.registeredFrom);
   }
   if (filters.registeredTo) {
-    query = (query as any).lte('contact.created_at', filters.registeredTo);
+    query = query.filter('contact.created_at', 'lte', filters.registeredTo);
   }
   if (filters.registeredLastDays) {
     const d = new Date();
     d.setDate(d.getDate() - filters.registeredLastDays);
-    query = (query as any).gte('contact.created_at', d.toISOString());
+    query = query.filter('contact.created_at', 'gte', d.toISOString());
   }
 
   // Interaction date filters (last_message_at on conversation)
@@ -211,11 +229,98 @@ async function queryChats(filters: ReportFilters, offset: number, companyId: str
   return { rows: data ?? [], total: count ?? 0 };
 }
 
-async function queryContacts(filters: ReportFilters, offset: number, companyId: string) {
+async function queryMessages(filters: ReportFilters, offset: number, companyId: string, agentUserId?: string) {
+  // First get conversation IDs matching filters, then fetch messages
+  let convQuery = supabase
+    .from('conversations')
+    .select('id')
+    .eq('company_id', companyId);
+
+  // Non-admin: force filter to only their assigned conversations
+  if (agentUserId) {
+    convQuery = convQuery.eq('assigned_user_id', agentUserId);
+  } else if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
+    convQuery = convQuery.in('assigned_user_id', filters.assignedUserIds);
+  }
+  if (filters.channels && filters.channels.length > 0) {
+    convQuery = convQuery.in('channel', filters.channels);
+  }
+  if (filters.status && filters.status !== 'any') {
+    convQuery = convQuery.eq('status', filters.status);
+  }
+  if (filters.integrationIds && filters.integrationIds.length > 0) {
+    convQuery = convQuery.in('integration_id', filters.integrationIds);
+  }
+
+  const { data: convRows, error: convErr } = await convQuery;
+  if (convErr) throw convErr;
+  const convIds = (convRows ?? []).map(c => c.id);
+  if (convIds.length === 0) return { rows: [], total: 0 };
+
+  let query = supabase
+    .from('messages')
+    .select('id, conversation_id, body, sender_type, sender_name, type, created_at', { count: 'exact' })
+    .in('conversation_id', convIds);
+
+  if (filters.registeredFrom) {
+    query = query.gte('created_at', filters.registeredFrom);
+  }
+  if (filters.registeredTo) {
+    query = query.lte('created_at', filters.registeredTo);
+  }
+  if (filters.registeredLastDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - filters.registeredLastDays);
+    query = query.gte('created_at', d.toISOString());
+  }
+  if (filters.interactedLastDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - filters.interactedLastDays);
+    query = query.gte('created_at', d.toISOString());
+  }
+
+  query = query
+    .order('created_at', { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  // Enrich with conversation + contact info
+  const msgRows = data ?? [];
+  if (msgRows.length === 0) return { rows: [], total: count ?? 0 };
+
+  const uniqueConvIds = [...new Set(msgRows.map(m => m.conversation_id))];
+  const { data: convData } = await supabase
+    .from('conversations')
+    .select('id, channel, status, contact:contacts(name, phone)')
+    .in('id', uniqueConvIds);
+
+  const convMap: Record<string, any> = {};
+  for (const c of (convData ?? [])) {
+    convMap[c.id] = c;
+  }
+
+  const enriched = msgRows.map(m => ({
+    ...m,
+    conversation: convMap[m.conversation_id] || null,
+  }));
+
+  return { rows: enriched, total: count ?? 0 };
+}
+
+async function queryContacts(filters: ReportFilters, offset: number, companyId: string, agentUserId?: string) {
   let query = supabase
     .from('contacts')
-    .select('*', { count: 'exact' })
+    .select('id, name, phone, phone_e164, email, tags, responsible_user_id, created_at, last_contact_at', { count: 'exact' })
     .eq('company_id', companyId);
+
+  // Non-admin: force filter to only their responsible contacts
+  if (agentUserId) {
+    query = query.eq('responsible_user_id', agentUserId);
+  } else if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
+    query = query.in('responsible_user_id', filters.assignedUserIds);
+  }
 
   // Tag filters — fix: pass array not JSON.stringify
   if (filters.includeTags && filters.includeTags.length > 0) {
@@ -225,7 +330,7 @@ async function queryContacts(filters: ReportFilters, offset: number, companyId: 
   }
   if (filters.excludeTags && filters.excludeTags.length > 0) {
     for (const tag of filters.excludeTags) {
-      query = (query as any).filter('tags', 'not.cs', JSON.stringify([tag]));
+      query = query.filter('tags', 'not.cs', JSON.stringify([tag]));
     }
   }
 
@@ -250,15 +355,24 @@ async function queryContacts(filters: ReportFilters, offset: number, companyId: 
     d.setDate(d.getDate() - filters.interactedLastDays);
     query = query.gte('last_contact_at', d.toISOString());
   }
-  if (filters.assignedUserIds && filters.assignedUserIds.length > 0) {
-    query = query.in('responsible_user_id', filters.assignedUserIds);
-  }
 
   // Funnel/stage filter for contacts — filter by contact_funnel_stages
   if (filters.funnelId) {
     const contactIds = await getContactIdsByFunnel(filters.funnelId, filters.stageId);
     if (contactIds.length === 0) return { rows: [], total: 0 };
     query = query.in('id', contactIds);
+  }
+
+  // Exclude funnel — remove contacts that are in the specified funnel/stage
+  if (filters.excludeFunnelId) {
+    const excludeIds = await getContactIdsByFunnel(filters.excludeFunnelId, filters.excludeStageId);
+    if (excludeIds.length > 0) {
+      // Supabase doesn't have "not in" with arrays > 100, so we batch
+      for (let i = 0; i < excludeIds.length; i += 100) {
+        const batch = excludeIds.slice(i, i + 100);
+        query = query.filter('id', 'not.in', `(${batch.join(',')})`);
+      }
+    }
   }
 
   query = query
@@ -284,7 +398,8 @@ async function getConversationsWithoutIncomingMessage(days: number): Promise<str
     .select('conversation_id, created_at')
     .in('sender_type', ['user', 'contact'])
     .gte('created_at', lookbackFrom.toISOString())
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(10000);
 
   if (error || !data) return [];
 
@@ -316,7 +431,8 @@ async function getConversationsWithoutOutgoingMessage(days: number): Promise<str
     .select('conversation_id, created_at')
     .eq('sender_type', 'agent')
     .gte('created_at', lookbackFrom.toISOString())
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(10000);
 
   if (error || !data) return [];
 

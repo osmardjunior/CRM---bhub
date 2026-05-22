@@ -10,49 +10,55 @@ import {
   useMarkConversationRead,
 } from '@/hooks/useConversations';
 import { useInboxRealtime } from '@/hooks/useInboxRealtime';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
 import { useAuth } from '@/contexts/AuthContext';
-import { useMyProjects } from '@/hooks/useProjects';
-import { useSelectedProject } from '@/hooks/useSelectedProject';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import type { ConversationFilters } from '@/services/api';
 import type { Enums } from '@/integrations/supabase/types';
 
 export default function InboxPage() {
   const { user, role } = useAuth();
+  const { projectId, selectProject } = useProjectContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialId = searchParams.get('id');
   const initialStatus = searchParams.get('status') as Enums<'conversation_status'> | null;
   const initialSearch = searchParams.get('search');
-  const initialProjectId = searchParams.get('projectId') ?? '';
+  const initialAssigned = searchParams.get('assigned');
+  const initialProject = searchParams.get('project');
 
-  const { data: myProjects = [] } = useMyProjects();
-  const { projectId, select: selectProject } = useSelectedProject();
-
-  // URL param takes priority over localStorage on first load
-  const effectiveProjectId = initialProjectId || projectId;
+  // If navigated with ?project=xxx (e.g. from reports), switch global project
+  useEffect(() => {
+    if (initialProject && initialProject !== projectId) {
+      selectProject(initialProject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [selectedId, setSelectedId] = useState<string | null>(initialId);
   const [profileOpen, setProfileOpen] = useState(true);
+  const [listCollapsed, setListCollapsed] = useState(false);
+  const [listFrozen, setListFrozen] = useState(() => localStorage.getItem('inbox_frozen') === 'true');
+
+  // When coming from URL with ?id=, also clear status filter to show the conversation regardless of status
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
     status: initialStatus ?? undefined,
-    statusIn: initialStatus ? undefined : ['new', 'open', 'pending', 'resolved'],
+    statusIn: (initialStatus || initialId) ? undefined : ['new', 'open', 'pending', 'resolved'],
     search: initialSearch ?? undefined,
-    project_id: effectiveProjectId || undefined,
+    project_id: initialProject || projectId || undefined,
+    assigned_user_id: initialAssigned === 'none' ? '__none__' : initialAssigned ?? undefined,
   });
 
-  // Se o agente pertence a exatamente 1 projeto, aplica automaticamente (sem mostrar seletor)
-  const didAutoProject = useRef(false);
+  // Sync project_id filter when global selector changes + clear selected conversation
+  // Never clear selectedId if we navigated via URL with ?id= (protects against project sync race)
+  const isFirstProjectChange = useRef(!!initialId);
   useEffect(() => {
-    if (didAutoProject.current) return;
-    if (role === 'agent' && myProjects.length === 1 && !effectiveProjectId) {
-      didAutoProject.current = true;
-      const sole = myProjects[0].id;
-      selectProject(sole);
-      setFilters(prev => ({ ...prev, project_id: sole }));
+    setFilters(prev => ({ ...prev, project_id: projectId || undefined }));
+    if (isFirstProjectChange.current) {
+      isFirstProjectChange.current = false;
+    } else if (!navigatedViaUrl.current) {
+      setSelectedId(null);
     }
-  }, [myProjects, role, effectiveProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Agents only see conversations assigned to them + scoped to their projects
   const effectiveFilters = useMemo<Omit<ConversationFilters, 'page'>>(() => {
@@ -62,9 +68,10 @@ export default function InboxPage() {
     return filters;
   }, [filters, role, user?.id]);
 
-  // O seletor de projeto só aparece quando há > 1 projeto disponível
-  // (para agentes com apenas 1 projeto, aplica silenciosamente; para admins, sempre mostra)
-  const showProjectSelector = myProjects.length > 1 || (role !== 'agent' && myProjects.length > 0);
+  const effectiveSelectedId = selectedId;
+
+  const { play: playNotification } = useNotificationSound();
+  const { isSubscribed } = useInboxRealtime(effectiveSelectedId, playNotification, listFrozen);
 
   const {
     data: infiniteData,
@@ -72,7 +79,7 @@ export default function InboxPage() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useInfiniteConversations(effectiveFilters);
+  } = useInfiniteConversations(effectiveFilters, { frozen: listFrozen, realtimeActive: isSubscribed });
 
   const conversations = useMemo(
     () => infiniteData?.pages.flat() ?? [],
@@ -80,53 +87,61 @@ export default function InboxPage() {
   );
 
   // Auto-seleciona a primeira conversa UMA única vez após o carregamento inicial.
+  // skipAutoSelect prevents re-selecting after "mark as unread" clears the selection.
+  // navigatedViaUrl prevents auto-select from overriding a URL-provided conversation ID.
   const didAutoSelect = useRef(false);
+  const skipAutoSelect = useRef(false);
+  const navigatedViaUrl = useRef(!!initialId);
   useEffect(() => {
+    if (skipAutoSelect.current) return;
+    if (navigatedViaUrl.current) return;
     if (!didAutoSelect.current && selectedId === null && conversations.length > 0) {
       didAutoSelect.current = true;
       setSelectedId(conversations[0].id);
     }
   }, [conversations, selectedId]);
 
-  const effectiveSelectedId = selectedId;
-  const { data: detail, isLoading: detailLoading } = useConversationDetail(effectiveSelectedId);
+  const { data: detail, isLoading: detailLoading, isError: detailError } = useConversationDetail(effectiveSelectedId, { realtimeActive: isSubscribed });
   const { data: unreadCounts } = useUnreadCounts(conversations);
   const markRead = useMarkConversationRead();
 
-  // Stable detail: once a conversation is loaded, never pass null back to ChatPanel
-  // while the same conversation is selected. This prevents the textarea from
-  // unmounting/remounting (losing focus) during React Query background refetches.
-  const stableDetailRef = useRef<typeof detail>(undefined);
-  const stableDetailConvIdRef = useRef<string | null>(null);
-  if (effectiveSelectedId !== stableDetailConvIdRef.current) {
-    // Conversation changed — reset so the new conversation shows loading state
-    stableDetailRef.current = undefined;
-    stableDetailConvIdRef.current = effectiveSelectedId;
-  }
-  if (detail !== undefined) {
-    stableDetailRef.current = detail;
-  }
-  const stableDetail = stableDetailRef.current;
-
-  useInboxRealtime(effectiveSelectedId);
-
+  // Only mark as read when the user EXPLICITLY clicks a conversation (not auto-select).
+  // This prevents the initial load from clearing all unread badges.
+  const userClickedRef = useRef(false);
   useEffect(() => {
-    if (effectiveSelectedId) {
+    if (effectiveSelectedId && userClickedRef.current) {
       markRead.mutate(effectiveSelectedId);
+      userClickedRef.current = false;
     }
     // markRead is a stable mutation ref from React Query — intentionally omitted
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveSelectedId]);
 
-  const handleProjectChange = (value: string) => {
-    const id = value === '__all__' ? '' : value;
-    selectProject(id);
-    setSelectedId(null);
-    didAutoSelect.current = false;
-    setFilters((prev) => ({ ...prev, project_id: id || undefined }));
-  };
+  // Clear selection ONLY if the detail query explicitly fails (RLS blocked / conversation deleted)
+  // Do NOT clear based on list position — conversation may be valid but outside the paginated window
+  // Never clear when navigated via URL — the conversation may just need time to load
+  useEffect(() => {
+    if (detailError && selectedId && !navigatedViaUrl.current) {
+      setSelectedId(null);
+      didAutoSelect.current = false;
+    }
+  }, [detailError, selectedId]);
+
+  // Keep ?id= in URL in sync with selectedId so sharing/refreshing works
+  useEffect(() => {
+    setSearchParams(params => {
+      if (selectedId) {
+        params.set('id', selectedId);
+      } else {
+        params.delete('id');
+      }
+      return params;
+    }, { replace: true });
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterChange = (newFilters: Partial<ConversationFilters>) => {
+    // Unfreeze list when filters change
+    setListFrozen(false);
     setFilters((prev) => {
       const next = { ...prev, ...newFilters };
       // Persist status filter in URL so it survives page reload
@@ -145,63 +160,73 @@ export default function InboxPage() {
   const hasSelection = !!effectiveSelectedId;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2">
-      {/* Project selector bar — visível para admin sempre, para agente apenas se tiver > 1 projeto */}
-      {showProjectSelector && (
-        <div className="flex items-center gap-2 px-3 pb-2">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Projeto:</span>
-          <Select
-            value={filters.project_id ?? '__all__'}
-            onValueChange={handleProjectChange}
-          >
-            <SelectTrigger className="h-7 text-xs w-48">
-              <SelectValue placeholder="Todos os projetos" />
-            </SelectTrigger>
-            <SelectContent>
-              {role !== 'agent' && (
-                <SelectItem value="__all__">Todos os projetos</SelectItem>
-              )}
-              {myProjects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
+    <div className="flex flex-col h-[calc(100dvh-7rem)] -mt-2">
       <div className="flex flex-1 min-h-0 gap-0 rounded-xl border border-border bg-card card-shadow overflow-hidden">
-      {/* Conversation list — hidden on mobile when a chat is open */}
-      <div className={hasSelection ? 'hidden md:flex shrink-0' : 'flex w-full md:w-auto shrink-0'}>
+      {/* Conversation list — hidden on mobile when a chat is open, collapsible on desktop */}
+      <div className={`${listCollapsed ? '!hidden' : ''} ${hasSelection ? 'hidden md:flex shrink-0' : 'flex w-full md:w-auto shrink-0'}`}>
         <ConversationList
           conversations={conversations}
           loading={listLoading}
           selectedId={effectiveSelectedId}
-          onSelect={setSelectedId}
+          onSelect={(id: string) => {
+            skipAutoSelect.current = false;
+            userClickedRef.current = true;
+            // Restore default status filter when user starts manual navigation
+            if (navigatedViaUrl.current) {
+              navigatedViaUrl.current = false;
+              setFilters(prev => prev.statusIn === undefined && !prev.status
+                ? { ...prev, statusIn: ['new', 'open', 'pending', 'resolved'] }
+                : prev,
+              );
+            }
+            setSelectedId(id);
+          }}
           filters={filters}
           onFilterChange={handleFilterChange}
           unreadCounts={unreadCounts ?? {}}
           hasMore={!!hasNextPage}
           onLoadMore={() => fetchNextPage()}
           loadingMore={isFetchingNextPage}
+          frozen={listFrozen}
+          onToggleFreeze={() => setListFrozen(p => { const next = !p; localStorage.setItem('inbox_frozen', String(next)); return next; })}
         />
       </div>
 
       {/* Chat panel — hidden on mobile when no chat is selected */}
       <div className={`${hasSelection ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
         <ChatPanel
-          conversation={effectiveSelectedId ? (stableDetail ?? null) : null}
-          loading={detailLoading && !stableDetail && !!effectiveSelectedId}
+          conversation={effectiveSelectedId ? (detail ?? null) : null}
+          loading={detailLoading && !!effectiveSelectedId}
           onToggleProfile={() => setProfileOpen((p) => !p)}
           profileOpen={profileOpen}
-          onBack={() => setSelectedId(null)}
+          onBack={(opts?: { skipAutoSelect?: boolean }) => {
+            if (opts?.skipAutoSelect) skipAutoSelect.current = true;
+            setSelectedId(null);
+          }}
+          listCollapsed={listCollapsed}
+          onToggleList={() => setListCollapsed((p) => !p)}
         />
       </div>
 
-      {profileOpen && stableDetail && (
-        <ContactProfilePanel
-          conversation={stableDetail}
-          onClose={() => setProfileOpen(false)}
-        />
+      {profileOpen && detail && (
+        <div className="hidden md:flex">
+          <ContactProfilePanel
+            conversation={detail}
+            onClose={() => setProfileOpen(false)}
+          />
+        </div>
+      )}
+      {/* Mobile: profile panel as overlay */}
+      {profileOpen && detail && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setProfileOpen(false)} />
+          <div className="absolute right-0 top-0 bottom-0 w-[85vw] max-w-[320px] animate-in slide-in-from-right">
+            <ContactProfilePanel
+              conversation={detail}
+              onClose={() => setProfileOpen(false)}
+            />
+          </div>
+        </div>
       )}
       </div>
     </div>

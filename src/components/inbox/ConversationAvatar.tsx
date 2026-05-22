@@ -44,13 +44,6 @@ export default function ConversationAvatar({
         </AvatarFallback>
       </Avatar>
 
-      {/* Unread badge */}
-      {unread > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 h-4.5 w-4.5 min-w-[18px] rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center shadow-sm border-2 border-background">
-          {unread > 9 ? '9+' : unread}
-        </span>
-      )}
-
       {/* Group indicator dot */}
       {isGroup && (
         <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-accent border-2 border-background flex items-center justify-center">

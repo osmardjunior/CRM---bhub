@@ -1,9 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { normalizeWhatsAppNumber } from '@/utils/whatsapp';
 import {
-  X, Phone, Mail, Plus, CheckCircle, Calendar, Info, GitBranch,
-  Star, Archive, Bot, UserPlus, MessageSquare, History, User,
-  ArrowRight, StickyNote, Pencil, Trash2, AlertTriangle, Smartphone,
+  X, Phone, Mail, Plus, Calendar, Info, GitBranch,
+  Star, Archive, Bot, UserPlus, History, User,
+  StickyNote, Pencil, AlertTriangle, Smartphone,
   Clock, Tag as TagIcon, type LucideIcon,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -16,19 +16,22 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { isGroupChat } from '@/services/api';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { useUserProjects } from '@/hooks/useUserProjects';
 import { updateContact, deleteContact } from '@/services/api';
 import { supabase } from '@/integrations/supabase/client';
 import { useTags } from '@/hooks/useTags';
 import { useContactTags, useAddContactTag, useRemoveContactTag } from '@/hooks/useContactTags';
-import { closeConversation } from '@/services/api';
 import { useFunnels } from '@/contexts/FunnelContext';
 import { useContactFunnelsByContact, useAddContactToStage, useRemoveContactFromStage } from '@/hooks/useContactFunnelStages';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
+import { usePermissions } from '@/hooks/usePermissions';
+import ContactHistorySection from '@/components/inbox/contact-sections/ContactHistorySection';
+import ContactAnnotationsSection from '@/components/inbox/contact-sections/ContactAnnotationsSection';
 
 interface Props {
   conversation: ConversationDetail;
@@ -36,13 +39,6 @@ interface Props {
 }
 
 type ActiveSection = 'perfil' | 'tags' | 'funil' | 'agendadas' | 'anotacoes' | 'historico';
-
-const closeReasons = [
-  { value: 'resolvido', label: 'Resolvido' },
-  { value: 'spam', label: 'Spam' },
-  { value: 'duplicado', label: 'Duplicado' },
-  { value: 'outro', label: 'Outro' },
-];
 
 function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
@@ -62,24 +58,41 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const { user, companyId } = useAuth();
 
   const [activeSection, setActiveSection] = useState<ActiveSection>('perfil');
+  const { projectId: globalProjectId } = useProjectContext();
 
-  const { data: availableTags = [] } = useTags();
+  const isAllProjects = globalProjectId === '';
+  const effectiveProjectId: string | null = isAllProjects
+    ? null
+    : (globalProjectId
+      || conversation.integration?.project_id
+      || conversation.project_id
+      || null);
+
+  const { data: allTags = [] } = useTags();
+  const { funnels: allFunnels } = useFunnels();
+
+  const availableTags = isAllProjects
+    ? allTags
+    : effectiveProjectId
+      ? allTags.filter(t => !t.project_id || t.project_id === effectiveProjectId)
+      : allTags.filter(t => !t.project_id);
   const { data: contactTags = [] } = useContactTags(contact.id);
   const addTag = useAddContactTag();
   const removeTag = useRemoveContactTag();
 
-  const { funnels } = useFunnels();
+  const funnels = isAllProjects
+    ? allFunnels
+    : effectiveProjectId
+      ? allFunnels.filter(f => !f.project_id || f.project_id === effectiveProjectId)
+      : allFunnels.filter(f => !f.project_id);
+
   const { data: contactFunnelStages = [] } = useContactFunnelsByContact(contact.id);
   const addContactToStage = useAddContactToStage();
   const removeContactFromStage = useRemoveContactFromStage();
   const [selectedFunnelId, setSelectedFunnelId] = useState('');
   const [selectedStageId, setSelectedStageId] = useState('');
-  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-  const [editEntryFunnelId, setEditEntryFunnelId] = useState('');
-  const [editEntryStageId, setEditEntryStageId] = useState('');
   const contactFunnelEntries = contactFunnelStages.filter((cfs) => cfs.contact_id === contact.id);
   const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId);
-  const editEntryFunnel = funnels.find((f) => f.id === editEntryFunnelId);
 
   const handleAddToFunnel = () => {
     if (!selectedFunnelId || !selectedStageId) return;
@@ -87,29 +100,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     setSelectedFunnelId('');
     setSelectedStageId('');
   };
-
-  const handleMoveEntry = async (entryId: string) => {
-    if (!editEntryFunnelId || !editEntryStageId) return;
-    // Remove from old stage, add to new
-    await removeContactFromStage.mutateAsync(entryId);
-    addContactToStage.mutate({ contactId: contact.id, funnelId: editEntryFunnelId, stageId: editEntryStageId });
-    setEditingEntryId(null);
-    setEditEntryFunnelId('');
-    setEditEntryStageId('');
-  };
-
-  // Conversation history
-  const { data: contactConversations = [] } = useQuery({
-    queryKey: ['contact-conversations', contact.id],
-    enabled: !!contact.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('conversations').select('id, status, created_at, last_message_at')
-        .eq('contact_id', contact.id).order('last_message_at', { ascending: false }).limit(8);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
 
   // Scheduled messages
   const { data: scheduledMessages = [] } = useQuery({
@@ -126,45 +116,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
     },
   });
 
-  // Annotations
-  const { data: annotations = [] } = useQuery({
-    queryKey: ['annotations-panel', conversation.id],
-    enabled: !!conversation.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('annotations')
-        .select('*, author:profiles!annotations_author_id_fkey(name)')
-        .eq('conversation_id', conversation.id)
-        .order('created_at', { ascending: false }).limit(50);
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  // Events timeline
-  const { data: convEvents = [] } = useQuery({
-    queryKey: ['conversation-events', conversation.id],
-    enabled: !!conversation.id && activeSection === 'historico',
-    queryFn: async () => {
-      const [eventsRes, annotationsRes] = await Promise.all([
-        supabase.from('conversation_events')
-          .select('*, actor:profiles!conversation_events_actor_id_fkey(name)')
-          .eq('conversation_id', conversation.id)
-          .order('created_at', { ascending: false }).limit(50),
-        supabase.from('annotations')
-          .select('*, author:profiles!annotations_author_id_fkey(name)')
-          .eq('conversation_id', conversation.id)
-          .order('created_at', { ascending: false }).limit(50),
-      ]);
-      const events = (eventsRes.data ?? []).map((e: any) => ({ ...e, _kind: 'event' as const }));
-      const notes = (annotationsRes.data ?? []).map((a: any) => ({ ...a, _kind: 'annotation' as const }));
-      return [...events, ...notes].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    },
-  });
-
-  const [closeModalOpen, setCloseModalOpen] = useState(false);
-  const [closeReason, setCloseReason] = useState('resolvido');
-  const [closing, setClosing] = useState(false);
   const [deleteContactOpen, setDeleteContactOpen] = useState(false);
   const [deletingContact, setDeletingContact] = useState(false);
   const [editingPhone, setEditingPhone] = useState(false);
@@ -172,21 +123,75 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   const [savingPhone, setSavingPhone] = useState(false);
   const phoneInputRef = useRef<HTMLInputElement>(null);
 
-  const [newAnnotation, setNewAnnotation] = useState('');
-  const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [newSchedContent, setNewSchedContent] = useState('');
   const [newSchedAt, setNewSchedAt] = useState('');
   const [savingScheduled, setSavingScheduled] = useState(false);
 
-  const { data: teamMembers = [] } = useTeamProfiles();
+  const { data: allTeamMembers = [] } = useTeamProfiles();
+  const { data: projectMembers = [] } = useUserProjects(effectiveProjectId ?? '');
+  const permissions = usePermissions();
+  const projectFilteredMembers = effectiveProjectId
+    ? allTeamMembers.filter(m => projectMembers.some(pm => pm.user_id === m.id))
+    : [];
+  const teamMembersBase = projectFilteredMembers.length > 1 ? projectFilteredMembers : allTeamMembers;
+
+  // For agents: filter to same department as conversation
+  const { data: myDeptIds = [] } = useQuery({
+    queryKey: ['my-departments', user?.id],
+    enabled: !!user?.id && !permissions.isSupervisorOrAbove,
+    queryFn: async () => {
+      const { data } = await supabase.from('profile_departments').select('department_id').eq('profile_id', user!.id);
+      return (data ?? []).map(r => r.department_id);
+    },
+  });
+
+  const { data: deptMemberIds = [] } = useQuery({
+    queryKey: ['dept-members', myDeptIds],
+    enabled: myDeptIds.length > 0 && !permissions.isSupervisorOrAbove,
+    queryFn: async () => {
+      const { data } = await supabase.from('profile_departments').select('profile_id').in('department_id', myDeptIds);
+      return [...new Set((data ?? []).map(r => r.profile_id))];
+    },
+  });
+
+  // Agents see only same-department colleagues; supervisors/admins see all
+  const teamMembers = permissions.isSupervisorOrAbove
+    ? teamMembersBase
+    : deptMemberIds.length > 0
+      ? teamMembersBase.filter(m => deptMemberIds.includes(m.id) && m.id !== user?.id)
+      : teamMembersBase;
+
+  // Agents can only delegate conversations assigned to them
+  const canDelegate = permissions.isSupervisorOrAbove || conversation.assigned_user_id === user?.id;
+
   const [delegatePopoverOpen, setDelegatePopoverOpen] = useState(false);
+
+  // Inline name editing
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(contact.name);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setNameInput(contact.name); }, [contact.name]);
+  useEffect(() => { if (editingName) nameInputRef.current?.focus(); }, [editingName]);
+
+  const handleSaveName = async () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed || trimmed === contact.name) { setEditingName(false); return; }
+    try {
+      await updateContact(contact.id, { name: trimmed });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+      toast.success('Nome atualizado');
+    } catch { toast.error('Erro ao atualizar nome'); }
+    setEditingName(false);
+  };
 
   const handleSavePhone = async () => {
     const trimmed = phoneInput.trim();
     if (!trimmed || trimmed === contact.phone) { setEditingPhone(false); return; }
     let normalized: string;
     try { normalized = normalizeWhatsAppNumber(trimmed); }
-    catch (err: any) { toast.error('Telefone inválido: ' + err.message); return; }
+    catch (err: unknown) { toast.error('Telefone inválido: ' + (err instanceof Error ? err.message : 'Formato inválido')); return; }
     setSavingPhone(true);
     try {
       await updateContact(contact.id, { phone: normalized, phone_e164: normalized });
@@ -212,22 +217,42 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
 
   const handleDelegate = async (userId: string) => {
     try {
-      const { error } = await supabase.from('conversations').update({ assigned_user_id: userId }).eq('id', conversation.id);
+      const { error, count } = await supabase.from('conversations').update({ assigned_user_id: userId }, { count: 'exact' }).eq('id', conversation.id);
       if (error) throw error;
+      if (count === 0) {
+        toast.error('Falha ao delegar — nenhuma conversa foi atualizada');
+        return;
+      }
+      // Audit log
+      if (user?.id && companyId) {
+        supabase.from('delegation_logs').insert({
+          conversation_id: conversation.id,
+          from_user_id: user.id,
+          to_user_id: userId,
+          company_id: companyId,
+        }).then(({ error: logErr }) => { if (logErr) console.warn('delegation log failed:', logErr); });
+      }
       toast.success('Conversa delegada!');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['leads-report'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox-status-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
       setDelegatePopoverOpen(false);
     } catch { toast.error('Erro ao delegar conversa'); }
   };
 
+  const isArchived = !!(conversation as any).archived_at;
   const handleToggleArchive = async () => {
     try {
-      await updateContact(contact.id, { is_archived: !contact.is_archived });
-      toast.success(contact.is_archived ? 'Contato desarquivado' : 'Contato arquivado');
+      const newValue = isArchived ? null : new Date().toISOString();
+      await supabase.from('conversations').update({ archived_at: newValue }).eq('id', conversation.id);
+      toast.success(isArchived ? 'Conversa desarquivada' : 'Conversa arquivada');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
-    } catch { toast.error('Erro ao arquivar contato'); }
+    } catch { toast.error('Erro ao arquivar conversa'); }
   };
 
   const handleToggleFavorite = async () => {
@@ -235,7 +260,8 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
       await updateContact(contact.id, { is_favorite: !contact.is_favorite });
       toast.success(contact.is_favorite ? 'Removido dos favoritos' : 'Adicionado aos favoritos');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
     } catch { toast.error('Erro ao favoritar contato'); }
   };
 
@@ -247,36 +273,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
     } catch { toast.error('Erro ao alterar chatbot'); }
-  };
-
-  const handleCloseConversation = async () => {
-    setClosing(true);
-    try {
-      await closeConversation(conversation.id, closeReason);
-      toast.success('Conversa fechada!');
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['conversation'] });
-      setCloseModalOpen(false);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao fechar conversa');
-    } finally { setClosing(false); }
-  };
-
-  const handleAddAnnotation = async () => {
-    if (!newAnnotation.trim()) return;
-    setSavingAnnotation(true);
-    try {
-      const { error } = await supabase.from('annotations').insert({
-        conversation_id: conversation.id, company_id: companyId,
-        author_id: user?.id, body: newAnnotation.trim(),
-      });
-      if (error) throw error;
-      setNewAnnotation('');
-      queryClient.invalidateQueries({ queryKey: ['annotations-panel', conversation.id] });
-      queryClient.invalidateQueries({ queryKey: ['conversation-events', conversation.id] });
-      toast.success('Anotação salva');
-    } catch { toast.error('Erro ao salvar anotação'); }
-    finally { setSavingAnnotation(false); }
   };
 
   const handleCancelScheduled = async (id: string) => {
@@ -327,7 +323,7 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
   ];
 
   return (
-    <div className="flex w-72 min-w-[272px] flex-col border-l border-border bg-card">
+    <div className="flex w-full md:w-72 md:min-w-[272px] flex-col border-l border-border bg-card h-full">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2.5 shrink-0">
         <span className="text-xs font-semibold text-foreground uppercase tracking-wider">Informações</span>
@@ -355,7 +351,7 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
 
       <div className="flex-1 overflow-y-auto">
 
-        {/* ── PERFIL ───────────────────────────────────────── */}
+        {/* PERFIL */}
         {activeSection === 'perfil' && (
           <>
             {/* Contact card */}
@@ -363,7 +359,25 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               <div className="mb-3">
                 <ConversationAvatar name={contact.name} avatarUrl={contactAvatarUrl} isGroup={isGroupChat(contact.phone)} size="lg" />
               </div>
-              <h3 className="text-sm font-bold text-foreground text-center">{contact.name}</h3>
+              {editingName ? (
+                <input
+                  ref={nameInputRef}
+                  className="text-sm font-bold text-foreground text-center bg-transparent border-b border-primary outline-none w-full px-2 py-0.5"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false); }}
+                  onBlur={handleSaveName}
+                />
+              ) : (
+                <h3
+                  className="text-sm font-bold text-foreground text-center cursor-pointer hover:text-primary transition-colors group flex items-center gap-1 justify-center"
+                  onClick={() => setEditingName(true)}
+                  title="Clique para editar o nome"
+                >
+                  {contact.name}
+                  <Pencil size={10} className="opacity-0 group-hover:opacity-60 transition-opacity" />
+                </h3>
+              )}
               {contact.phone && <p className="text-xs text-primary font-medium mt-0.5">{contact.phone}</p>}
             </div>
 
@@ -373,41 +387,85 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               <div className="grid grid-cols-2 gap-1.5">
                 <Popover open={delegatePopoverOpen} onOpenChange={setDelegatePopoverOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs justify-start"><UserPlus size={12} />Delegar</Button>
+                    <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs justify-start" disabled={!canDelegate} title={!canDelegate ? 'Você só pode delegar conversas atribuídas a você' : undefined}><UserPlus size={12} />Delegar</Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-52 p-2" align="start">
                     <p className="text-xs font-semibold mb-2">Delegar para</p>
-                    <ScrollArea className="max-h-40">
-                      <div className="space-y-0.5">
-                        {teamMembers.map((m) => (
-                          <button key={m.id} onClick={() => handleDelegate(m.id)} className="flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left">
-                            <Avatar className="h-5 w-5"><AvatarFallback className="text-[9px] bg-primary/10 text-primary">{m.name[0]}</AvatarFallback></Avatar>
-                            {m.name}
-                          </button>
-                        ))}
-                      </div>
-                    </ScrollArea>
+                    <div className="max-h-48 overflow-y-auto overscroll-contain space-y-0.5">
+                      {teamMembers.length > 0 ? teamMembers.map((m) => (
+                        <button key={m.id} onClick={() => handleDelegate(m.id)} className="flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors text-left">
+                          <Avatar className="h-5 w-5"><AvatarFallback className="text-[9px] bg-primary/10 text-primary">{m.name[0]}</AvatarFallback></Avatar>
+                          {m.name}
+                        </button>
+                      )) : (
+                        <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhum colega neste projeto</p>
+                      )}
+                    </div>
                   </PopoverContent>
                 </Popover>
                 <Button variant="outline" size="sm" className={`h-8 gap-1.5 text-xs justify-start ${contact.is_favorite ? 'bg-amber-500/10 border-amber-500/30 text-amber-600' : ''}`} onClick={handleToggleFavorite}>
                   <Star size={12} className={contact.is_favorite ? 'fill-amber-500' : ''} />
                   {contact.is_favorite ? 'Favorito' : 'Favoritar'}
                 </Button>
-                <Button variant="outline" size="sm" className={`h-8 gap-1.5 text-xs justify-start ${contact.is_archived ? 'bg-muted text-muted-foreground' : ''}`} onClick={handleToggleArchive}>
-                  <Archive size={12} />{contact.is_archived ? 'Desarquivar' : 'Arquivar'}
+                <Button variant="outline" size="sm" className={`h-8 gap-1.5 text-xs justify-start ${isArchived ? 'bg-muted text-muted-foreground' : ''}`} onClick={handleToggleArchive}>
+                  <Archive size={12} />{isArchived ? 'Desarquivar' : 'Arquivar'}
                 </Button>
                 <Button variant="outline" size="sm" className={`h-8 gap-1.5 text-xs justify-start ${(contact.chatbot_enabled ?? true) ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600' : ''}`} onClick={handleToggleChatbot}>
                   <Bot size={12} />{(contact.chatbot_enabled ?? true) ? 'Bot On' : 'Bot Off'}
                 </Button>
               </div>
-              {conversation.status !== 'closed' && (
-                <Button variant="outline" size="sm" className="w-full h-8 mt-1.5 gap-1.5 text-xs justify-start text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setCloseModalOpen(true)}>
-                  <CheckCircle size={12} />Fechar conversa
-                </Button>
+            </div>
+
+            {/* Tags inline */}
+            <div className="px-3 py-3 border-b border-border">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tags</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className="inline-flex items-center gap-0.5 text-[10px] text-primary hover:text-primary/80 font-medium transition-colors">
+                      <Plus size={10} /> Adicionar
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" align="end">
+                    <p className="text-xs font-semibold mb-2">Gerenciar tags</p>
+                    <div className="max-h-[40vh] overflow-y-auto overscroll-contain space-y-0.5">
+                      {availableTags.map((t) => (
+                        <label key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer transition-colors">
+                          <Checkbox
+                            checked={contactTagIds.includes(t.id)}
+                            onCheckedChange={() => handleToggleTag(t.id)}
+                            disabled={addTag.isPending || removeTag.isPending}
+                          />
+                          <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                          <span className="text-xs">{t.name}</span>
+                        </label>
+                      ))}
+                      {availableTags.length === 0 && (
+                        <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhuma tag cadastrada</p>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              {contactTags.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {contactTags.map((ct) => (
+                    <span
+                      key={ct.tag_id}
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border cursor-pointer hover:opacity-70 transition-opacity"
+                      style={{ borderColor: ct.tag_color + '80', color: ct.tag_color, backgroundColor: ct.tag_color + '18' }}
+                      onClick={() => removeTag.mutate({ contactId: contact.id, tagId: ct.tag_id })}
+                      title="Clique para remover"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: ct.tag_color }} />
+                      {ct.tag_name}
+                      <X size={8} className="shrink-0" />
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground italic">Nenhuma tag adicionada</p>
               )}
-              <Button variant="outline" size="sm" className="w-full h-8 mt-1 gap-1.5 text-xs justify-start text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/5" onClick={() => setDeleteContactOpen(true)}>
-                <Trash2 size={12} />Excluir contato
-              </Button>
             </div>
 
             {/* Responsável */}
@@ -446,7 +504,35 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               {contact.email && <InfoRow icon={Mail} label="E-mail" value={contact.email} />}
               {contact.source && <InfoRow icon={Info} label="Origem" value={contact.source} />}
               {conversation.integration && (
-                <InfoRow icon={Smartphone} label="Aparelho Origem" value={conversation.integration.phone_number ?? conversation.integration.device_name} />
+                <div className="flex items-start gap-2.5 py-2 border-b border-border/50">
+                  <Smartphone size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Aparelho Origem</p>
+                    <p className="text-xs font-medium text-foreground truncate">
+                      {conversation.integration.device_name}
+                      {conversation.integration.phone_number && (
+                        <span className="text-muted-foreground ml-1">({conversation.integration.phone_number})</span>
+                      )}
+                    </p>
+                    <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium ${
+                      conversation.integration.status === 'connected' ? 'text-green-500' :
+                      conversation.integration.status === 'banned' ? 'text-red-500' :
+                      conversation.integration.status === 'restricted' ? 'text-amber-500' :
+                      'text-muted-foreground'
+                    }`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${
+                        conversation.integration.status === 'connected' ? 'bg-green-500' :
+                        conversation.integration.status === 'banned' ? 'bg-red-500' :
+                        conversation.integration.status === 'restricted' ? 'bg-amber-500' :
+                        'bg-gray-400'
+                      }`} />
+                      {conversation.integration.status === 'connected' ? 'Conectado' :
+                       conversation.integration.status === 'banned' ? 'Banido' :
+                       conversation.integration.status === 'restricted' ? 'Restringido' :
+                       'Desconectado'}
+                    </span>
+                  </div>
+                </div>
               )}
               <InfoRow icon={Calendar} label="Data de cadastro" value={createdAt} />
               {contact.notes && (
@@ -455,42 +541,11 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                   <p className="text-xs text-muted-foreground leading-relaxed">{contact.notes}</p>
                 </div>
               )}
-              {/* Tags inline no perfil */}
-              {contactTags.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-border/50">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Tags</p>
-                    <button
-                      onClick={() => setActiveSection('tags')}
-                      className="text-[10px] text-primary hover:underline"
-                    >
-                      Ver todas
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {contactTags.slice(0, 4).map((ct) => (
-                      <span
-                        key={ct.tag_id}
-                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border"
-                        style={{ borderColor: ct.tag_color + '80', color: ct.tag_color, backgroundColor: ct.tag_color + '18' }}
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: ct.tag_color }} />
-                        {ct.tag_name}
-                      </span>
-                    ))}
-                    {contactTags.length > 4 && (
-                      <button onClick={() => setActiveSection('tags')} className="text-[10px] text-muted-foreground hover:text-primary">
-                        +{contactTags.length - 4} mais
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </>
         )}
 
-        {/* ── TAGS ─────────────────────────────────────────── */}
+        {/* TAGS */}
         {activeSection === 'tags' && (
           <div className="px-3 py-4 space-y-4">
             <div className="flex items-center justify-between">
@@ -499,20 +554,18 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"><Plus size={11} />Adicionar</Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-56 p-2" align="end">
+                <PopoverContent className="w-64 p-2" align="end">
                   <p className="text-xs font-semibold mb-2">Gerenciar tags</p>
-                  <ScrollArea className="max-h-48">
-                    <div className="space-y-1">
-                      {availableTags.map((t) => (
-                        <label key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer transition-colors">
-                          <Checkbox checked={contactTagIds.includes(t.id)} onCheckedChange={() => handleToggleTag(t.id)} disabled={addTag.isPending || removeTag.isPending} />
-                          <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
-                          <span className="text-xs">{t.name}</span>
-                        </label>
-                      ))}
-                      {availableTags.length === 0 && <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhuma tag cadastrada</p>}
-                    </div>
-                  </ScrollArea>
+                  <div className="max-h-[50vh] overflow-y-auto overscroll-contain space-y-1">
+                    {availableTags.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer transition-colors">
+                        <Checkbox checked={contactTagIds.includes(t.id)} onCheckedChange={() => handleToggleTag(t.id)} disabled={addTag.isPending || removeTag.isPending} />
+                        <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                        <span className="text-xs">{t.name}</span>
+                      </label>
+                    ))}
+                    {availableTags.length === 0 && <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhuma tag cadastrada</p>}
+                  </div>
                 </PopoverContent>
               </Popover>
             </div>
@@ -538,58 +591,57 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
           </div>
         )}
 
-        {/* ── FUNIL ────────────────────────────────────────── */}
+        {/* FUNIL */}
         {activeSection === 'funil' && (
           <div className="px-3 py-4 space-y-4">
             <p className="text-xs font-semibold text-foreground">Funil de Vendas</p>
 
             {contactFunnelEntries.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {contactFunnelEntries.map((entry) => {
                   const funnel = funnels.find((f) => f.id === entry.funnel_id);
-                  const stage = funnel?.stages.find((s) => s.id === entry.stage_id);
-                  const isEditing = editingEntryId === entry.id;
+                  const currentStage = funnel?.stages.find((s) => s.id === entry.stage_id);
+                  const isMoving = addContactToStage.isPending || removeContactFromStage.isPending;
                   return (
                     <div key={entry.id} className="bg-secondary/60 rounded-lg border border-border overflow-hidden">
                       <div className="flex items-center justify-between px-3 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-foreground truncate">{funnel?.name ?? 'Funil'}</p>
-                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{stage?.label ?? 'Etapa'}</p>
+                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{currentStage?.label ?? 'Etapa'}</p>
                         </div>
-                        <div className="flex items-center gap-0.5 shrink-0 ml-2">
-                          <button
-                            onClick={() => {
-                              if (isEditing) { setEditingEntryId(null); setEditEntryFunnelId(''); setEditEntryStageId(''); }
-                              else { setEditingEntryId(entry.id); setEditEntryFunnelId(entry.funnel_id); setEditEntryStageId(entry.stage_id); }
-                            }}
-                            className="p-1 text-muted-foreground hover:text-primary transition-colors rounded"
-                            title="Mover para outro funil/etapa"
-                          >
-                            <Pencil size={11} />
-                          </button>
-                          <button onClick={() => removeContactFromStage.mutate(entry.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded" title="Remover do funil">
-                            <X size={12} />
-                          </button>
-                        </div>
+                        <button onClick={() => removeContactFromStage.mutate(entry.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded shrink-0" title="Remover do funil">
+                          <X size={12} />
+                        </button>
                       </div>
-                      {isEditing && (
-                        <div className="px-3 pb-3 space-y-2 border-t border-border/60 pt-2.5 bg-background/40">
-                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Mover para:</p>
-                          <Select value={editEntryFunnelId} onValueChange={(v) => { setEditEntryFunnelId(v); setEditEntryStageId(''); }}>
-                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar funil..." /></SelectTrigger>
-                            <SelectContent>{funnels.map((f) => <SelectItem key={f.id} value={f.id} className="text-xs">{f.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                          {editEntryFunnel && (
-                            <Select value={editEntryStageId} onValueChange={setEditEntryStageId}>
-                              <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar etapa..." /></SelectTrigger>
-                              <SelectContent>{editEntryFunnel.stages.map((s) => <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>)}</SelectContent>
-                            </Select>
-                          )}
-                          {editEntryFunnelId && editEntryStageId && (
-                            <Button size="sm" className="w-full h-7 text-xs gap-1" onClick={() => handleMoveEntry(entry.id)} disabled={addContactToStage.isPending || removeContactFromStage.isPending}>
-                              Confirmar mudança
-                            </Button>
-                          )}
+                      {funnel && funnel.stages.length > 0 && (
+                        <div className="px-3 pb-3 pt-1 border-t border-border/40">
+                          <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Mover para:</p>
+                          <div className="flex flex-col gap-1">
+                            {funnel.stages.map((s) => {
+                              const isCurrent = s.id === entry.stage_id;
+                              return (
+                                <button
+                                  key={s.id}
+                                  disabled={isCurrent || isMoving}
+                                  onClick={async () => {
+                                    await removeContactFromStage.mutateAsync(entry.id);
+                                    addContactToStage.mutate({ contactId: contact.id, funnelId: funnel.id, stageId: s.id });
+                                  }}
+                                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+                                    isCurrent
+                                      ? 'bg-primary text-primary-foreground shadow-sm'
+                                      : 'bg-background border border-border hover:bg-accent hover:border-primary/30 text-foreground'
+                                  } ${isMoving && !isCurrent ? 'opacity-50' : ''}`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full shrink-0 ${isCurrent ? 'bg-primary-foreground' : 'bg-muted-foreground/40'}`} />
+                                    {s.label}
+                                    {isCurrent && <span className="ml-auto text-[9px] opacity-80">Atual</span>}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -612,38 +664,52 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
                 </SelectContent>
               </Select>
               {selectedFunnel && (
-                <Select value={selectedStageId} onValueChange={setSelectedStageId}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecionar etapa..." /></SelectTrigger>
-                  <SelectContent>
-                    {selectedFunnel.stages.map((s) => <SelectItem key={s.id} value={s.id} className="text-xs">{s.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              )}
-              {selectedFunnelId && selectedStageId && (
-                <Button size="sm" className="w-full h-8 text-xs gap-1" onClick={handleAddToFunnel} disabled={addContactToStage.isPending}>
-                  <Plus size={12} />Adicionar ao Funil
-                </Button>
+                <>
+                  <div className="flex flex-col gap-1">
+                    {selectedFunnel.stages.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setSelectedStageId(s.id)}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+                          selectedStageId === s.id
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'bg-background border border-border hover:bg-accent hover:border-primary/30 text-foreground'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full shrink-0 ${selectedStageId === s.id ? 'bg-primary-foreground' : 'bg-muted-foreground/40'}`} />
+                          {s.label}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedStageId && (
+                    <Button size="sm" className="w-full h-8 text-xs gap-1" onClick={handleAddToFunnel} disabled={addContactToStage.isPending}>
+                      <Plus size={12} />Adicionar ao Funil
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
         )}
 
-        {/* ── AGENDADAS ─────────────────────────────────────── */}
+        {/* AGENDADAS */}
         {activeSection === 'agendadas' && (
           <div className="px-3 py-4 space-y-4">
             <p className="text-xs font-semibold text-foreground">Mensagens Agendadas</p>
 
             {scheduledMessages.length > 0 ? (
               <div className="space-y-2">
-                {scheduledMessages.map((msg: any) => (
-                  <div key={msg.id} className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2.5">
+                {scheduledMessages.map((msg: Record<string, unknown>) => (
+                  <div key={msg.id as string} className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2.5">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-foreground leading-snug">{msg.content}</p>
+                      <p className="text-xs text-foreground leading-snug">{msg.content as string}</p>
                       <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-1 font-medium">
-                        {new Date(msg.scheduled_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(msg.scheduled_at as string).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
-                    <button onClick={() => handleCancelScheduled(msg.id)} className="text-muted-foreground hover:text-destructive transition-colors p-0.5 shrink-0 mt-0.5" title="Cancelar">
+                    <button onClick={() => handleCancelScheduled(msg.id as string)} className="text-muted-foreground hover:text-destructive transition-colors p-0.5 shrink-0 mt-0.5" title="Cancelar">
                       <X size={13} />
                     </button>
                   </div>
@@ -672,148 +738,22 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
           </div>
         )}
 
-        {/* ── ANOTAÇÕES ─────────────────────────────────────── */}
+        {/* ANOTAÇÕES */}
         {activeSection === 'anotacoes' && (
-          <div className="px-3 py-4 space-y-4">
-            <p className="text-xs font-semibold text-foreground">Anotações</p>
-
-            {annotations.length > 0 ? (
-              <div className="space-y-2">
-                {annotations.map((ann: any) => (
-                  <div key={ann.id} className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 border border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">{ann.author?.name ?? 'Agente'}</span>
-                      <span className="text-[9px] text-muted-foreground">
-                        {new Date(ann.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <p className="text-xs text-foreground leading-relaxed">{ann.body}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                <StickyNote size={28} className="mb-2 opacity-30" />
-                <p className="text-xs">Nenhuma anotação ainda</p>
-              </div>
-            )}
-
-            <div className="space-y-2 pt-2 border-t border-border">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Nova anotação</p>
-              <textarea className="w-full text-xs border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                rows={3} placeholder="Escrever anotação..." value={newAnnotation} onChange={(e) => setNewAnnotation(e.target.value)} />
-              <Button size="sm" className="w-full h-8 text-xs gap-1" onClick={handleAddAnnotation} disabled={savingAnnotation || !newAnnotation.trim()}>
-                <Plus size={12} />{savingAnnotation ? 'Salvando...' : 'Salvar anotação'}
-              </Button>
-            </div>
-          </div>
+          <ContactAnnotationsSection
+            conversationId={conversation.id}
+            companyId={companyId}
+            userId={user?.id}
+          />
         )}
 
-        {/* ── HISTÓRICO ─────────────────────────────────────── */}
+        {/* HISTÓRICO */}
         {activeSection === 'historico' && (
-          <div className="px-3 py-4">
-            <p className="text-xs font-semibold text-foreground mb-3">Linha do tempo</p>
-
-            {/* Conversation list */}
-            {contactConversations.length > 0 && (
-              <div className="mb-4 space-y-1">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <MessageSquare size={10} />Conversas
-                </p>
-                {contactConversations.map((conv) => {
-                  const statusColors: Record<string, string> = {
-                    new: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-                    open: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-                    pending: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-                    resolved: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-                    closed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-                  };
-                  const statusLabels: Record<string, string> = { new: 'Aberta', open: 'Em Atend.', pending: 'Aguardando', resolved: 'Resolvida', closed: 'Fechada' };
-                  const dateStr = new Date(conv.last_message_at ?? conv.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-                  return (
-                    <div key={conv.id} className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 ${conv.id === conversation.id ? 'bg-primary/10 border border-primary/20' : 'bg-secondary/40'}`}>
-                      <span className="text-[10px] text-muted-foreground">{dateStr}</span>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColors[conv.status] ?? 'bg-muted text-muted-foreground'}`}>
-                        {conv.id === conversation.id ? '● Atual' : (statusLabels[conv.status] ?? conv.status)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Events timeline */}
-            {convEvents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                <History size={28} className="mb-2 opacity-30" />
-                <p className="text-xs">Nenhum evento registrado</p>
-              </div>
-            ) : (
-              <div className="relative pl-4">
-                <div className="absolute left-1.5 top-0 bottom-0 w-px bg-border" />
-                <div className="space-y-3">
-                  {convEvents.map((ev: any) => {
-                    const date = new Date(ev.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-                    const statusLabel: Record<string, string> = { new: 'Aberto', open: 'Em Atendimento', pending: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
-                    const statusColor: Record<string, string> = { new: 'text-green-600', open: 'text-blue-600', pending: 'text-amber-600', resolved: 'text-purple-600', closed: 'text-red-700' };
-
-                    if (ev._kind === 'annotation') return (
-                      <div key={ev.id} className="relative">
-                        <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-amber-400 border-2 border-background" />
-                        <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2 border border-amber-200 dark:border-amber-800">
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1">
-                              <StickyNote size={10} className="text-amber-600" />
-                              <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">{ev.author?.name ?? 'Agente'}</span>
-                            </div>
-                            <span className="text-[9px] text-muted-foreground">{date}</span>
-                          </div>
-                          <p className="text-[11px] text-foreground leading-relaxed">{ev.body}</p>
-                        </div>
-                      </div>
-                    );
-
-                    if (ev.event_type === 'status_change') return (
-                      <div key={ev.id} className="relative flex items-start gap-2">
-                        <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-primary border-2 border-background" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <span className={`text-[10px] font-semibold ${statusColor[ev.payload?.from] ?? 'text-muted-foreground'}`}>{statusLabel[ev.payload?.from] ?? ev.payload?.from}</span>
-                            <ArrowRight size={9} className="text-muted-foreground shrink-0" />
-                            <span className={`text-[10px] font-semibold ${statusColor[ev.payload?.to] ?? 'text-muted-foreground'}`}>{statusLabel[ev.payload?.to] ?? ev.payload?.to}</span>
-                          </div>
-                          <p className="text-[9px] text-muted-foreground">{ev.actor?.name ?? 'Sistema'} · {date}</p>
-                        </div>
-                      </div>
-                    );
-
-                    if (ev.event_type === 'agent_assigned') return (
-                      <div key={ev.id} className="relative flex items-start gap-2">
-                        <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-blue-400 border-2 border-background" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1">
-                            <User size={9} className="text-blue-500" />
-                            <span className="text-[10px] text-foreground">Agente atribuído</span>
-                          </div>
-                          <p className="text-[9px] text-muted-foreground">{date}</p>
-                        </div>
-                      </div>
-                    );
-
-                    return (
-                      <div key={ev.id} className="relative flex items-start gap-2">
-                        <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-muted border-2 border-background" />
-                        <div className="flex-1">
-                          <span className="text-[10px] text-muted-foreground">{ev.event_type}</span>
-                          <p className="text-[9px] text-muted-foreground">{date}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          <ContactHistorySection
+            conversationId={conversation.id}
+            contactId={contact.id}
+            currentConversationId={conversation.id}
+          />
         )}
 
       </div>
@@ -835,24 +775,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={closeModalOpen} onOpenChange={setCloseModalOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Fechar Conversa</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label className="text-xs">Motivo</Label>
-              <Select value={closeReason} onValueChange={setCloseReason}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{closeReasons.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCloseModalOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleCloseConversation} disabled={closing}>Fechar conversa</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

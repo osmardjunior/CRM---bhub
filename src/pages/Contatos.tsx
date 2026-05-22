@@ -101,7 +101,7 @@ export default function ContatosPage() {
   }, [search, tagFilter, sourceFilter, role, user?.id, agentProjectId]);
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] -m-4 lg:-m-6">
+    <div className="flex h-[calc(100dvh-7rem)] -m-4 lg:-m-6">
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-3">
@@ -183,8 +183,8 @@ export default function ContatosPage() {
                 </tr>
               </thead>
               <tbody>
-                {contacts.map((contact) => {
-                  const tags = (contact.tags as string[]) || [];
+                {contacts.map((contact: any) => {
+                  const enrichedTags: { name: string; color: string }[] = contact._tags || [];
                   const responsible = contact.responsible;
                   return (
                     <tr
@@ -205,17 +205,32 @@ export default function ContatosPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell text-sm">{contact.phone}</td>
+                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell text-sm">{contact.phone || contact.phone_e164 || '—'}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {contact.source && <Badge variant="outline" className="text-xs font-normal">{contact.source}</Badge>}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <TagChips tags={tags} size="sm" />
+                        {enrichedTags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {enrichedTags.slice(0, 3).map(t => (
+                              <Badge key={t.name} variant="secondary" className="text-[10px] px-1.5 py-0" style={{ backgroundColor: t.color + '20', color: t.color, borderColor: t.color + '40' }}>
+                                {t.name}
+                              </Badge>
+                            ))}
+                            {enrichedTags.length > 3 && (
+                              <Badge variant="outline" className="text-[10px] px-1 py-0">+{enrichedTags.length - 3}</Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs hidden xl:table-cell">
                         {contact.last_contact_at
                           ? new Date(contact.last_contact_at).toLocaleDateString('pt-BR')
-                          : '—'}
+                          : contact.updated_at
+                            ? new Date(contact.updated_at).toLocaleDateString('pt-BR')
+                            : '—'}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-sm hidden lg:table-cell">
                         {responsible?.name || '—'}

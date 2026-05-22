@@ -16,22 +16,40 @@ interface Permissions {
   isAdmin: boolean;
   /** Check if user is supervisor or admin */
   isSupervisorOrAbove: boolean;
+  /**
+   * Check a granular custom permission by key.
+   * Admins always return true. For non-admins, checks `custom_permissions` JSONB.
+   * If the key is not present, returns false (deny by default).
+   */
+  can: (key: string) => boolean;
+  /** Raw custom_permissions map from profile */
+  customPermissions: Record<string, boolean>;
 }
 
 export function usePermissions(): Permissions {
-  const { role, user } = useAuth();
+  const { role, profile } = useAuth();
   const typedRole = role as AppRole | null;
 
   const isAdmin = typedRole === 'admin';
   const isSupervisorOrAbove = typedRole === 'admin' || typedRole === 'supervisor';
 
+  const customPermissions = (profile?.custom_permissions ?? {}) as Record<string, boolean>;
+
+  const can = (key: string): boolean => {
+    // Admins have all permissions
+    if (isAdmin) return true;
+    return !!customPermissions[key];
+  };
+
   return {
-    canReassignConversations: isSupervisorOrAbove,
+    canReassignConversations: isSupervisorOrAbove || !!customPermissions['chats_delegate'],
     canAssignToSelf: true, // all roles can assign to self
     canManageUsers: isAdmin,
     role: typedRole,
     isAdmin,
     isSupervisorOrAbove,
+    can,
+    customPermissions,
   };
 }
 
@@ -41,7 +59,7 @@ export function getPermissionTooltip(
   permissions: Permissions,
 ): string | undefined {
   if (permission === 'canReassignConversations' && !permissions.canReassignConversations) {
-    return 'Sem permissão: apenas supervisores e admins podem reatribuir conversas';
+    return 'Sem permissão: você não tem a permissão "Delegar Chats"';
   }
   if (permission === 'canManageUsers' && !permissions.canManageUsers) {
     return 'Sem permissão: apenas admins podem gerenciar usuários';

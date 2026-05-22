@@ -31,7 +31,8 @@ export default function AIReportGenerator() {
   const { data: previousReports = [] } = useQuery({
     queryKey: ['ai-reports'],
     queryFn: async () => {
-      const { data } = await (supabase as any)
+      // @ts-expect-error ai_reports not yet in generated Supabase types
+      const { data } = await supabase
         .from('ai_reports')
         .select('*')
         .order('created_at', { ascending: false })
@@ -72,7 +73,7 @@ export default function AIReportGenerator() {
       agents: agentMetrics ?? [],
       totalConversations: convCount ?? 0,
       npsResponses: npsData ?? [],
-      avgNPS: npsData?.length ? (npsData.reduce((a: number, b: any) => a + (b.score || 0), 0) / npsData.length).toFixed(1) : 'N/A',
+      avgNPS: npsData?.length ? (npsData.reduce((a: number, b: { score: number | null }) => a + (b.score || 0), 0) / npsData.length).toFixed(1) : 'N/A',
     };
 
     invoke({ periodStart, periodEnd, metrics });
@@ -85,7 +86,8 @@ export default function AIReportGenerator() {
 
   const handleSave = async () => {
     try {
-      await (supabase as any).from('ai_reports').insert({
+      // @ts-expect-error ai_reports not yet in generated Supabase types
+      await supabase.from('ai_reports').insert({
         period_start: periodStart,
         period_end: periodEnd,
         content_md: content,

@@ -156,7 +156,7 @@ export default function NPSPage() {
               <p className="text-sm">Nenhuma resposta neste período</p>
             </div>
           ) : (
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
               <ResponsiveContainer width={140} height={140}>
                 <PieChart>
                   <Pie data={donutData} cx="50%" cy="50%" innerRadius={38} outerRadius={60} paddingAngle={2} dataKey="value">

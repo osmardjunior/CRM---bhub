@@ -3,11 +3,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useChatbotFlows, useChatbotNodes } from '@/hooks/useChatbotFlows';
 import FlowList from '@/components/chatbot/FlowList';
 import FlowEditor from '@/components/chatbot/FlowEditor';
-import FlowSettings from '@/components/chatbot/FlowSettings';
 import type { ChatbotFlow, ChatbotNode } from '@/hooks/useChatbotFlows';
 import { supabase } from '@/integrations/supabase/client';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectContext } from '@/contexts/ProjectContext';
 
 export default function Chatbot() {
+  const permissions = usePermissions();
+  const { projectId } = useProjectContext();
   const { flows, isLoading, createFlow, updateFlow, deleteFlow, toggleActive } = useChatbotFlows();
   const [selectedFlow, setSelectedFlow] = useState<ChatbotFlow | null>(null);
   const [activeTab, setActiveTab] = useState('flows');
@@ -54,19 +57,22 @@ export default function Chatbot() {
         <TabsList>
           <TabsTrigger value="flows">Meus Fluxos</TabsTrigger>
           <TabsTrigger value="editor" disabled={!selectedFlow}>Editor de Fluxo</TabsTrigger>
-          <TabsTrigger value="settings">Configurações Gerais</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="flows">
-          <FlowList
-            flows={flows}
-            onSelect={handleSelectFlow}
-            onCreate={payload => createFlow.mutate(payload)}
-            onCreateFromTemplate={handleCreateFromTemplate}
-            onDelete={id => deleteFlow.mutate(id)}
-            onToggleActive={(id, active) => toggleActive.mutate({ id, is_active: active })}
-          />
-        </TabsContent>
+        {/* Keep FlowList always mounted so navigation state persists */}
+        <div className={activeTab === 'flows' ? '' : 'hidden'}>
+          <div className="mt-2">
+            <FlowList
+              flows={flows}
+              onSelect={handleSelectFlow}
+              onCreate={permissions.can('chatbot_edit_dialogs') ? (payload => createFlow.mutate(payload)) : undefined}
+              onCreateFromTemplate={permissions.can('chatbot_edit_dialogs') ? handleCreateFromTemplate : undefined}
+              onDelete={permissions.can('chatbot_delete_dialogs') ? (id => deleteFlow.mutate(id)) : undefined}
+              onToggleActive={permissions.can('chatbot_edit_dialogs') ? ((id, active) => toggleActive.mutate({ id, is_active: active })) : undefined}
+              activeProjectId={projectId}
+            />
+          </div>
+        </div>
 
         <TabsContent value="editor">
           {selectedFlow && (
@@ -83,13 +89,6 @@ export default function Chatbot() {
               onUpdateFlow={data => updateFlow.mutate(data)}
             />
           )}
-        </TabsContent>
-
-        <TabsContent value="settings">
-          <FlowSettings
-            flow={selectedFlow || (flows.length > 0 ? flows[0] : null)}
-            onSave={updates => updateFlow.mutate(updates)}
-          />
         </TabsContent>
       </Tabs>
     </div>

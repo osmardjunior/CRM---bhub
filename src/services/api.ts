@@ -94,9 +94,9 @@ export async function sendViaWhatsApp(
       reason: data?.reason ?? undefined,
       detail: data?.detail ?? undefined,
     };
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[sendViaWhatsApp] exception:', e);
-    return { delivered: false, error: e?.message ?? 'exception' };
+    return { delivered: false, error: e instanceof Error ? e.message : 'exception' };
   }
 }
 
@@ -129,9 +129,19 @@ export interface ConversationFilters {
   integration_id?: string;
   project_id?: string;
   conversation_ids?: string[];
+  funnel_id?: string;
+  stage_id?: string;
   sort?: 'recent' | 'oldest' | 'name';
+  /** When true, show ONLY archived conversations; when false/undefined, exclude archived */
+  archived?: boolean;
   page?: number;
   limit?: number;
+  /** When true, only return conversations with unread messages (DB-level filter via RPC) */
+  has_unread?: boolean;
+  /** Required when has_unread is true — the authenticated user's ID */
+  has_unread_user_id?: string;
+  /** Required when has_unread is true — the user's company ID */
+  has_unread_company_id?: string;
 }
 
 export interface PaginatedResult<T> {
@@ -149,10 +159,60 @@ export async function listConversations(
   const from = page * limit;
   const to = from + limit - 1;
 
+  // ── has_unread: fetch IDs via paginated RPC, then load those conversations ──
+  if (filters?.has_unread && filters.has_unread_user_id && filters.has_unread_company_id) {
+    const { data: rows, error: rpcErr } = await supabase.rpc('get_unread_conversation_ids', {
+      p_user_id: filters.has_unread_user_id,
+      p_limit: limit,
+      p_offset: from,
+      p_company_id: filters.has_unread_company_id,
+      p_project_id: filters.project_id ?? null,
+      p_status_filter: filters.status ?? null,
+      p_status_in: (!filters.status && filters.statusIn) ? filters.statusIn.join(',') : null,
+      p_assigned_user_id: filters.assigned_user_id ?? null,
+    } as Record<string, unknown>);
+
+    if (rpcErr) {
+      console.warn('[api] unread RPC failed:', rpcErr.message);
+      return [];
+    }
+    const ids = (rows ?? []).map((r: { conversation_id: string }) => r.conversation_id);
+    if (ids.length === 0) return [];
+
+    // Build query with all remaining filters (channel, search, tag, etc.)
+    let query = supabase
+      .from('conversations')
+      .select(`
+        id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, archived_at, created_at, updated_at,
+        contact:contacts!conversations_contact_id_fkey(id, name, phone, phone_e164, email, wa_identifier_raw, tags, is_group, source, responsible_user_id, avatar_url),
+        assigned_user:profiles!conversations_assigned_user_id_fkey(id, name, email, display_name)
+      `)
+      .in('id', ids)
+      .order('last_message_at', { ascending: false });
+
+    // Apply additional filters that the RPC doesn't handle
+    if (filters.status) {
+      query = query.eq('status', filters.status);
+    } else if (filters.statusIn?.length) {
+      query = query.in('status', filters.statusIn);
+    }
+    if (filters.assigned_user_id && filters.assigned_user_id !== '__none__') {
+      query = query.eq('assigned_user_id', filters.assigned_user_id);
+    } else if (filters.assigned_user_id === '__none__') {
+      query = query.is('assigned_user_id', null);
+    }
+    if (filters.channel) query = query.eq('channel', filters.channel);
+    if (filters.integration_id) query = query.eq('integration_id', filters.integration_id);
+
+    const { data, error } = await query;
+    if (error) handleError(error);
+    return (data ?? []) as ConversationWithRelations[];
+  }
+
   let query = supabase
     .from('conversations')
     .select(`
-      id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, created_at, updated_at,
+      id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, archived_at, created_at, updated_at,
       contact:contacts!conversations_contact_id_fkey(id, name, phone, phone_e164, email, wa_identifier_raw, tags, is_group, source, responsible_user_id, avatar_url),
       assigned_user:profiles!conversations_assigned_user_id_fkey(id, name, email, display_name)
     `)
@@ -190,12 +250,46 @@ export async function listConversations(
   if (filters?.project_id) {
     query = query.eq('project_id', filters.project_id);
   }
+  // Archived filter: by default exclude archived conversations
+  if (filters?.archived) {
+    query = query.not('archived_at', 'is', null);
+  } else {
+    query = query.is('archived_at', null);
+  }
   if (filters?.conversation_ids && filters.conversation_ids.length > 0) {
     // '__none__' sentinel means "no results" (e.g. 0 unread conversations)
     if (filters.conversation_ids.length === 1 && filters.conversation_ids[0] === '__none__') {
       return [];
     }
     query = query.in('id', filters.conversation_ids);
+  }
+
+  // Funnel/stage filter: uses SECURITY DEFINER RPC to bypass RLS
+  if (filters?.funnel_id) {
+    const { data: funnelContacts } = await supabase.rpc('get_funnel_contact_ids', {
+      p_funnel_id: filters.funnel_id,
+      p_stage_id: filters.stage_id ?? null,
+    });
+    const funnelContactIds = (funnelContacts ?? []).map((r: { contact_id: string }) => r.contact_id);
+    if (funnelContactIds.length === 0) return [];
+    query = query.in('contact_id', funnelContactIds);
+  }
+
+  // Tag filter via normalized contact_tags table (replaces client-side filtering)
+  if (filters?.tag) {
+    const { data: tagRow } = await supabase
+      .from('tags')
+      .select('id')
+      .eq('name', filters.tag)
+      .maybeSingle();
+    if (!tagRow) return [];
+    const { data: taggedRows } = await supabase
+      .from('contact_tags')
+      .select('contact_id')
+      .eq('tag_id', tagRow.id);
+    const tagContactIds = (taggedRows ?? []).map((r) => r.contact_id).filter(Boolean);
+    if (tagContactIds.length === 0) return [];
+    query = query.in('contact_id', tagContactIds);
   }
 
   // Apply name/phone/search filters at the DB level
@@ -244,14 +338,6 @@ export async function listConversations(
   if (error) handleError(error);
 
   let results = (data ?? []) as ConversationWithRelations[];
-
-  // Client-side filter for tags (JSON field, can't easily query in DB)
-  if (filters?.tag) {
-    results = results.filter((c) => {
-      const tags = (c.contact.tags as string[]) || [];
-      return tags.includes(filters.tag!);
-    });
-  }
   if (filters?.sort === 'name') {
     results.sort((a, b) => a.contact.name.localeCompare(b.contact.name));
   }
@@ -267,7 +353,7 @@ export async function getConversation(
     supabase
       .from('conversations')
       .select(`
-        id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, created_at, updated_at,
+        id, status, channel, last_message_at, last_message_preview, contact_id, assigned_user_id, department_id, project_id, integration_id, chatbot_active, archived_at, created_at, updated_at,
         contact:contacts!conversations_contact_id_fkey(id, name, phone, phone_e164, email, wa_identifier_raw, tags, is_group, source, responsible_user_id, avatar_url, created_at),
         assigned_user:profiles!conversations_assigned_user_id_fkey(id, name, email, display_name),
         integration:integrations!conversations_integration_id_fkey(id,device_name,phone_number,status,provider,project_id)
@@ -311,13 +397,9 @@ export async function getConversation(
   return {
     ...(conv as ConversationWithRelations),
     messages: messagesWithReply,
-    integration: (conv as any).integration ?? null,
+    integration: (conv as unknown as { integration: IntegrationSummary | null }).integration ?? null,
   };
 }
-
-// Cache para perfil do usuário (reduz latência)
-let cachedProfile: { id: string; company_id: string } | null = null;
-let cachedProfileUserId: string | null = null;
 
 export async function sendMessage(
   conversationId: string,
@@ -359,10 +441,11 @@ export async function sendMessage(
 
   if (msgErr) handleError(msgErr);
 
-  // Auto-move + auto-assign: fire-and-forget (don't block the send response)
+  // Fire-and-forget: auto-move + auto-assign without blocking the response.
+  // These are cosmetic DB updates — not needed before returning the message.
   Promise.all([
-    supabase.from('conversations').update({ status: 'open' as any }).eq('id', conversationId).in('status', ['new']),
-    supabase.from('conversations').update({ assigned_user_id: userId } as any).eq('id', conversationId).is('assigned_user_id', null),
+    supabase.from('conversations').update({ status: 'open' as TablesUpdate<'conversations'>['status'] }).eq('id', conversationId).in('status', ['new']),
+    supabase.from('conversations').update({ assigned_user_id: userId } as TablesUpdate<'conversations'>).eq('id', conversationId).is('assigned_user_id', null),
   ]).catch(() => {});
 
   // last_message_at is now updated by DB trigger — no extra UPDATE needed.
@@ -412,7 +495,7 @@ export async function listContacts(
       .from('contact_tags')
       .select('contact_id')
       .eq('tag_id', filters.tag_id);
-    const tagContactIds = (tagContacts ?? []).map((r: any) => r.contact_id).filter(Boolean);
+    const tagContactIds = (tagContacts ?? []).map((r) => r.contact_id).filter(Boolean);
     if (tagContactIds.length === 0) {
       return { data: [], total: 0, page, totalPages: 0 };
     }
@@ -429,7 +512,7 @@ export async function listContacts(
       convQuery = convQuery.eq('project_id', filters.project_id);
     }
     const { data: convContacts } = await convQuery;
-    const contactIds = Array.from(new Set((convContacts ?? []).map((c: any) => c.contact_id).filter(Boolean)));
+    const contactIds = Array.from(new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)));
     if (contactIds.length === 0) {
       return { data: [], total: 0, page, totalPages: 0 };
     }
@@ -452,7 +535,7 @@ export async function listContacts(
       .from('contact_tags')
       .select('contact_id, tags:tag_id(name, color)')
       .in('contact_id', contactIds);
-    for (const row of (ctData ?? []) as any[]) {
+    for (const row of (ctData ?? []) as { contact_id: string; tags: { name: string; color: string } | null }[]) {
       const cid = row.contact_id;
       if (!contactTagsMap[cid]) contactTagsMap[cid] = [];
       if (row.tags) contactTagsMap[cid].push({ name: row.tags.name, color: row.tags.color });
@@ -466,7 +549,7 @@ export async function listContacts(
   }));
 
   return {
-    data: enriched as any,
+    data: enriched as unknown as (Contact & { responsible: { id: string; name: string } | null })[],
     total,
     page,
     totalPages: Math.ceil(total / limit),
@@ -496,7 +579,7 @@ export async function exportAllContacts(
       .from('contact_tags')
       .select('contact_id')
       .eq('tag_id', filters.tag_id);
-    const tagContactIds = (tagContacts ?? []).map((r: any) => r.contact_id).filter(Boolean);
+    const tagContactIds = (tagContacts ?? []).map((r) => r.contact_id).filter(Boolean);
     if (tagContactIds.length === 0) return [];
     query = query.in('id', tagContactIds);
   }
@@ -511,7 +594,7 @@ export async function exportAllContacts(
     }
     const { data: convContacts } = await convQuery;
     const contactIds = Array.from(
-      new Set((convContacts ?? []).map((c: any) => c.contact_id).filter(Boolean)),
+      new Set((convContacts ?? []).map((c) => c.contact_id).filter(Boolean)),
     );
     if (contactIds.length === 0) return [];
     query = query.in('id', contactIds);
@@ -625,51 +708,54 @@ export async function markConversationRead(
 export async function getUnreadCounts(
   conversationIds: string[],
   userId: string,
+  companyId: string,
   spyMode = false,
 ): Promise<Record<string, number>> {
-  if (conversationIds.length === 0) return {};
+  if (conversationIds.length === 0 || !companyId) return {};
 
-  const rpcParams = {
+  // Use get_unread_counts RPC — returns actual per-conversation counts.
+  // Falls back to get_unread_conversation_ids (binary 1/0) if the RPC fails.
+  const { data, error } = await supabase.rpc('get_unread_counts', {
     p_user_id: userId,
     p_conversation_ids: conversationIds,
     p_spy_mode: spyMode,
-  };
+  });
 
-  const { data, error } = await supabase.rpc('get_unread_counts', rpcParams as Record<string, unknown>);
+  if (!error && Array.isArray(data) && data.length > 0) {
+    const counts: Record<string, number> = {};
+    for (const row of data as { conversation_id: string; unread_count: number }[]) {
+      if (row.conversation_id && row.unread_count > 0) {
+        counts[row.conversation_id] = Number(row.unread_count);
+      }
+    }
+    return counts;
+  }
 
+  // Fallback: get_unread_conversation_ids (binary presence)
   if (error) {
-    console.warn('[api] get_unread_counts RPC failed:', error.message, { rpcParams });
+    console.warn('[api] get_unread_counts RPC failed, trying fallback:', error.message);
+  }
+  const { data: fallbackData, error: fbErr } = await supabase.rpc('get_unread_conversation_ids', {
+    p_company_id: companyId,
+    p_user_id: userId,
+  });
+  if (fbErr) {
+    console.warn('[api] get_unread_conversation_ids RPC also failed:', fbErr.message);
     return {};
   }
 
+  const raw = fallbackData ?? [];
+  const ids: string[] = Array.isArray(raw)
+    ? raw.map((r: any) => (typeof r === 'string' ? r : r.conversation_id)).filter(Boolean)
+    : [];
+  const unreadSet = new Set(ids);
   const counts: Record<string, number> = {};
-  for (const row of (data ?? []) as { conversation_id: string; unread_count: number }[]) {
-    counts[row.conversation_id] = Number(row.unread_count);
+  for (const id of conversationIds) {
+    if (unreadSet.has(id)) counts[id] = 1;
   }
   return counts;
 }
 
-// ── Unread conversation IDs (server-side) ─────────────
-export async function getUnreadConversationIds(
-  userId: string,
-  companyId: string,
-  projectId?: string | null,
-  spyMode = false,
-): Promise<string[]> {
-  const { data, error } = await supabase.rpc('get_unread_conversation_ids', {
-    p_user_id: userId,
-    p_company_id: companyId,
-    p_project_id: projectId ?? null,
-    p_spy_mode: spyMode,
-  } as Record<string, unknown>);
-
-  if (error) {
-    console.warn('[api] get_unread_conversation_ids RPC failed:', error.message);
-    return [];
-  }
-
-  return (data ?? []) as string[];
-}
 
 // ── Close conversation ────────────────────────────────
 export async function closeConversation(

@@ -3,7 +3,9 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebarStats } from '@/hooks/useSidebarStats';
-import GlobalSearchCommand from '@/components/GlobalSearchCommand';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
+import ConnectionStatusIndicator from '@/components/shared/ConnectionStatusIndicator';
 import {
   MessageSquare,
   Users,
@@ -12,7 +14,6 @@ import {
   Menu,
   X,
   Bell,
-  Search,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -27,17 +28,18 @@ import {
   Megaphone,
   Smartphone,
   Star,
-  Archive,
   Puzzle,
   Headphones,
   FolderOpen,
   Sun,
   Moon,
+  LayoutDashboard,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +49,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCompany } from '@/hooks/useCompany';
+import { useProjectContext } from '@/contexts/ProjectContext';
+import { useMyProjects } from '@/hooks/useProjects';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -55,41 +61,44 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, role, signOut } = useAuth();
   const { data: stats } = useSidebarStats();
   const { data: company } = useCompany();
   const { theme, toggleTheme } = useTheme();
+  const { projectId, selectProject } = useProjectContext();
+  const { data: myProjects = [] } = useMyProjects();
+  usePresenceHeartbeat();
+  const permissions = usePermissions();
+  const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound();
+
+
+  // Auto-select project for non-admin users when they have projects but none selected
+  useEffect(() => {
+    if (role !== 'admin' && !projectId && myProjects.length > 0) {
+      selectProject(myProjects[0].id);
+    }
+  }, [role, projectId, myProjects, selectProject]);
 
   const userName = profile?.name || 'Usuário';
   const userInitials = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   const companyName = company?.name ?? 'Minha Empresa';
 
-  // Keyboard shortcut for search
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, []);
 
-  type NavItem = { to: string; label: string; icon: ComponentType<{ size?: number; className?: string }>; badge?: number; roles?: string[] };
+  type NavItem = { to: string; label: string; icon: ComponentType<{ size?: number; className?: string }>; badge?: number; roles?: string[]; permissionAny?: string[] };
   type NavGroup = { label: string | null; items: NavItem[] };
 
+  // permissionAny: visible if user has ANY of the listed permissions.
+  // Items with no permissionAny are visible to all authenticated users.
   const allNavGroups: NavGroup[] = [
     {
       label: 'Atendimento',
       items: [
+        { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { to: '/inbox', label: 'Inbox', icon: MessageSquare, badge: stats?.openConversations },
-        { to: '/chats', label: 'Chats Geral', icon: Kanban, roles: ['admin', 'supervisor'] },
         { to: '/contatos', label: 'Contatos', icon: Users },
-        { to: '/tags', label: 'Tags', icon: Tag, roles: ['admin', 'supervisor'] },
+        { to: '/tags', label: 'Tags', icon: Tag, permissionAny: ['tags_view', 'tags_assign', 'tags_remove', 'tags_create'] },
         { to: '/respostas-rapidas', label: 'Respostas Rápidas', icon: Zap },
       ],
     },
@@ -97,35 +106,38 @@ export default function AppLayout({ children }: AppLayoutProps) {
       label: 'Automação',
       items: [
         { to: '/chatbot', label: 'Diálogos / Chatbot', icon: Bot, roles: ['admin', 'supervisor'] },
-        { to: '/campanhas', label: 'Campanhas', icon: Megaphone, roles: ['admin', 'supervisor'] },
-        { to: '/pipeline', label: 'Funil', icon: Filter },
+        { to: '/campanhas', label: 'Campanhas', icon: Megaphone, permissionAny: ['campaigns_view', 'campaigns_create', 'campaigns_pause', 'campaigns_resume'] },
+        { to: '/pipeline', label: 'Funil', icon: Filter, permissionAny: ['funnels_view', 'funnels_create', 'funnels_edit', 'funnels_move_chats'] },
       ],
     },
     {
       label: 'Dados',
       items: [
-        { to: '/relatorios', label: 'Relatórios', icon: BarChart3, roles: ['admin', 'supervisor'] },
-        { to: '/nps', label: 'NPS', icon: Star, roles: ['admin', 'supervisor'] },
-        { to: '/arquivos', label: 'Arquivos', icon: Archive, roles: ['admin', 'supervisor'] },
+        { to: '/relatorios', label: 'Relatórios', icon: BarChart3, permissionAny: ['reports_access_view', 'reports_chats_view', 'reports_chats_graphs', 'reports_messages_view', 'reports_notes_view', 'reports_users_view', 'reports_chatbot_view', 'reports_dialogs_view'] },
+        { to: '/nps', label: 'NPS', icon: Star, permissionAny: ['nps_view', 'nps_create', 'nps_edit', 'nps_manual'] },
       ],
     },
     {
       label: 'Sistema',
       items: [
-        { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone, roles: ['admin'] },
+        { to: '/integracoes', label: 'Celulares WhatsApp', icon: Smartphone, permissionAny: ['phones_view', 'phones_link'] },
         { to: '/modulos', label: 'Módulos', icon: Puzzle, roles: ['admin'] },
-        { to: '/configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
+        { to: '/usuarios', label: 'Usuários', icon: Users, permissionAny: ['users_view', 'users_create', 'users_assign'] },
         { to: '/suporte', label: 'Suporte', icon: Headphones },
       ],
     },
   ];
 
-  // Filter nav items by current user role (no role = agent)
+  // Filter nav items by role + granular permissions
   const currentRole = role ?? 'agent';
   const navGroups = allNavGroups
     .map(g => ({
       ...g,
-      items: g.items.filter(item => !item.roles || item.roles.includes(currentRole)),
+      items: g.items.filter(item => {
+        if (item.roles && !item.roles.includes(currentRole)) return false;
+        if (item.permissionAny && !item.permissionAny.some(k => permissions.can(k))) return false;
+        return true;
+      }),
     }))
     .filter(g => g.items.length > 0);
 
@@ -133,7 +145,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const navItems = navGroups.flatMap(g => g.items);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-screen h-[100dvh] w-full overflow-hidden bg-background">
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
@@ -142,11 +154,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <aside className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'w-16' : 'w-64'}`}>
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
           {collapsed ? (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+            <button onClick={() => navigate('/dashboard')} className="flex h-8 w-8 shrink-0 items-center justify-center">
               <img src="/logo-white.png" alt="ALL·IN" className="h-6 w-auto object-contain" />
-            </div>
+            </button>
           ) : (
-            <img src="/logo-white.png" alt="ALL·IN" className="h-7 w-auto object-contain" />
+            <button onClick={() => navigate('/dashboard')} className="flex items-center">
+              <img src="/logo-white.png" alt="ALL·IN" className="h-7 w-auto object-contain" />
+            </button>
           )}
           <button onClick={() => setSidebarOpen(false)} className="ml-auto text-sidebar-muted hover:text-sidebar-foreground lg:hidden"><X size={20} /></button>
         </div>
@@ -211,21 +225,36 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </h1>
 
           <div className="ml-auto flex items-center gap-3">
-            {/* Global search trigger */}
-            <div className="relative hidden md:block">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar... (⌘K)"
-                className="w-64 pl-9 bg-secondary border-0 focus-visible:ring-1 cursor-pointer"
-                readOnly
-                onClick={() => setSearchOpen(true)}
-              />
+            {/* Project selector */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              <Building2 size={14} className="text-muted-foreground shrink-0" />
+              {myProjects.length > 1 ? (
+                <Select value={projectId || '_all'} onValueChange={v => selectProject(v === '_all' ? '' : v)}>
+                  <SelectTrigger className="h-8 w-[170px] border-0 bg-secondary text-sm focus:ring-1">
+                    <SelectValue placeholder="Todos os projetos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentRole === 'admin' && <SelectItem value="_all">Todos os projetos</SelectItem>}
+                    {myProjects.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span className="text-sm text-muted-foreground truncate max-w-[140px]">
+                  {myProjects[0]?.name ?? companyName}
+                </span>
+              )}
             </div>
 
-            {/* Company name */}
-            <Button variant="outline" size="sm" className="hidden sm:flex gap-2">
-              <Building2 size={14} />
-              <span className="max-w-[120px] truncate">{companyName}</span>
+            {/* Sound toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSound}
+              title={soundEnabled ? 'Desativar som de notificação' : 'Ativar som de notificação'}
+            >
+              {soundEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
             </Button>
 
             {/* Theme toggle */}
@@ -237,6 +266,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
             >
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </Button>
+
+            {/* Connection status + WhatsApp queue */}
+            <ConnectionStatusIndicator />
 
             {/* Notifications */}
             <DropdownMenu>
@@ -285,7 +317,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 <DropdownMenuItem onClick={() => navigate('/perfil')}>
                   <User size={14} className="mr-2" /> Meu Perfil
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/configuracoes')}>
+                <DropdownMenuItem onClick={() => navigate('/usuarios')}>
                   <Settings size={14} className="mr-2" /> Configurações
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -300,7 +332,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
 
-      <GlobalSearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

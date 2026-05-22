@@ -140,7 +140,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Prazo *</Label>
               <Popover>
@@ -183,7 +183,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Responsável *</Label>
               <Select value={form.assignedUserId} onValueChange={(v) => setForm({ ...form, assignedUserId: v })}>
@@ -205,7 +205,7 @@ export default function TaskModal({ open, onClose, task, defaultContactId, defau
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>
-                  {((contacts as any)?.data ?? contacts ?? []).map((c: any) => (
+                  {(contacts?.data ?? []).map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>

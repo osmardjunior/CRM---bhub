@@ -28,10 +28,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = async (userId: string) => {
     // Run both queries in parallel — cuts initial load time in half
     const [{ data: profileData }, { data: roleData }, { data: { user: authUser } }] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('profiles').select('id, name, email, company_id, status, display_name, spy_mode, access_hours, custom_permissions, is_active, round_robin_weight, last_seen_at, allowed_integration_ids').eq('id', userId).maybeSingle(),
       supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle(),
       supabase.auth.getUser(),
     ]);
+
+    // Block inactive users: sign them out immediately
+    if (profileData && profileData.is_active === false) {
+      await supabase.auth.signOut();
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      setRole(null);
+      setLoading(false);
+      return;
+    }
 
     if (profileData) setProfile(profileData);
 
@@ -39,6 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // not yet inserted in user_roles (e.g. invited agents without a role row)
     const resolvedRole = roleData?.role ?? (authUser?.user_metadata?.role as string | undefined) ?? null;
     if (resolvedRole) setRole(resolvedRole);
+
+    // Self-healing: if role came from metadata fallback (no user_roles row),
+    // call the ensure-user-role function to fix the missing row silently.
+    if (!roleData?.role && resolvedRole) {
+      supabase.functions.invoke('ensure-user-role').catch(() => {});
+    }
 
     // Only mark loading=false AFTER profile is ready — prevents race conditions
     // where spy_mode and other profile flags are read before they're populated.
@@ -97,6 +114,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // Clear last_seen_at before signing out → instant offline on Dashboard
+    if (user?.id) {
+      await supabase
+        .from('profiles')
+        .update({ last_seen_at: null })
+        .eq('id', user.id);
+    }
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);

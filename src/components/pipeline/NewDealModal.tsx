@@ -171,7 +171,7 @@ export default function NewDealModal({ open, onClose }: NewDealModalProps) {
               <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Nenhum</SelectItem>
-                {((contacts as any)?.data ?? contacts ?? []).map((c: any) => (
+                {(contacts?.data ?? []).map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>

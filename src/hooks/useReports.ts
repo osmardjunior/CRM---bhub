@@ -12,11 +12,11 @@ export interface AgentMetric {
   avg_nps: number | null;
 }
 
-export function useAgentMetrics(dateFrom: string, dateTo: string, projectId?: string | null) {
+export function useAgentMetrics(dateFrom: string, dateTo: string, projectId?: string | null, agentId?: string | null) {
   const { companyId, user, role } = useAuth();
 
   return useQuery({
-    queryKey: ['agent-metrics', companyId, dateFrom, dateTo, role, user?.id, projectId],
+    queryKey: ['agent-metrics', companyId, dateFrom, dateTo, role, user?.id, projectId, agentId],
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_agent_metrics', {
@@ -25,7 +25,11 @@ export function useAgentMetrics(dateFrom: string, dateTo: string, projectId?: st
         p_project_id: projectId || null,
       } as Record<string, unknown>);
       if (error) throw error;
-      const all = (data ?? []) as AgentMetric[];
+      let all = (data ?? []) as AgentMetric[];
+      // Filter by specific agent if provided
+      if (agentId) {
+        return all.filter(a => a.agent_id === agentId);
+      }
       // Non-admin: only show own metrics
       if (role !== 'admin' && user?.id) {
         return all.filter(a => a.agent_id === user.id);
@@ -35,11 +39,11 @@ export function useAgentMetrics(dateFrom: string, dateTo: string, projectId?: st
   });
 }
 
-export function usePipelineConversion(dateFrom: string, dateTo: string) {
+export function usePipelineConversion(dateFrom: string, dateTo: string, agentId?: string | null) {
   const { companyId, user, role } = useAuth();
 
   return useQuery({
-    queryKey: ['pipeline-conversion', companyId, dateFrom, dateTo, role, user?.id],
+    queryKey: ['pipeline-conversion', companyId, dateFrom, dateTo, role, user?.id, agentId],
     enabled: !!companyId,
     queryFn: async () => {
       // Paginate to avoid 1000-row limit
@@ -51,7 +55,8 @@ export function usePipelineConversion(dateFrom: string, dateTo: string) {
           .eq('company_id', companyId!)
           .gte('updated_at', dateFrom).lte('updated_at', dateTo)
           .range(from, from + PAGE - 1);
-        if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
+        if (agentId) q = q.eq('assigned_user_id', agentId);
+        else if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
         const { data, error } = await q;
         if (error) throw error;
         if (!data || data.length === 0) break;
@@ -68,11 +73,11 @@ export function usePipelineConversion(dateFrom: string, dateTo: string) {
   });
 }
 
-export function useChannelVolume(dateFrom: string, dateTo: string, projectId?: string | null) {
+export function useChannelVolume(dateFrom: string, dateTo: string, projectId?: string | null, agentId?: string | null) {
   const { companyId, user, role } = useAuth();
 
   return useQuery({
-    queryKey: ['channel-volume', companyId, dateFrom, dateTo, role, user?.id, projectId],
+    queryKey: ['channel-volume', companyId, dateFrom, dateTo, role, user?.id, projectId, agentId],
     enabled: !!companyId,
     queryFn: async () => {
       // Paginate to avoid 1000-row limit
@@ -85,7 +90,8 @@ export function useChannelVolume(dateFrom: string, dateTo: string, projectId?: s
           .gte('created_at', dateFrom).lte('created_at', dateTo)
           .range(from, from + PAGE - 1);
         if (projectId) q = q.eq('project_id', projectId);
-        if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
+        if (agentId) q = q.eq('assigned_user_id', agentId);
+        else if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
         const { data, error } = await q;
         if (error) throw error;
         if (!data || data.length === 0) break;
@@ -126,11 +132,11 @@ export interface LeadPerAgent {
   closed: number;
 }
 
-export function useLeadsPerAgent(dateFrom: string, dateTo: string, projectId?: string | null) {
+export function useLeadsPerAgent(dateFrom: string, dateTo: string, projectId?: string | null, agentId?: string | null) {
   const { companyId, user, role } = useAuth();
 
   return useQuery({
-    queryKey: ['leads-per-agent', companyId, dateFrom, dateTo, role, user?.id, projectId],
+    queryKey: ['leads-per-agent', companyId, dateFrom, dateTo, role, user?.id, projectId, agentId],
     enabled: !!companyId,
     queryFn: async () => {
       // Paginate ALL conversations (including unassigned) to avoid 1000-row limit
@@ -144,7 +150,8 @@ export function useLeadsPerAgent(dateFrom: string, dateTo: string, projectId?: s
           .gte('created_at', dateFrom).lte('created_at', dateTo)
           .range(from, from + PAGE - 1);
         if (projectId) q = q.eq('project_id', projectId);
-        if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
+        if (agentId) q = q.eq('assigned_user_id', agentId);
+        else if (role !== 'admin' && user?.id) q = q.eq('assigned_user_id', user.id);
         const { data, error } = await q;
         if (error) throw error;
         if (!data || data.length === 0) break;
@@ -209,11 +216,11 @@ export function useLeadsPerAgent(dateFrom: string, dateTo: string, projectId?: s
   });
 }
 
-export function useNPSSummary(dateFrom: string, dateTo: string, projectId?: string | null) {
+export function useNPSSummary(dateFrom: string, dateTo: string, projectId?: string | null, agentId?: string | null) {
   const { companyId, user, role } = useAuth();
 
   return useQuery({
-    queryKey: ['nps-summary', companyId, dateFrom, dateTo, role, user?.id, projectId],
+    queryKey: ['nps-summary', companyId, dateFrom, dateTo, role, user?.id, projectId, agentId],
     enabled: !!companyId,
     queryFn: async () => {
       let query = supabase
@@ -224,15 +231,16 @@ export function useNPSSummary(dateFrom: string, dateTo: string, projectId?: stri
         .gte('answered_at', dateFrom)
         .lte('answered_at', dateTo);
 
-      // Project filter or non-admin: filter via conversation IDs (paginated)
-      if (projectId || (role !== 'admin' && user?.id)) {
+      // Project/agent filter or non-admin: filter via conversation IDs (paginated)
+      if (projectId || agentId || (role !== 'admin' && user?.id)) {
         let allConvIds: string[] = [];
         let from = 0;
         const PAGE = 5000;
         while (true) {
           let cq = supabase.from('conversations').select('id').eq('company_id', companyId!).range(from, from + PAGE - 1);
           if (projectId) cq = cq.eq('project_id', projectId);
-          if (role !== 'admin' && user?.id) cq = cq.eq('assigned_user_id', user.id);
+          if (agentId) cq = cq.eq('assigned_user_id', agentId);
+          else if (role !== 'admin' && user?.id) cq = cq.eq('assigned_user_id', user.id);
           const { data: convRows } = await cq;
           if (!convRows || convRows.length === 0) break;
           allConvIds = allConvIds.concat(convRows.map(c => c.id));

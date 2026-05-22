@@ -11,22 +11,22 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 
 const BUCKET = 'chat-media';
 
-interface StorageFile {
-  name: string;
+interface CompanyFile {
   id: string;
-  updated_at: string;
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  file_size: number | null;
+  caption: string | null;
   created_at: string;
-  metadata: {
-    size: number;
-    mimetype: string;
-  } | null;
 }
 
-function fileIcon(mime: string | undefined) {
+function fileIcon(mime: string | null | undefined) {
   if (!mime) return <File size={24} className="text-muted-foreground" />;
   if (mime.startsWith('image/')) return <Image size={24} className="text-blue-500" />;
   if (mime.startsWith('video/')) return <Film size={24} className="text-purple-500" />;
@@ -34,26 +34,11 @@ function fileIcon(mime: string | undefined) {
   return <FileText size={24} className="text-orange-500" />;
 }
 
-function formatSize(bytes: number) {
+function formatSize(bytes: number | null | undefined) {
+  if (!bytes) return '';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function getPublicUrl(companyId: string, fileName: string) {
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(`${companyId}/${fileName}`);
-  return data.publicUrl;
-}
-
-function getMimeType(fileName: string): string {
-  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
-    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
-    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav',
-    pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  };
-  return map[ext] ?? 'application/octet-stream';
 }
 
 interface MediaPickerModalProps {
@@ -63,7 +48,8 @@ interface MediaPickerModalProps {
 }
 
 export default function MediaPickerModal({ open, onClose, onSelect }: MediaPickerModalProps) {
-  const { companyId } = useAuth();
+  const { companyId, user, role } = useAuth();
+  const { projectId } = useProjectContext();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -71,30 +57,61 @@ export default function MediaPickerModal({ open, onClose, onSelect }: MediaPicke
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: files = [], isLoading } = useQuery({
-    queryKey: ['media-picker', companyId],
+    queryKey: ['media-picker', companyId, projectId, role, user?.id],
     enabled: !!companyId && open,
     queryFn: async () => {
-      const { data, error } = await supabase.storage.from(BUCKET).list(companyId ?? '', {
-        limit: 200,
-        sortBy: { column: 'created_at', order: 'desc' },
-      });
+      let query = supabase
+        // @ts-expect-error company_files not yet in generated Supabase types
+        .from('company_files')
+        .select('id, file_path, file_name, mime_type, file_size, caption, created_at')
+        .eq('company_id', companyId!)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+
+      // Agentes veem apenas seus próprios arquivos
+      if (role !== 'admin' && user) {
+        query = query.eq('created_by', user.id);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
-      return (data ?? []) as unknown as StorageFile[];
+      return (data ?? []) as unknown as CompanyFile[];
     },
   });
 
-  const filtered = files.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = files.filter(f =>
+    f.file_name.toLowerCase().includes(search.toLowerCase()) ||
+    (f.caption ?? '').toLowerCase().includes(search.toLowerCase())
+  );
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !companyId) return;
+    if (!file || !companyId || !user) return;
     setUploading(true);
     try {
       const path = `${companyId}/${Date.now()}_${file.name}`;
-      const { error } = await supabase.storage.from(BUCKET).upload(path, file);
-      if (error) throw error;
+      const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(path, file);
+      if (uploadErr) throw uploadErr;
+
+      // Also save to company_files table
+      // @ts-expect-error company_files not yet in generated Supabase types
+      await supabase.from('company_files').insert({
+        company_id: companyId,
+        file_path: path,
+        file_name: file.name,
+        mime_type: file.type || null,
+        file_size: file.size,
+        caption: null,
+        created_by: user.id,
+        project_id: projectId || null,
+      });
+
       queryClient.invalidateQueries({ queryKey: ['media-picker'] });
-      queryClient.invalidateQueries({ queryKey: ['arquivos'] });
+      queryClient.invalidateQueries({ queryKey: ['company-files'] });
       toast.success('Arquivo enviado!');
     } catch {
       toast.error('Erro ao enviar arquivo.');
@@ -106,19 +123,19 @@ export default function MediaPickerModal({ open, onClose, onSelect }: MediaPicke
 
   const handleConfirm = () => {
     if (!selected || !companyId) return;
-    const file = files.find(f => f.name === selected);
+    const file = files.find(f => f.id === selected);
     if (!file) return;
-    const url = getPublicUrl(companyId, file.name);
-    const mime = file.metadata?.mimetype ?? getMimeType(file.name);
-    onSelect(url, mime, file.name);
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(file.file_path);
+    const url = data.publicUrl;
+    const mime = file.mime_type ?? 'application/octet-stream';
+    onSelect(url, mime, file.file_name);
     setSelected(null);
     setSearch('');
     onClose();
   };
 
-  const isImage = (f: StorageFile) => {
-    const mime = f.metadata?.mimetype ?? getMimeType(f.name);
-    return mime.startsWith('image/');
+  const isImage = (f: CompanyFile) => {
+    return (f.mime_type ?? '').startsWith('image/');
   };
 
   return (
@@ -132,7 +149,7 @@ export default function MediaPickerModal({ open, onClose, onSelect }: MediaPicke
           <div className="relative flex-1">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Buscar arquivo..."
+              placeholder="Buscar arquivo ou legenda..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-8 h-8 text-xs bg-secondary border-0"
@@ -159,11 +176,11 @@ export default function MediaPickerModal({ open, onClose, onSelect }: MediaPicke
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {filtered.map(f => {
-                const isSelected = selected === f.name;
+                const isSelected = selected === f.id;
                 return (
                   <button
-                    key={f.id || f.name}
-                    onClick={() => setSelected(isSelected ? null : f.name)}
+                    key={f.id}
+                    onClick={() => setSelected(isSelected ? null : f.id)}
                     className={`relative rounded-lg border-2 p-2 transition-all text-left ${
                       isSelected
                         ? 'border-primary bg-primary/5'
@@ -177,19 +194,22 @@ export default function MediaPickerModal({ open, onClose, onSelect }: MediaPicke
                     )}
                     {isImage(f) && companyId ? (
                       <img
-                        src={getPublicUrl(companyId, f.name)}
-                        alt={f.name}
+                        src={supabase.storage.from(BUCKET).getPublicUrl(f.file_path).data.publicUrl}
+                        alt={f.file_name}
                         className="w-full h-20 object-cover rounded"
                         loading="lazy"
                       />
                     ) : (
                       <div className="w-full h-20 flex items-center justify-center bg-muted/50 rounded">
-                        {fileIcon(f.metadata?.mimetype)}
+                        {fileIcon(f.mime_type)}
                       </div>
                     )}
-                    <p className="text-[10px] text-foreground mt-1 truncate">{f.name.replace(/^\d+_/, '')}</p>
+                    <p className="text-[10px] text-foreground mt-1 truncate">{f.file_name.replace(/^\d+_/, '')}</p>
+                    {f.caption && (
+                      <p className="text-[9px] text-primary truncate" title={f.caption}>📝 {f.caption}</p>
+                    )}
                     <p className="text-[9px] text-muted-foreground">
-                      {f.metadata?.size ? formatSize(f.metadata.size) : ''}
+                      {formatSize(f.file_size)}
                     </p>
                   </button>
                 );

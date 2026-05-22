@@ -1,4 +1,5 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -21,36 +22,51 @@ export function useConversations(filters?: ConversationFilters) {
   });
 }
 
-export function useInfiniteConversations(filters?: Omit<ConversationFilters, 'page'>) {
+export function useInfiniteConversations(
+  filters?: Omit<ConversationFilters, 'page'>,
+  options?: { frozen?: boolean; realtimeActive?: boolean },
+) {
+  const { user, role } = useAuth();
+  const frozen = options?.frozen ?? false;
+  const realtimeActive = options?.realtimeActive ?? false;
+
+  // Agents see only their own assigned conversations
+  const effectiveFilters = useMemo(() => {
+    const isAgentOnly = role !== 'admin' && role !== 'supervisor';
+    if (isAgentOnly && user && !filters?.assigned_user_id) {
+      return { ...filters, assigned_user_id: user.id };
+    }
+    return filters;
+  }, [filters, role, user]);
+
   return useInfiniteQuery({
-    queryKey: ['conversations-infinite', filters],
-    queryFn: ({ pageParam = 0 }) => listConversations({ ...filters, page: pageParam, limit: 20 }),
+    queryKey: ['conversations-infinite', effectiveFilters],
+    queryFn: ({ pageParam = 0 }) => listConversations({ ...effectiveFilters, page: pageParam, limit: 20 }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.length < 20) return undefined;
       return allPages.length;
     },
-    // Polling de fallback: garante atualização mesmo quando o Realtime falha.
-    // O Realtime ainda é o mecanismo primário (sub-50ms); este é o safety net.
-    refetchInterval: 8_000,            // 8s (era 15s)
-    refetchIntervalInBackground: false, // só quando a aba está ativa
-    staleTime: 0,                       // sempre refetch ao invalidar
+    // Polling desabilitado quando Realtime está SUBSCRIBED ou quando frozen.
+    refetchInterval: (frozen || realtimeActive) ? false : 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: !frozen,
+    staleTime: frozen ? Infinity : 15_000,
   });
 }
 
-export function useConversationDetail(conversationId: string | null) {
+export function useConversationDetail(
+  conversationId: string | null,
+  options?: { realtimeActive?: boolean },
+) {
   return useQuery({
     queryKey: ['conversation', conversationId],
     enabled: !!conversationId,
     queryFn: () => getConversation(conversationId!),
-    // Realtime handles sub-50ms updates; this is just a safety net for when realtime fails.
-    // 15s is enough — reducing from 3s avoids race-conditions with optimistic updates.
-    refetchInterval: 15_000,
+    // Polling desabilitado quando Realtime está SUBSCRIBED
+    refetchInterval: options?.realtimeActive ? false : 30_000,
     refetchIntervalInBackground: false,
-    staleTime: 0,
-    // Keep previous data during refetch so conversation never becomes null
-    // (prevents handleSend from returning early on the second send)
-    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 
@@ -59,7 +75,6 @@ export function useSendMessage() {
   const { user, companyId, profile } = useAuth();
 
   return useMutation({
-    // Only awaits the DB insert — WhatsApp delivery is fire-and-forget
     mutationFn: async ({ conversationId, body, replyToId }: { conversationId: string; body: string; replyToId?: string | null }) => {
       const msg = await sendMessage(
         conversationId,
@@ -67,22 +82,32 @@ export function useSendMessage() {
         replyToId,
         user && companyId ? { userId: user.id, companyId } : undefined,
       );
-      return { msg };
+      // Deliver via WhatsApp and capture result for toast feedback
+      const delivery = await sendViaWhatsApp(conversationId, body, undefined, replyToId, msg.id);
+      return { msg, delivery };
     },
 
     // ── Optimistic update: message appears instantly ──────────────────────
     onMutate: async ({ conversationId, body, replyToId }) => {
-      // Cancel any in-flight refetch so it can't overwrite the optimistic message.
-      // No await — cancelQueries marks the query as cancelled synchronously in React Query state;
-      // the actual HTTP response is discarded when it arrives. Awaiting would delay onMutate
-      // (and therefore mutationFn start) by the full round-trip time of the in-flight request.
-      queryClient.cancelQueries({ queryKey: ['conversation', conversationId] });
-
+      await queryClient.cancelQueries({ queryKey: ['conversation', conversationId] });
       const previous = queryClient.getQueryData<ConversationDetail>(['conversation', conversationId]);
-      const optimisticId = `optimistic-${Date.now()}`;
+
+      // Resolve reply_to preview from existing messages in cache
+      let replyToPreview = null;
+      if (replyToId && previous) {
+        const parent = previous.messages.find((m) => m.id === replyToId);
+        if (parent) {
+          replyToPreview = {
+            id: parent.id!,
+            body: parent.body ?? null,
+            sender_type: parent.sender_type,
+            sender_name: parent.sender_name ?? parent.sender?.name ?? null,
+          };
+        }
+      }
 
       const optimisticMsg: MessageWithSender = {
-        id: optimisticId,
+        id: `optimistic-${Date.now()}`,
         conversation_id: conversationId,
         company_id: companyId ?? '',
         body,
@@ -97,94 +122,105 @@ export function useSendMessage() {
         media_type: null,
         media_mime_type: null,
         reply_to_id: replyToId ?? null,
-        reply_to: null,
+        reply_to: replyToPreview,
         deleted_at: null,
       } as unknown as MessageWithSender;
 
       if (previous) {
         queryClient.setQueryData<ConversationDetail>(['conversation', conversationId], {
           ...previous,
+          // Auto-move "new" → "open" (pending stays pending until chatbot keyword trigger)
+          status: previous.status === 'new' ? 'open' : previous.status,
+          assigned_user_id: previous.assigned_user_id ?? user?.id ?? null,
+          assigned_user: previous.assigned_user ?? profile ?? null,
           messages: [...previous.messages, optimisticMsg],
-        });
+        } as ConversationDetail);
       }
 
-      return { previous, optimisticId };
+      return { previous };
     },
 
-    onError: (_err, variables, context: { previous?: ConversationDetail; optimisticId?: string } | undefined) => {
+    onError: (_err, variables, context: { previous?: ConversationDetail } | undefined) => {
       if (context?.previous) {
         queryClient.setQueryData(['conversation', variables.conversationId], context.previous);
       }
       toast.error('Erro ao enviar mensagem. Tente novamente.');
     },
 
-    onSuccess: ({ msg }, variables, context) => {
-      const { optimisticId } = (context ?? {}) as { optimisticId?: string };
+    onSuccess: (data, variables) => {
+      const { msg, delivery } = data;
 
-      // Replace optimistic placeholder with the real DB message id so subsequent
-      // polls and realtime events don't cause a duplicate or flash.
-      if (optimisticId) {
-        const current = queryClient.getQueryData<ConversationDetail>(['conversation', variables.conversationId]);
-        if (current) {
-          queryClient.setQueryData<ConversationDetail>(
-            ['conversation', variables.conversationId],
-            {
-              ...current,
-              messages: current.messages.map((m) =>
-                m.id === optimisticId ? { ...m, id: msg.id } : m,
-              ),
-            },
-          );
+      // Show delivery failure toast with reason
+      if (!delivery.delivered) {
+        let reason: string;
+        if (delivery.reason === 'rate_limited') {
+          reason = 'Limite de envio atingido para este número. Aguarde alguns minutos antes de enviar novamente.';
+        } else if (delivery.reason === 'No active integration found') {
+          reason = 'Nenhuma integração WhatsApp conectada.';
+        } else {
+          reason = delivery.error ?? delivery.reason ?? 'Erro desconhecido';
         }
-      }
+        toast.warning(`Mensagem salva, mas não enviada via WhatsApp: ${reason}`);
 
-      // Fire-and-forget: only attempt WhatsApp delivery for WhatsApp conversations.
-      // Skipping for other channels avoids a ~2s edge function call that always fails
-      // and a toast.warning() that appears on top of the send button (bottom-right).
-      const cachedConv = queryClient.getQueryData<ConversationDetail>(['conversation', variables.conversationId]);
-      const isWhatsApp = cachedConv?.integration?.provider === 'whatsapp';
-      if (isWhatsApp) {
-        sendViaWhatsApp(variables.conversationId, variables.body).then((delivery) => {
-          if (!delivery.delivered) {
-            // 'No active integration found' = expected for non-whatsapp, already filtered above
-            const reason = delivery.error ?? delivery.reason ?? 'Erro desconhecido';
-            toast.warning(`Mensagem não enviada via WhatsApp: ${reason}`);
-
-            if (msg?.id) {
-              import('@/integrations/supabase/client').then(({ supabase }) => {
-                supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).catch(() => {});
-              });
-            }
-          }
-        }).catch(() => {
-          toast.warning('Não foi possível verificar entrega via WhatsApp.');
+        // Mark message as failed in DB so the red tick appears
+        if (msg?.id) {
+          import('@/integrations/supabase/client').then(({ supabase }) => {
+            supabase.from('messages').update({ delivery_status: 'failed' }).eq('id', msg.id).then(() => {});
+          });
+        }
+      } else if (delivery.messageId && msg?.id) {
+        // Save the Evolution external message ID so edit/delete can reference it later
+        import('@/integrations/supabase/client').then(({ supabase }) => {
+          supabase.from('messages').update({ external_message_id: delivery.messageId, delivery_status: 'sent' }).eq('id', msg.id).then(() => {});
         });
       }
 
       // Mark as read unless spy_mode is enabled
-      if (!(profile as any)?.spy_mode) {
+      if (!profile?.spy_mode) {
         markConversationRead(
           variables.conversationId,
           user && companyId ? { userId: user.id, companyId } : undefined,
         ).catch(() => {});
       }
 
-      // No invalidations here — realtime subscription handles syncing without
-      // disrupting consecutive sends. refetchInterval (15s) is the fallback.
+      // Refresh from server to replace optimistic with real data
+      queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+      queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
     },
   });
 }
 
 export function useUnreadCounts(conversations: ConversationWithRelations[]) {
-  const { user } = useAuth();
-  const conversationIds = conversations.map((c) => c.id);
+  const { user, companyId, profile } = useAuth();
+  const spyMode = !!profile?.spy_mode;
+
+  // Stabilize the IDs array: only change the queryKey when the actual set of IDs changes,
+  // not on every re-render or conversation list reorder. This prevents badge flickering.
+  // CRITICAL: when conversations is temporarily empty (during resetQueries), keep the
+  // previous IDs so the query stays enabled and keepPreviousData works correctly.
+  const idsRef = useRef<string[]>([]);
+  const stableIds = useMemo(() => {
+    const newIds = conversations.map((c) => c.id);
+    // During reset transitions, conversations is briefly []. Keep previous IDs.
+    if (newIds.length === 0 && idsRef.current.length > 0) {
+      return idsRef.current;
+    }
+    const sorted = [...newIds].sort();
+    const prevSorted = [...idsRef.current].sort();
+    if (sorted.length === prevSorted.length && sorted.every((id, i) => id === prevSorted[i])) {
+      return idsRef.current; // same set of IDs — keep previous reference
+    }
+    idsRef.current = newIds;
+    return newIds;
+  }, [conversations]);
 
   return useQuery({
-    queryKey: ['unread-counts', conversationIds],
-    enabled: conversationIds.length > 0 && !!user,
-    // Single RPC replaces N queries
-    queryFn: () => getUnreadCounts(conversationIds, user!.id),
-    refetchInterval: 8_000, // fallback polling — realtime invalida imediatamente via useInboxRealtime
+    queryKey: ['unread-counts', stableIds, spyMode],
+    enabled: stableIds.length > 0 && !!user && !!companyId,
+    queryFn: () => getUnreadCounts(stableIds, user!.id, companyId!, spyMode),
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -195,7 +231,7 @@ export function useMarkConversationRead() {
   return useMutation({
     mutationFn: (conversationId: string) => {
       // Spy mode: do not clear unread — supervisor monitors without marking as read
-      if ((profile as any)?.spy_mode) return Promise.resolve();
+      if (profile?.spy_mode) return Promise.resolve();
       return markConversationRead(
         conversationId,
         user && companyId ? { userId: user.id, companyId } : undefined,
@@ -203,7 +239,7 @@ export function useMarkConversationRead() {
     },
     onMutate: (conversationId: string) => {
       // Optimistic update: zero the badge instantly without waiting for DB
-      if ((profile as any)?.spy_mode) return;
+      if (profile?.spy_mode) return;
       queryClient.setQueriesData<Record<string, number>>(
         { queryKey: ['unread-counts'] },
         (old) => old ? { ...old, [conversationId]: 0 } : old,

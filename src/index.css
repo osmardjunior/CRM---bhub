@@ -59,23 +59,23 @@
   }
 
   .dark {
-    --background: 0 0% 6%;
-    --foreground: 0 0% 92%;
+    --background: 220 10% 11%;
+    --foreground: 220 5% 92%;
 
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 92%;
+    --card: 220 10% 14%;
+    --card-foreground: 220 5% 92%;
 
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 92%;
+    --popover: 220 10% 14%;
+    --popover-foreground: 220 5% 92%;
 
     --primary: 38 62% 51%;
     --primary-foreground: 0 0% 8%;
 
-    --secondary: 0 0% 14%;
-    --secondary-foreground: 0 0% 75%;
+    --secondary: 220 8% 18%;
+    --secondary-foreground: 220 5% 75%;
 
-    --muted: 0 0% 16%;
-    --muted-foreground: 0 0% 52%;
+    --muted: 220 8% 20%;
+    --muted-foreground: 220 5% 52%;
 
     --accent: 38 40% 14%;
     --accent-foreground: 38 62% 65%;
@@ -83,19 +83,19 @@
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 16%;
-    --input: 0 0% 16%;
+    --border: 220 8% 20%;
+    --input: 220 8% 20%;
     --ring: 38 62% 51%;
 
-    --sidebar-background: 0 0% 5%;
-    --sidebar-foreground: 0 0% 68%;
+    --sidebar-background: 220 12% 8%;
+    --sidebar-foreground: 220 5% 68%;
     --sidebar-primary: 38 62% 51%;
     --sidebar-primary-foreground: 0 0% 8%;
-    --sidebar-accent: 0 0% 11%;
-    --sidebar-accent-foreground: 0 0% 95%;
-    --sidebar-border: 0 0% 13%;
+    --sidebar-accent: 220 10% 14%;
+    --sidebar-accent-foreground: 220 5% 95%;
+    --sidebar-border: 220 8% 16%;
     --sidebar-ring: 38 62% 51%;
-    --sidebar-muted: 0 0% 38%;
+    --sidebar-muted: 220 5% 38%;
   }
 }
 
@@ -104,9 +104,18 @@
     @apply border-border;
   }
 
+  html, body, #root {
+    @apply h-full overflow-hidden;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: none;
   }
 }
 
@@ -127,7 +136,7 @@
 }
 
 .dark .chat-messages-bg {
-  background-color: hsl(0 0% 8%);
-  background-image: url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath fill-rule='evenodd' d='M0 0h40v40H0V0zm40 40h40v40H40V40zm0-40h2l-2 2V0zm0 4l4-4h2l-6 6V4zm0 4l8-8h2L40 10V8zm0 4L52 0h2L40 14v-2zm0 4L56 0h2L40 18v-2zm0 4L60 0h2L40 22v-2zm0 4L64 0h2L40 26v-2zm0 4L68 0h2L40 30v-2zm0 4L72 0h2L40 34v-2zm0 4L76 0h2L40 38v-2zm0 4L80 0v2L42 40h-2zm4 0L80 4v2L46 40h-2zm4 0L80 8v2L50 40h-2zm4 0l28-28v2L54 40h-2zm4 0l24-24v2L58 40h-2zm4 0l20-20v2L62 40h-2zm4 0l16-16v2L66 40h-2zm4 0l12-12v2L70 40h-2zm4 0l8-8v2l-6 6h-2zm4 0l4-4v2l-2 2h-2z'/%3E%3C/g%3E%3C/svg%3E");
-  box-shadow: inset 0 1px 6px 0 hsl(0 0% 0% / 0.3);
+  background-color: hsl(220 10% 17%);
+  background-image: url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath fill-rule='evenodd' d='M0 0h40v40H0V0zm40 40h40v40H40V40zm0-40h2l-2 2V0zm0 4l4-4h2l-6 6V4zm0 4l8-8h2L40 10V8zm0 4L52 0h2L40 14v-2zm0 4L56 0h2L40 18v-2zm0 4L60 0h2L40 22v-2zm0 4L64 0h2L40 26v-2zm0 4L68 0h2L40 30v-2zm0 4L72 0h2L40 34v-2zm0 4L76 0h2L40 38v-2zm0 4L80 0v2L42 40h-2zm4 0L80 4v2L46 40h-2zm4 0L80 8v2L50 40h-2zm4 0l28-28v2L54 40h-2zm4 0l24-24v2L58 40h-2zm4 0l20-20v2L62 40h-2zm4 0l16-16v2L66 40h-2zm4 0l12-12v2L70 40h-2zm4 0l8-8v2l-6 6h-2zm4 0l4-4v2l-2 2h-2z'/%3E%3C/g%3E%3C/svg%3E");
+  box-shadow: inset 0 1px 6px 0 hsl(220 10% 6% / 0.3);
 }

@@ -21,12 +21,14 @@ export function useTags() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tags')
-        .select('*')
+        .select('id, company_id, name, color, department_id, project_id, created_at')
         .eq('company_id', companyId!)
-        .order('name');
+        .order('name')
+        .limit(500);
       if (error) throw error;
       return (data ?? []) as Tag[];
     },
+    staleTime: 60_000,
   });
 }
 
@@ -36,7 +38,7 @@ export function useCreateTag() {
     mutationFn: async (payload: { name: string; color: string; department_id?: string | null; project_id?: string | null }) => {
       const { error } = await supabase
         .from('tags')
-        .insert(payload as any);
+        .insert(payload);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -53,7 +55,7 @@ export function useUpdateTag() {
     mutationFn: async ({ id, ...updates }: { id: string; name?: string; color?: string; department_id?: string | null; project_id?: string | null }) => {
       const { error } = await supabase
         .from('tags')
-        .update(updates as any)
+        .update(updates)
         .eq('id', id);
       if (error) throw error;
     },

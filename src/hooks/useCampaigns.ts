@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 
 export interface Campaign {
@@ -18,25 +20,37 @@ export interface Campaign {
   send_window: Record<string, any>;
   total_contacts: number;
   processed: number;
+  min_delay_seconds: number;
+  max_delay_seconds: number;
+  excluded_contact_ids: string[];
   created_at: string;
   updated_at: string;
 }
 
 export function useCampaigns() {
   const { companyId } = useAuth();
+  const { projectId } = useProjectContext();
   return useQuery({
-    queryKey: ['campaigns', companyId],
+    queryKey: ['campaigns', companyId, projectId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('campaigns')
-        .select('*')
+        .select('id, name, status, target_count, sent_count, actions, filters, created_at, project_id, company_id')
         .eq('company_id', companyId!)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (projectId) {
+        query = query.or(`project_id.eq.${projectId},project_id.is.null`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return (data ?? []) as Campaign[];
     },
     enabled: !!companyId,
-    refetchInterval: 5000, // poll progress every 5s while campaigns run
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -47,7 +61,7 @@ export function useCreateCampaign() {
     mutationFn: async (payload: Partial<Campaign>) => {
       const { data, error } = await supabase
         .from('campaigns')
-        .insert({ ...payload, company_id: companyId } as any)
+        .insert({ ...payload, company_id: companyId! })
         .select()
         .single();
       if (error) throw error;
@@ -67,7 +81,7 @@ export function useUpdateCampaign() {
     mutationFn: async ({ id, ...updates }: Partial<Campaign> & { id: string }) => {
       const { error } = await supabase
         .from('campaigns')
-        .update(updates as any)
+        .update(updates as TablesUpdate<'campaigns'>)
         .eq('id', id);
       if (error) throw error;
     },
@@ -105,8 +119,11 @@ export function useRunCampaign() {
         .update({ status: 'scheduled', schedule_at: new Date().toISOString() })
         .eq('id', campaignId);
       if (error) throw error;
-      // Trigger immediately
-      await supabase.functions.invoke('execute-campaign', { body: { campaign_id: campaignId } });
+      // Trigger immediately and await the response
+      const { error: fnError } = await supabase.functions.invoke('execute-campaign', {
+        body: { campaign_id: campaignId },
+      });
+      if (fnError) throw new Error(`Falha ao executar campanha: ${fnError.message}`);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });

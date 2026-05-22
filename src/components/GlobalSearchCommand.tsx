@@ -48,7 +48,7 @@ export default function GlobalSearchCommand({ open, onOpenChange }: GlobalSearch
     contacts.data?.forEach(c => r.push({ id: c.id, label: c.name, sub: c.email ?? '', type: 'contact' }));
     deals.data?.forEach(d => r.push({ id: d.id, label: d.title, sub: `R$ ${Number(d.value).toLocaleString('pt-BR')}`, type: 'deal' }));
     conversations.data?.forEach(c => {
-      const contactName = (c.contact as any)?.name ?? 'Conversa';
+      const contactName = (c.contact as unknown as { name: string } | null)?.name ?? 'Conversa';
       r.push({ id: c.id, label: contactName, sub: c.channel, type: 'conversation' });
     });
 

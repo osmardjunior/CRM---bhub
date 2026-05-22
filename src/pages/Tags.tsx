@@ -11,6 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '@/hooks/useTags';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useProjects } from '@/hooks/useProjects';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import PageHeader from '@/components/shared/PageHeader';
 
 const TAG_COLORS = [
@@ -20,7 +21,12 @@ const TAG_COLORS = [
 
 export default function TagsPage() {
   const permissions = usePermissions();
-  const { data: tags = [], isLoading } = useTags();
+  const { projectId: selectedProjectId } = useProjectContext();
+  const { data: allTags = [], isLoading } = useTags();
+  // Filter tags by selected project: show project-scoped + global tags
+  const tags = selectedProjectId
+    ? allTags.filter(t => !t.project_id || t.project_id === selectedProjectId)
+    : allTags;
   const { data: departments = [] } = useDepartments();
   const { data: allProjects = [] } = useProjects();
   const createTag = useCreateTag();
@@ -40,7 +46,7 @@ export default function TagsPage() {
   const handleCreateTag = () => {
     const name = newTagName.trim();
     if (!name) return;
-    createTag.mutate({ name, color: newTagColor, department_id: newTagDeptId || null as any, project_id: newTagProjectId || null as any }, {
+    createTag.mutate({ name, color: newTagColor, department_id: newTagDeptId || null, project_id: newTagProjectId || null }, {
       onSuccess: () => {
         setNewTagName('');
         setNewTagColor(TAG_COLORS[0]);
@@ -81,11 +87,11 @@ export default function TagsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader title="Tags" subtitle="Tags centralizadas usadas em contatos. Apenas admins podem gerenciar." />
+      <PageHeader title="Tags" subtitle="Tags centralizadas usadas em contatos." />
 
       <div className="rounded-xl border border-border bg-card card-shadow p-5">
         {/* Create new tag */}
-        {permissions.isAdmin && (
+        {permissions.can('tags_create') && (
           <div className="space-y-2 mb-5">
             <div className="flex items-end gap-2">
               <div className="flex-1">
@@ -165,7 +171,7 @@ export default function TagsPage() {
                 </div>
                 <div className="space-y-1 pl-2 border-l-2 border-border">
                   {groupTags.map(tag => (
-                    <div key={tag.id} className="flex items-center gap-3 rounded-lg bg-secondary/50 px-3 py-2">
+                    <div key={tag.id} className="flex items-center gap-3 rounded-lg bg-secondary/50 px-3 py-2 flex-wrap">
                       <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
                       {editingTag?.id === tag.id ? (
                         <>
@@ -228,14 +234,18 @@ export default function TagsPage() {
                               </span>
                             )}
                           </div>
-                          {permissions.isAdmin && (
+                          {(permissions.can('tags_create') || permissions.can('tags_delete')) && (
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id, project_id: tag.project_id })}>
-                                <Pencil size={13} />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>
-                                <Trash2 size={13} />
-                              </Button>
+                              {permissions.can('tags_create') && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id, project_id: tag.project_id })}>
+                                  <Pencil size={13} />
+                                </Button>
+                              )}
+                              {permissions.can('tags_delete') && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>
+                                  <Trash2 size={13} />
+                                </Button>
+                              )}
                             </div>
                           )}
                         </>
@@ -276,14 +286,18 @@ export default function TagsPage() {
                 ) : (
                   <>
                     <span className="text-sm text-foreground flex-1">{tag.name}</span>
-                    {permissions.isAdmin && (
+                    {(permissions.can('tags_create') || permissions.can('tags_delete')) && (
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id })}>
-                          <Pencil size={13} />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>
-                          <Trash2 size={13} />
-                        </Button>
+                        {permissions.can('tags_create') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingTag({ id: tag.id, name: tag.name, color: tag.color, department_id: tag.department_id })}>
+                            <Pencil size={13} />
+                          </Button>
+                        )}
+                        {permissions.can('tags_delete') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteTag.mutate(tag.id)}>
+                            <Trash2 size={13} />
+                          </Button>
+                        )}
                       </div>
                     )}
                   </>

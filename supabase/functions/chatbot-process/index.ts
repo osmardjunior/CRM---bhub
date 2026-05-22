@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifyAuth, unauthorizedResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,10 +8,70 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/** Private/internal IP ranges that webhook URLs must NOT resolve to (SSRF prevention). */
+const BLOCKED_IP_PREFIXES = [
+  "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+  "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+  "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+  "172.30.", "172.31.", "192.168.", "127.", "0.",
+  "169.254.", "100.64.",
+];
+
+/**
+ * Validate a webhook URL for safety:
+ * - Must be HTTPS (except localhost in dev)
+ * - Must not target private/internal IPs
+ * - Must be a valid URL
+ */
+function isWebhookUrlSafe(url: string): { safe: boolean; reason?: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { safe: false, reason: "Invalid URL" };
+  }
+
+  // Must be HTTPS
+  if (parsed.protocol !== "https:") {
+    return { safe: false, reason: "Only HTTPS URLs are allowed" };
+  }
+
+  // Block localhost and common internal hostnames
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname === "localhost" ||
+    hostname === "0.0.0.0" ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal")
+  ) {
+    return { safe: false, reason: "Internal hostnames are not allowed" };
+  }
+
+  // Block private IP ranges
+  for (const prefix of BLOCKED_IP_PREFIXES) {
+    if (hostname.startsWith(prefix)) {
+      return { safe: false, reason: "Private IP addresses are not allowed" };
+    }
+  }
+
+  // Block IPv6 loopback
+  if (hostname === "::1" || hostname === "[::1]") {
+    return { safe: false, reason: "IPv6 loopback is not allowed" };
+  }
+
+  return { safe: true };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    // ── Auth: require JWT or service-role key ──────────────────────────────
+    const auth = await verifyAuth(req);
+    if (!auth.authenticated) {
+      return unauthorizedResponse(corsHeaders, auth.error);
+    }
+
     const body = await req.json();
 
     const supabase = createClient(
@@ -41,23 +102,125 @@ serve(async (req) => {
     }
 
     // Get flow: if flow_id is provided use that specific flow; otherwise fallback to first active flow
-    const flowQuery = supabase
-      .from("chatbot_flows")
-      .select("*")
-      .eq("company_id", company_id)
-      .eq("is_active", true);
-
+    let flow: any = null;
     if (flow_id) {
-      flowQuery.eq("id", flow_id);
+      const { data, error } = await supabase
+        .from("chatbot_flows")
+        .select("*")
+        .eq("company_id", company_id)
+        .eq("is_active", true)
+        .eq("id", flow_id)
+        .maybeSingle();
+      if (!error) flow = data;
+    }
+    if (!flow) {
+      // Fallback: get first active flow (use .limit(1) to avoid maybeSingle error with multiple rows)
+      const { data, error } = await supabase
+        .from("chatbot_flows")
+        .select("*")
+        .eq("company_id", company_id)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      if (!error && data && data.length > 0) flow = data[0];
     }
 
-    const { data: flow, error: flowErr } = await flowQuery.maybeSingle();
-
-    if (flowErr || !flow) {
+    if (!flow) {
+      console.log(`[chatbot-process] no active flow found for company=${company_id} flow_id=${flow_id}`);
       return new Response(JSON.stringify({ action: "no_flow" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    console.log(`[chatbot-process] using flow=${flow.id} name="${flow.name}"`);
+
+    // ── Pre-fetch: resolve project + valid agents in 3 parallel queries ────
+    // This avoids N+1 queries when validating candidates in delegate/smart_router
+    const flowBh = (flow.business_hours || {}) as Record<string, any>;
+    const flowIntegrationIds: string[] = flowBh._trigger?.integration_ids || [];
+
+    let flowProjectId: string | null = null;
+    if (flowIntegrationIds.length > 0) {
+      const { data: flowInteg } = await supabase
+        .from("integrations")
+        .select("project_id")
+        .eq("id", flowIntegrationIds[0])
+        .maybeSingle();
+      flowProjectId = flowInteg?.project_id ?? null;
+    }
+
+    // Fallback: if flow has no integration, try to get project from the conversation itself
+    if (!flowProjectId && conversation_id) {
+      const { data: convInteg } = await supabase
+        .from("conversations")
+        .select("integration:integrations!conversations_integration_id_fkey(project_id)")
+        .eq("id", conversation_id)
+        .maybeSingle();
+      flowProjectId = (convInteg as any)?.integration?.project_id ?? null;
+    }
+
+    // Pre-fetch all eligible agents for this project (active, non-admin, in project)
+    // This is done ONCE and reused by delegate + smart_router nodes
+    const validAgentSet = new Set<string>();
+    const agentLastSeen = new Map<string, string>(); // userId → last_seen_at ISO
+
+    {
+      // 1. Get all active profiles in this company
+      const { data: activeProfiles } = await supabase
+        .from("profiles")
+        .select("id, last_seen_at")
+        .eq("company_id", company_id)
+        .eq("is_active", true);
+      const allActiveIds = (activeProfiles ?? []).map((p: any) => p.id);
+
+      if (allActiveIds.length > 0) {
+        // 2. Get admin user IDs to exclude (single query)
+        const { data: adminRows } = await supabase
+          .from("user_roles")
+          .select("user_id")
+          .in("user_id", allActiveIds)
+          .eq("role", "admin");
+        const adminSet = new Set((adminRows ?? []).map((r: any) => r.user_id));
+
+        // 3. Get project members — ALWAYS when project is known
+        let projectMemberSet: Set<string> | null = null;
+        if (flowProjectId) {
+          const { data: projectMembers } = await supabase
+            .from("user_projects")
+            .select("user_id")
+            .eq("project_id", flowProjectId)
+            .eq("active", true);
+          projectMemberSet = new Set((projectMembers ?? []).map((m: any) => m.user_id));
+        }
+
+        // Build the valid set: active + not admin + in project (mandatory if known)
+        for (const profile of (activeProfiles ?? [])) {
+          const uid = profile.id;
+          if (adminSet.has(uid)) continue;
+          if (projectMemberSet && !projectMemberSet.has(uid)) continue;
+          validAgentSet.add(uid);
+          if (profile.last_seen_at) agentLastSeen.set(uid, profile.last_seen_at);
+        }
+      }
+    }
+
+    console.log(`[chatbot-process] flow=${flow.id} project=${flowProjectId} validAgents=${validAgentSet.size} integrations=${JSON.stringify(flowIntegrationIds)}`);
+
+    // Fast in-memory check — O(1) per candidate instead of 3 DB queries
+    const isValidAgent = (userId: string): boolean => {
+      if (!userId) return false;
+      return validAgentSet.has(userId);
+    };
+
+    // Pick an online agent from a list of valid candidates
+    const pickOnlineFirst = (candidates: string[]): string | null => {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const online = candidates.filter(uid => {
+        const seen = agentLastSeen.get(uid);
+        return seen && seen > fiveMinAgo;
+      });
+      if (online.length > 0) return online[Math.floor(Math.random() * online.length)];
+      return candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : null;
+    };
 
     // Get all nodes ordered by position
     const { data: nodes } = await supabase
@@ -181,8 +344,23 @@ serve(async (req) => {
         // ── New node types ───────────────────────────────────────────────────
 
         case "apply_tag": {
+          // Frontend saves tag_ids as array of UUIDs
+          const tagIds: string[] = config.tag_ids || [];
+          // Legacy: also support config.tag (name-based lookup)
           const tagName: string = config.tag || "";
-          if (tagName && contact_id) {
+
+          if (tagIds.length > 0 && contact_id) {
+            for (const tagId of tagIds) {
+              await supabase
+                .from("contact_tags")
+                .upsert(
+                  { contact_id, tag_id: tagId, company_id },
+                  { onConflict: "contact_id,tag_id" },
+                );
+            }
+            console.log(`[chatbot-apply_tag] applied ${tagIds.length} tags to contact ${contact_id}`);
+          } else if (tagName && contact_id) {
+            // Legacy fallback: lookup by name
             const { data: tag } = await supabase
               .from("tags")
               .select("id")
@@ -196,7 +374,10 @@ serve(async (req) => {
                   { contact_id, tag_id: tag.id, company_id },
                   { onConflict: "contact_id,tag_id" },
                 );
+              console.log(`[chatbot-apply_tag] applied tag "${tagName}" (${tag.id}) to contact ${contact_id}`);
             }
+          } else {
+            console.log(`[chatbot-apply_tag] no tags to apply (tag_ids=${JSON.stringify(tagIds)}, tag="${tagName}", contact=${contact_id})`);
           }
           nextNode = getNextNode(nodes, nextNode.position);
           break;
@@ -212,19 +393,71 @@ serve(async (req) => {
                 { contact_id, funnel_id: funnelId, stage_id: stageId, company_id },
                 { onConflict: "contact_id,funnel_id" },
               );
+            console.log(`[chatbot-move_to_funnel] moved contact ${contact_id} to funnel=${funnelId} stage=${stageId}`);
+          } else {
+            console.log(`[chatbot-move_to_funnel] skipped — funnel_id="${funnelId}" stage_id="${stageId}" contact=${contact_id}`);
           }
           nextNode = getNextNode(nodes, nextNode.position);
           break;
         }
 
         case "delegate": {
-          const userId: string = config.user_id || "";
-          if (userId) {
-            await supabase
-              .from("conversations")
-              .update({ assigned_user_id: userId })
-              .eq("id", conversation_id);
+          // Frontend saves user_ids (array) and department_ids (array)
+          // PRIORITY: user_ids first — department is secondary context only
+          const userIds: string[] = config.user_ids || [];
+          const deptIds: string[] = config.department_ids || [];
+          const legacyUserId: string = config.user_id || "";
+          const preferOnline: boolean = config.prefer_online || false;
+
+          // Build candidate list — user_ids have absolute priority
+          let candidates: string[] = [...userIds];
+          if (legacyUserId && !candidates.includes(legacyUserId)) {
+            candidates.push(legacyUserId);
           }
+
+          let validCandidates: string[];
+
+          if (candidates.length > 0) {
+            // Explicit user_ids: validate active + in project (isValidAgent checks both)
+            validCandidates = candidates.filter(isValidAgent);
+            console.log(`[chatbot-delegate] user_ids=${candidates.length} valid=${validCandidates.length} (project=${flowProjectId})`);
+          } else if (deptIds.length > 0) {
+            // Department fallback (only when NO user_ids configured)
+            const { data: deptMembers } = await supabase
+              .from("profile_departments")
+              .select("profile_id")
+              .in("department_id", deptIds)
+              .in("role_in_department", ["supervisor", "agent"]);
+            candidates = (deptMembers ?? []).map((m: any) => m.profile_id);
+            // isValidAgent checks: active + not admin + in project
+            validCandidates = candidates.filter(isValidAgent);
+            console.log(`[chatbot-delegate] dept members=${candidates.length} valid=${validCandidates.length} (project=${flowProjectId})`);
+          } else {
+            validCandidates = [];
+          }
+
+          // Pick agent: prefer online if configured
+          const convUpdate: Record<string, any> = {};
+          if (validCandidates.length > 0) {
+            const chosen = preferOnline
+              ? pickOnlineFirst(validCandidates)
+              : validCandidates[Math.floor(Math.random() * validCandidates.length)];
+            if (chosen) {
+              convUpdate.assigned_user_id = chosen;
+              console.log(`[chatbot-delegate] → ${chosen} (project=${flowProjectId})`);
+            }
+          } else {
+            // No valid candidates → leave unassigned (will appear in "não delegado")
+            console.warn(`[chatbot-delegate] 0 valid candidates from ${candidates.length} — conversation stays unassigned (project=${flowProjectId})`);
+          }
+
+          // Department is context only — set it but it does NOT drive agent selection
+          if (deptIds.length > 0) convUpdate.department_id = deptIds[0];
+
+          if (Object.keys(convUpdate).length > 0) {
+            await supabase.from("conversations").update(convUpdate).eq("id", conversation_id);
+          }
+
           nextNode = getNextNode(nodes, nextNode.position);
           break;
         }
@@ -258,25 +491,31 @@ serve(async (req) => {
           const webhookUrl: string = config.url || "";
           const webhookMethod: string = (config.method || "POST").toUpperCase();
           if (webhookUrl) {
-            try {
-              let extraHeaders: Record<string, string> = {};
-              if (config.headers) {
-                try { extraHeaders = JSON.parse(config.headers); } catch { /* ignore */ }
+            // Validate URL safety (SSRF prevention)
+            const urlCheck = isWebhookUrlSafe(webhookUrl);
+            if (!urlCheck.safe) {
+              console.warn(`Webhook node blocked: ${urlCheck.reason} — URL: ${webhookUrl}`);
+            } else {
+              try {
+                let extraHeaders: Record<string, string> = {};
+                if (config.headers) {
+                  try { extraHeaders = JSON.parse(config.headers); } catch { /* ignore */ }
+                }
+                await fetch(webhookUrl, {
+                  method: webhookMethod,
+                  headers: { "Content-Type": "application/json", ...extraHeaders },
+                  body: webhookMethod !== "GET"
+                    ? JSON.stringify({
+                        conversation_id,
+                        contact_id,
+                        message: message_body,
+                        company_id,
+                      })
+                    : undefined,
+                });
+              } catch (e) {
+                console.warn("Webhook node call failed:", e);
               }
-              await fetch(webhookUrl, {
-                method: webhookMethod,
-                headers: { "Content-Type": "application/json", ...extraHeaders },
-                body: webhookMethod !== "GET"
-                  ? JSON.stringify({
-                      conversation_id,
-                      contact_id,
-                      message: message_body,
-                      company_id,
-                    })
-                  : undefined,
-              });
-            } catch (e) {
-              console.warn("Webhook node call failed:", e);
             }
           }
           nextNode = getNextNode(nodes, nextNode.position);
@@ -360,17 +599,25 @@ serve(async (req) => {
               );
           }
 
-          // Delegate to user by weighted percentage
+          // Delegate to user by weighted percentage (in-memory filter — no DB queries)
+          // isValidAgent checks: active + not admin + in project
           const userAssignments: Array<{ user_id: string; percentage: number }> = activeRoute.delegate_assignments || [];
           if (userAssignments.length > 0) {
-            const chosenUserId = weightedRandomPick(
-              userAssignments.map((a: any) => ({ id: a.user_id, weight: a.percentage || 0 }))
-            );
-            if (chosenUserId) {
-              await supabase
-                .from("conversations")
-                .update({ assigned_user_id: chosenUserId })
-                .eq("id", conversation_id);
+            const validAssignments = userAssignments.filter(a => isValidAgent(a.user_id));
+            if (validAssignments.length > 0) {
+              const chosenUserId = weightedRandomPick(
+                validAssignments.map((a: any) => ({ id: a.user_id, weight: a.percentage || 0 }))
+              );
+              if (chosenUserId) {
+                await supabase
+                  .from("conversations")
+                  .update({ assigned_user_id: chosenUserId })
+                  .eq("id", conversation_id);
+                console.log(`[smart-router] → ${chosenUserId} (project=${flowProjectId})`);
+              }
+            } else {
+              // No valid agents → stays unassigned ("não delegado")
+              console.warn(`[smart-router] 0 valid agents from ${userAssignments.length} — stays unassigned (project=${flowProjectId})`);
             }
           }
 
@@ -419,8 +666,18 @@ serve(async (req) => {
     }
 
     // ── Send responses: insert to DB + deliver via WhatsApp ─────────────────
+    // Delay between messages to simulate human behavior and avoid WhatsApp spam detection
     const channel = conv?.channel || "whatsapp";
-    for (const responseBody of responses.filter(Boolean)) {
+    const validResponses = responses.filter(Boolean);
+    for (let i = 0; i < validResponses.length; i++) {
+      const responseBody = validResponses[i];
+
+      // Delay between multiple messages (skip for first)
+      // Random delay between 1000ms and 2500ms to simulate human behavior
+      if (i > 0) {
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+      }
+
       // Insert to DB
       await supabase.from("messages").insert({
         conversation_id,
@@ -602,6 +859,64 @@ async function sendViaWhatsApp(
       const instanceName: string = config.instance_name || "";
 
       if (!apiKey || !apiUrl || !instanceName) return;
+
+      // ── Volume tracking + humanization (shared with send-whatsapp) ──
+      // Never blocks — just adds progressive delay to look human
+      const ageDays = integration.created_at
+        ? Math.floor((Date.now() - new Date(integration.created_at).getTime()) / 86_400_000)
+        : 999;
+      const isNewNumber = ageDays <= 7;
+
+      // Log + check volume + cleanup in parallel
+      const oneMinAgo = new Date(Date.now() - 60_000).toISOString();
+      const cutoff25h = new Date(Date.now() - 25 * 3_600_000).toISOString();
+      const [, { count: recentCount }] = await Promise.all([
+        supabase.from("send_rate_log").insert({ integration_id: integration.id }),
+        supabase.from("send_rate_log").select("id", { count: "exact", head: true })
+          .eq("integration_id", integration.id).gte("sent_at", oneMinAgo),
+        supabase.from("send_rate_log").delete().lt("sent_at", cutoff25h),
+      ]);
+      const msgsLastMin = recentCount ?? 0;
+
+      // Always send typing indicator — core human behavior signal
+      const phoneDigits = phone.replace(/\D/g, "");
+      try {
+        // Try v2 format first, fallback to flat format
+        const v2Body = { number: phoneDigits, options: { delay: 1500, presence: "composing", number: phoneDigits } };
+        const presRes = await fetch(`${apiUrl}/chat/sendPresence/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify(v2Body),
+        });
+        console.log(`[chatbot] sendPresence v2 ${presRes.status}`);
+        if (!presRes.ok) {
+          const v1Body = { number: phoneDigits, delay: 1500, presence: "composing" };
+          const presRes2 = await fetch(`${apiUrl}/chat/sendPresence/${instanceName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: apiKey },
+            body: JSON.stringify(v1Body),
+          });
+          console.log(`[chatbot] sendPresence flat ${presRes2.status}`);
+        }
+      } catch (e: any) { console.warn(`[chatbot] sendPresence failed: ${e.message}`); }
+
+      // Hard-block: aligned with send-whatsapp thresholds
+      const hardMinute = ageDays <= 1 ? 2 : ageDays <= 3 ? 6 : ageDays <= 7 ? 10 : 20;
+      if (msgsLastMin >= hardMinute) {
+        console.warn(`[chatbot] HARD BLOCK: ${msgsLastMin}/${hardMinute} msgs/min (age=${ageDays}d) — waiting 60s`);
+        await new Promise(r => setTimeout(r, 60_000));
+      }
+
+      // Progressive delay: more volume or newer number = longer delay
+      const baseMsMin = isNewNumber ? 1000 : 600;
+      const baseMsMax = isNewNumber ? 2000 : 1200;
+      // Volume multiplier: each msg/min adds ~15% delay
+      const volumeMultiplier = 1 + Math.min(msgsLastMin, 15) * 0.15;
+      // Text length adds realistic "typing time" (up to 500ms for long messages)
+      const textFactor = Math.min((messageBody?.length ?? 0) / 200, 1) * 500;
+      const humanDelay = (baseMsMin + Math.random() * (baseMsMax - baseMsMin)) * volumeMultiplier + textFactor * 0.5;
+      console.log(`[chatbot] Humanize: ${Math.round(humanDelay)}ms (${msgsLastMin}/min, age=${ageDays}d, hard=${hardMinute})`);
+      await new Promise(r => setTimeout(r, humanDelay));
 
       const res = await fetch(`${apiUrl}/message/sendText/${instanceName}`, {
         method: "POST",

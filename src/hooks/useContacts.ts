@@ -23,7 +23,7 @@ export function useCreateContact() {
     mutationFn: (payload: Omit<ContactInsert, 'company_id'> & { company_id?: string }) =>
       createContact(payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'], refetchType: 'active' });
       toast.success('Contato criado com sucesso!');
     },
     onError: (err: Error) => {
@@ -38,7 +38,7 @@ export function useUpdateContact() {
     mutationFn: ({ id, ...updates }: ContactUpdate & { id: string }) =>
       updateContact(id, updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['contacts'], refetchType: 'active' });
       toast.success('Contato atualizado!');
     },
     onError: (err: Error) => {

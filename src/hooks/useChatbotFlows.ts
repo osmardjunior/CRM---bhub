@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 
 export interface ChatbotFlow {
@@ -31,19 +33,28 @@ export interface ChatbotNode {
 
 export function useChatbotFlows() {
   const { companyId } = useAuth();
+  const { projectId } = useProjectContext();
   const queryClient = useQueryClient();
 
   const flowsQuery = useQuery({
-    queryKey: ['chatbot-flows', companyId],
+    queryKey: ['chatbot-flows', companyId, projectId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('chatbot_flows')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('id, name, is_active, created_at, business_hours, department_id, project_id')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as ChatbotFlow[];
     },
     enabled: !!companyId,
+    staleTime: 30_000,
   });
 
   const createFlow = useMutation({
@@ -51,7 +62,7 @@ export function useChatbotFlows() {
       const insert = typeof payload === 'string' ? { name: payload } : payload;
       const { data, error } = await supabase
         .from('chatbot_flows')
-        .insert([insert] as any)
+        .insert([insert] as TablesInsert<'chatbot_flows'>[])
         .select()
         .single();
       if (error) throw error;
@@ -107,9 +118,10 @@ export function useChatbotNodes(flowId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('chatbot_nodes')
-        .select('*')
+        .select('id, flow_id, position, node_type, config, created_at')
         .eq('flow_id', flowId!)
-        .order('position', { ascending: true });
+        .order('position', { ascending: true })
+        .limit(500);
       if (error) throw error;
       return data as ChatbotNode[];
     },
@@ -134,7 +146,7 @@ export function useChatbotNodes(flowId: string | null) {
 
       const { data, error } = await supabase
         .from('chatbot_nodes')
-        .insert([{ flow_id, position, node_type, config, company_id: companyId }] as any)
+        .insert([{ flow_id, position, node_type, config, company_id: companyId }] as TablesInsert<'chatbot_nodes'>[])
         .select()
         .single();
       if (error) throw error;
@@ -149,7 +161,7 @@ export function useChatbotNodes(flowId: string | null) {
 
   const updateNode = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<ChatbotNode> & { id: string }) => {
-      const { error } = await supabase.from('chatbot_nodes').update(updates as any).eq('id', id);
+      const { error } = await supabase.from('chatbot_nodes').update(updates as TablesUpdate<'chatbot_nodes'>).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chatbot-nodes'] }),

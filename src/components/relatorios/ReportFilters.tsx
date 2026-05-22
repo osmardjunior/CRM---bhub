@@ -1,8 +1,12 @@
 import { useState } from 'react';
+import { format, parse } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -11,11 +15,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { X, Search, Save } from 'lucide-react';
+import { X, Search, Save, CalendarIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useTags } from '@/hooks/useTags';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useIntegrations } from '@/hooks/useIntegrations';
 import { useFunnels } from '@/contexts/FunnelContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import type { ReportFilters as Filters, ReportType } from '@/hooks/useReportBuilder';
 
 interface Props {
@@ -45,6 +53,11 @@ export default function ReportFiltersPanel({
   const { data: team } = useTeamProfiles();
   const { data: departments } = useDepartments();
   const { funnels } = useFunnels();
+  const { role } = useAuth();
+  const { projectId } = useProjectContext();
+  const { data: integrations = [] } = useIntegrations(projectId || undefined);
+  const whatsappNumbers = integrations.filter(i => i.channel === 'whatsapp');
+  const isAdmin = role === 'admin';
 
   const update = (patch: Partial<Filters>) => onChange({ ...filters, ...patch });
 
@@ -131,23 +144,45 @@ export default function ReportFiltersPanel({
         </div>
 
         {/* Status */}
-        {(reportType === 'chats') && (
+        {(reportType === 'chats' || reportType === 'messages') && (
           <div>
             <Label className="text-xs text-muted-foreground">Status de Atendimento</Label>
-            <Select value={filters.status ?? 'any'} onValueChange={(v) => update({ status: v as any })}>
+            <Select value={filters.status ?? 'any'} onValueChange={(v) => update({ status: v as Filters['status'] })}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="any">Indiferente</SelectItem>
-                <SelectItem value="open">Aberto</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
+                <SelectItem value="new">Aberto</SelectItem>
+                <SelectItem value="open">Em Atendimento</SelectItem>
+                <SelectItem value="pending">Aguardando</SelectItem>
                 <SelectItem value="closed">Fechado</SelectItem>
               </SelectContent>
             </Select>
           </div>
         )}
 
+        {/* Número / Integration */}
+        {(reportType === 'chats' || reportType === 'messages') && whatsappNumbers.length > 0 && (
+          <div>
+            <Label className="text-xs text-muted-foreground">Número (Chip)</Label>
+            <Select
+              value={filters.integrationIds?.[0] ?? 'any'}
+              onValueChange={(v) => update({ integrationIds: v === 'any' ? [] : [v] })}
+            >
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Todos os números</SelectItem>
+                {whatsappNumbers.map((ig) => (
+                  <SelectItem key={ig.id} value={ig.id}>
+                    {ig.device_name}{ig.phone_number ? ` (${ig.phone_number})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* Channel */}
-        {(reportType === 'chats') && (
+        {(reportType === 'chats' || reportType === 'messages') && (
           <div>
             <Label className="text-xs text-muted-foreground">Canal</Label>
             <Select
@@ -169,7 +204,7 @@ export default function ReportFiltersPanel({
         {(reportType === 'chats') && (
           <div>
             <Label className="text-xs text-muted-foreground">Status do Bot</Label>
-            <Select value={filters.botStatus ?? 'any'} onValueChange={(v) => update({ botStatus: v as any })}>
+            <Select value={filters.botStatus ?? 'any'} onValueChange={(v) => update({ botStatus: v as Filters['botStatus'] })}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="any">Indiferente</SelectItem>
@@ -180,25 +215,27 @@ export default function ReportFiltersPanel({
           </div>
         )}
 
-        {/* Assigned user */}
-        <div>
-          <Label className="text-xs text-muted-foreground">Delegado ao Usuário</Label>
-          <Select
-            value={filters.assignedUserIds?.[0] ?? 'any'}
-            onValueChange={(v) => update({ assignedUserIds: v === 'any' ? [] : [v] })}
-          >
-            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="any">Todos</SelectItem>
-              {(team ?? []).map((m) => (
-                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Assigned user — admin only (agents see only their own data) */}
+        {isAdmin && (
+          <div>
+            <Label className="text-xs text-muted-foreground">Delegado ao Usuário</Label>
+            <Select
+              value={filters.assignedUserIds?.[0] ?? 'any'}
+              onValueChange={(v) => update({ assignedUserIds: v === 'any' ? [] : [v] })}
+            >
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Todos</SelectItem>
+                {(team ?? []).map((m) => (
+                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        {/* Department — only for chats */}
-        {reportType === 'chats' && (
+        {/* Department — admin only, chats report */}
+        {isAdmin && reportType === 'chats' && (
           <div>
             <Label className="text-xs text-muted-foreground">Departamento</Label>
             <Select
@@ -252,27 +289,94 @@ export default function ReportFiltersPanel({
                 </Select>
               </div>
             )}
+
+            {/* Excluir Funil */}
+            <div>
+              <Label className="text-xs text-muted-foreground">Excluir Funil</Label>
+              <Select
+                value={filters.excludeFunnelId ?? 'any'}
+                onValueChange={(v) => update({ excludeFunnelId: v === 'any' ? undefined : v, excludeStageId: undefined })}
+              >
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Nenhum</SelectItem>
+                  {funnels.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filters.excludeFunnelId && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Excluir Etapa</Label>
+                <Select
+                  value={filters.excludeStageId ?? 'any'}
+                  onValueChange={(v) => update({ excludeStageId: v === 'any' ? undefined : v })}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Todas as etapas</SelectItem>
+                    {(funnels.find((f) => f.id === filters.excludeFunnelId)?.stages ?? []).map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </>
         )}
 
-        {/* Date filters */}
+        {/* Date filters with calendar */}
         <div>
           <Label className="text-xs text-muted-foreground">Cadastrado a partir de</Label>
-          <Input
-            type="date"
-            value={filters.registeredFrom ?? ''}
-            onChange={(e) => update({ registeredFrom: e.target.value || undefined })}
-            className="mt-1"
-          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn('w-full mt-1 justify-start text-left font-normal', !filters.registeredFrom && 'text-muted-foreground')}
+              >
+                <CalendarIcon size={14} className="mr-2" />
+                {filters.registeredFrom
+                  ? format(parse(filters.registeredFrom, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy', { locale: ptBR })
+                  : 'Selecionar data'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={filters.registeredFrom ? parse(filters.registeredFrom, 'yyyy-MM-dd', new Date()) : undefined}
+                onSelect={(d) => update({ registeredFrom: d ? format(d, 'yyyy-MM-dd') : undefined })}
+                initialFocus
+                locale={ptBR}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
         <div>
           <Label className="text-xs text-muted-foreground">Cadastrado até</Label>
-          <Input
-            type="date"
-            value={filters.registeredTo ?? ''}
-            onChange={(e) => update({ registeredTo: e.target.value || undefined })}
-            className="mt-1"
-          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn('w-full mt-1 justify-start text-left font-normal', !filters.registeredTo && 'text-muted-foreground')}
+              >
+                <CalendarIcon size={14} className="mr-2" />
+                {filters.registeredTo
+                  ? format(parse(filters.registeredTo, 'yyyy-MM-dd', new Date()), 'dd/MM/yyyy', { locale: ptBR })
+                  : 'Selecionar data'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={filters.registeredTo ? parse(filters.registeredTo, 'yyyy-MM-dd', new Date()) : undefined}
+                onSelect={(d) => update({ registeredTo: d ? format(d, 'yyyy-MM-dd') : undefined })}
+                initialFocus
+                locale={ptBR}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div>

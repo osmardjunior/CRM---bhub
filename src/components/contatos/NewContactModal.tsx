@@ -63,7 +63,7 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
     // Insert into normalized contact_tags table
     if (selectedTagIds.length > 0 && newContact?.id) {
       await supabase.from('contact_tags').insert(
-        selectedTagIds.map(tagId => ({ contact_id: newContact.id, tag_id: tagId })) as any
+        selectedTagIds.map(tagId => ({ contact_id: newContact.id, tag_id: tagId }))
       );
     }
     handleClose();

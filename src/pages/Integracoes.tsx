@@ -1,12 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Plus, Copy, Check, Wifi, WifiOff, Shield, Globe, Trash2, Pencil, Phone, Server, QrCode, RefreshCw, Layers, FolderOpen, Users } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Smartphone, Plus, Copy, Check, Shield, Globe, RefreshCw, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,185 +13,13 @@ import { useProjects } from '@/hooks/useProjects';
 import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { getAreaUserIds } from '@/lib/areaFilter';
 import PageHeader from '@/components/shared/PageHeader';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import EvolutionQRModal from '@/components/integracoes/EvolutionQRModal';
+import DeviceCard, { formatPhone, maskSecret, WEBHOOK_URL } from '@/components/integracoes/DeviceCard';
+import AddDeviceDialog, { type AddDeviceFormData } from '@/components/integracoes/AddDeviceDialog';
+import EditDeviceDialog, { type EditDeviceResult } from '@/components/integracoes/EditDeviceDialog';
 
-const PROVIDERS = [
-  { value: 'meta', label: 'Meta Cloud API' },
-  { value: 'twilio', label: 'Twilio' },
-  { value: '360dialog', label: '360dialog' },
-  { value: 'gupshup', label: 'Gupshup' },
-  { value: 'evolution', label: 'Evolution API' },
-];
-
-const WEBHOOK_URL = `https://loamacrszlgxhaqvnkzw.supabase.co/functions/v1/incoming-message`;
-
-function providerLabel(p: string) {
-  return PROVIDERS.find(pr => pr.value === p)?.label ?? p;
-}
-
-function formatPhone(phone: string | null) {
-  if (!phone) return '—';
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 13) {
-    return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
-  }
-  if (digits.length >= 10) {
-    return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4)}`;
-  }
-  return phone;
-}
-
-function maskSecret(s?: string) {
-  if (!s || s.length < 8) return '••••••••';
-  return s.slice(0, 4) + '••••' + s.slice(-4);
-}
-
-// ── Provider-specific config fields ──────────────────
-function ProviderFields({ provider, config, onChange }: {
-  provider: string;
-  config: Record<string, string>;
-  onChange: (c: Record<string, string>) => void;
-}) {
-  const set = (k: string, v: string) => onChange({ ...config, [k]: v });
-
-  if (provider === 'meta') return (
-    <div className="space-y-3">
-      <div><Label className="text-xs">Access Token</Label><Input type="password" className="mt-1" value={config.access_token ?? ''} onChange={e => set('access_token', e.target.value)} placeholder="EAABx..." /></div>
-      <div><Label className="text-xs">Phone Number ID</Label><Input className="mt-1" value={config.phone_number_id ?? ''} onChange={e => set('phone_number_id', e.target.value)} placeholder="1234567890" /></div>
-    </div>
-  );
-  if (provider === 'twilio') return (
-    <div className="space-y-3">
-      <div><Label className="text-xs">Account SID</Label><Input className="mt-1" value={config.account_sid ?? ''} onChange={e => set('account_sid', e.target.value)} placeholder="ACxxx" /></div>
-      <div><Label className="text-xs">Auth Token</Label><Input type="password" className="mt-1" value={config.auth_token ?? ''} onChange={e => set('auth_token', e.target.value)} /></div>
-      <div><Label className="text-xs">From Number</Label><Input className="mt-1" value={config.from_number ?? ''} onChange={e => set('from_number', e.target.value)} placeholder="+5511999999999" /></div>
-    </div>
-  );
-  if (provider === '360dialog') return (
-    <div><Label className="text-xs">API Key</Label><Input type="password" className="mt-1" value={config.api_key ?? ''} onChange={e => set('api_key', e.target.value)} /></div>
-  );
-  if (provider === 'gupshup') return (
-    <div className="space-y-3">
-      <div><Label className="text-xs">API Key</Label><Input type="password" className="mt-1" value={config.api_key ?? ''} onChange={e => set('api_key', e.target.value)} /></div>
-      <div><Label className="text-xs">App Name</Label><Input className="mt-1" value={config.app_name ?? ''} onChange={e => set('app_name', e.target.value)} /></div>
-    </div>
-  );
-  if (provider === 'evolution') return (
-    <div className="space-y-3">
-      <div><Label className="text-xs">URL da API</Label><Input className="mt-1" value={config.api_url ?? ''} onChange={e => set('api_url', e.target.value)} placeholder="https://sua-evolution-api.com" /><p className="text-[11px] text-muted-foreground mt-1">URL onde a Evolution API está rodando (Docker local, Railway, etc.)</p></div>
-      <div><Label className="text-xs">API Key (Global)</Label><Input type="password" className="mt-1" value={config.api_key ?? ''} onChange={e => set('api_key', e.target.value)} placeholder="Chave definida em AUTHENTICATION_API_KEY" /></div>
-      <div><Label className="text-xs">Nome da instância</Label><Input className="mt-1" value={config.instance_name ?? ''} onChange={e => set('instance_name', e.target.value)} placeholder="Ex: minha-empresa" /><p className="text-[11px] text-muted-foreground mt-1">Nome que será usado para criar a instância na Evolution API</p></div>
-    </div>
-  );
-  return null;
-}
-
-// ── Device Card ──────────────────────────────────────
-function DeviceCard({ device, isAdmin, departments, onDisconnect, onDelete, onEdit, onConnect, onSyncPhone, liveStatus }: {
-  device: Integration;
-  isAdmin: boolean;
-  departments: { id: string; name: string }[];
-  onDisconnect: (id: string) => void;
-  onDelete: (id: string) => void;
-  onEdit: (device: Integration) => void;
-  onConnect: (device: Integration) => void;
-  onSyncPhone: (device: Integration) => void;
-  liveStatus?: 'checking' | 'connected' | 'disconnected';
-}) {
-  // Use liveStatus for Evolution devices if available, fall back to DB status
-  const connected = liveStatus ? liveStatus === 'connected' : device.status === 'connected';
-  const isChecking = liveStatus === 'checking';
-
-  return (
-    <div className="group rounded-xl border border-border bg-card card-shadow p-5 space-y-4 transition-shadow hover:shadow-md">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`flex h-11 w-11 items-center justify-center rounded-xl shrink-0 ${connected ? 'bg-success/10' : 'bg-muted'}`}>
-            <Smartphone size={20} className={connected ? 'text-success' : 'text-muted-foreground'} />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground truncate">{device.device_name || 'Aparelho sem nome'}</h3>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Phone size={10} />
-              <span>{formatPhone(device.phone_number)}</span>
-            </div>
-          </div>
-        </div>
-        {isChecking ? (
-          <Badge variant="outline" className="text-[11px] shrink-0 bg-amber-500/15 text-amber-600 border-amber-500/20 animate-pulse">
-            <RefreshCw size={10} className="mr-1 animate-spin" /> Verificando...
-          </Badge>
-        ) : (
-          <Badge variant="outline" className={`text-[11px] shrink-0 ${connected ? 'bg-success/15 text-success border-success/20' : 'bg-destructive/15 text-destructive border-destructive/20'}`}>
-            {connected ? <><Wifi size={10} className="mr-1" /> Conectado</> : <><WifiOff size={10} className="mr-1" /> Desconectado</>}
-          </Badge>
-        )}
-      </div>
-
-      {/* Info rows */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Server size={12} />
-            <span>Provedor</span>
-          </div>
-          <span className="text-xs font-medium text-foreground">{providerLabel(device.provider)}</span>
-        </div>
-        <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Shield size={12} />
-            <span>Credenciais</span>
-          </div>
-          <code className="text-[11px] text-muted-foreground">{maskSecret(JSON.stringify(device.config))}</code>
-        </div>
-        {departments.length > 0 && (
-          <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Layers size={12} />
-              <span>Departamento</span>
-            </div>
-            <span className="text-xs font-medium text-foreground">
-              {device.department_id ? (departments.find(d => d.id === device.department_id)?.name ?? '—') : <span className="text-muted-foreground italic">Nenhum</span>}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      {isAdmin && (
-        <div className="flex items-center gap-2 pt-1 border-t border-border">
-          <Button variant="outline" size="sm" className="text-xs gap-1.5 flex-1" onClick={() => onEdit(device)}>
-            <Pencil size={12} /> Editar
-          </Button>
-          {device.provider === 'evolution' && !connected && (
-            <Button variant="outline" size="sm" className="text-xs gap-1.5 text-primary hover:text-primary" onClick={() => onConnect(device)}>
-              <QrCode size={12} /> Conectar
-            </Button>
-          )}
-          {device.provider === 'evolution' && connected && !device.phone_number && (
-            <Button variant="outline" size="sm" className="text-xs gap-1.5 text-primary hover:text-primary" onClick={() => onSyncPhone(device)}>
-              <RefreshCw size={12} /> Sincronizar nº
-            </Button>
-          )}
-          {connected && (
-            <Button variant="outline" size="sm" className="text-xs text-destructive hover:text-destructive" onClick={() => onDisconnect(device.id)}>
-              Desativar
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0" onClick={() => onDelete(device.id)}>
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main Page ────────────────────────────────────────
 export default function IntegracoesPage() {
   const navigate = useNavigate();
   const permissions = usePermissions();
@@ -213,7 +38,6 @@ export default function IntegracoesPage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [step, setStep] = useState(1);
 
   // Evolution QR modal state
   const [qrModal, setQrModal] = useState<{
@@ -224,21 +48,6 @@ export default function IntegracoesPage() {
     instanceName: string;
   }>({ open: false, integrationId: null, apiUrl: '', apiKey: '', instanceName: '' });
 
-  // form state
-  const [deviceName, setDeviceName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [provider, setProvider] = useState('');
-  const [config, setConfig] = useState<Record<string, string>>({});
-  const [deptId, setDeptId] = useState('');
-
-  // edit form state
-  const [editName, setEditName] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editConfig, setEditConfig] = useState<Record<string, string>>({});
-  const [editDeptId, setEditDeptId] = useState<string>('');
-  // Agent assignment for edit modal
-  type AgentEntry = { id: string; name: string; originalAllowed: string[] | null; checked: boolean };
-  const [editAgentsList, setEditAgentsList] = useState<AgentEntry[]>([]);
   // map deviceId → selectedProjectId for "move to folder" action
   const [moveProjectMap, setMoveProjectMap] = useState<Record<string, string>>({});
 
@@ -247,9 +56,8 @@ export default function IntegracoesPage() {
 
   // Evolution credentials from existing integration (auto-fill for quick add)
   const existingEvolution = whatsappDevices.find(d => d.provider === 'evolution' && d.config?.api_url && d.config?.api_key);
-  const quickAddMode = !!existingEvolution;
 
-  // Live status for Evolution API devices (separate from DB status)
+  // Live status for Evolution API devices
   const [liveStatus, setLiveStatus] = useState<Record<string, 'checking' | 'connected' | 'disconnected'>>({});
 
   const checkAllStatuses = useCallback(async () => {
@@ -282,185 +90,49 @@ export default function IntegracoesPage() {
     );
   }, [whatsappDevices]);
 
-  // Check on load and every 60s
   useEffect(() => {
     if (!isLoading) checkAllStatuses();
     const timer = setInterval(checkAllStatuses, 60_000);
     return () => clearInterval(timer);
   }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const resetForm = () => {
-    setDeviceName('');
-    setPhoneNumber('');
-    setProvider('');
-    setConfig({});
-    setDeptId('');
-  };
-
-  // Generate a URL-safe instance name from the device name + short suffix
-  const toInstanceName = (name: string) => {
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const suffix = Math.random().toString(36).slice(2, 6);
-    return `${slug}-${suffix}`;
-  };
-
-  const handleQuickAdd = () => {
-    if (!deviceName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
-    if (!existingEvolution) return;
-    const instanceName = toInstanceName(deviceName);
-    const cfg = {
-      api_url: existingEvolution.config.api_url as string,
-      api_key: existingEvolution.config.api_key as string,
-      instance_name: instanceName,
-    };
+  const handleAddDevice = (data: AddDeviceFormData) => {
     addDevice.mutate({
       channel: 'whatsapp',
-      provider: 'evolution',
-      config: cfg,
-      phone_number: '',
-      device_name: deviceName.trim(),
-      department_id: deptId || null,
+      provider: data.provider,
+      config: data.config,
+      phone_number: data.phoneNumber,
+      device_name: data.deviceName,
+      department_id: data.departmentId,
     }, {
       onSuccess: async () => {
         setAddOpen(false);
-        resetForm();
-        // Small delay for DB insert to propagate
-        await new Promise(r => setTimeout(r, 500));
-        const { data } = await supabase
-          .from('integrations')
-          .select('id')
-          .eq('device_name', deviceName.trim())
-          .eq('provider', 'evolution')
-          .order('created_at', { ascending: false })
-          .limit(1);
-        const newId = data?.[0]?.id || null;
-        setQrModal({ open: true, integrationId: newId, apiUrl: cfg.api_url, apiKey: cfg.api_key, instanceName });
-      },
-    });
-  };
-
-  const openEdit = async (device: Integration) => {
-    setEditDevice(device);
-    setEditName(device.device_name || '');
-    setEditPhone(device.phone_number || '');
-    setEditDeptId(device.department_id ?? '__none__');
-    setEditConfig(device.config as Record<string, string> ?? {});
-    setEditAgentsList([]); // reset while loading
-    if (companyId) {
-      const areaUserIds = await getAreaUserIds();
-      let q = supabase
-        .from('profiles')
-        .select('id, name, allowed_integration_ids')
-        .eq('company_id', companyId)
-        .eq('is_active', true)
-        .order('name');
-      if (areaUserIds) q = q.in('id', areaUserIds);
-      const { data: profiles } = await q;
-      if (profiles) {
-        const deviceId = device.id;
-        setEditAgentsList(profiles.map((p: any) => ({
-          id: p.id,
-          name: p.name || p.id,
-          originalAllowed: p.allowed_integration_ids ?? null,
-          checked: p.allowed_integration_ids === null || (p.allowed_integration_ids ?? []).includes(deviceId),
-        })));
-      }
-    }
-  };
-
-  const handleAdd = () => {
-    const needsPhone = provider !== 'evolution';
-    if (!deviceName.trim() || !provider || (needsPhone && !phoneNumber.trim())) {
-      toast.error(needsPhone ? 'Preencha nome, número e provedor' : 'Preencha nome e provedor');
-      return;
-    }
-    const isEvolution = provider === 'evolution';
-    if (isEvolution && (!config.api_url?.trim() || !config.api_key?.trim() || !config.instance_name?.trim())) {
-      toast.error('Preencha a URL da API, API Key e Nome da instância');
-      return;
-    }
-    const savedConfig = { ...config };
-    const savedInstanceName = config.instance_name || deviceName.trim();
-    addDevice.mutate({
-      channel: 'whatsapp',
-      provider,
-      config,
-      phone_number: needsPhone ? phoneNumber : '',
-      device_name: deviceName,
-      department_id: deptId || null,
-    }, {
-      onSuccess: (_, variables) => {
-        setAddOpen(false);
-        resetForm();
-        // For Evolution API, open QR modal to pair
-        if (isEvolution && savedConfig.api_url && savedConfig.api_key) {
-          // Small delay to let the DB insert complete and get the ID
-          setTimeout(async () => {
-            // Find the newly created integration
-            const { data } = await supabase
-              .from('integrations')
-              .select('id')
-              .eq('device_name', variables.device_name)
-              .eq('provider', 'evolution')
-              .order('created_at', { ascending: false })
-              .limit(1);
-            const newId = data?.[0]?.id || null;
-            setQrModal({
-              open: true,
-              integrationId: newId,
-              apiUrl: savedConfig.api_url,
-              apiKey: savedConfig.api_key,
-              instanceName: savedInstanceName,
-            });
-          }, 500);
+        if (data.provider === 'evolution' && data.config.api_url && data.config.api_key) {
+          await new Promise(r => setTimeout(r, 500));
+          const { data: newData } = await supabase
+            .from('integrations')
+            .select('id')
+            .eq('device_name', data.deviceName)
+            .eq('provider', 'evolution')
+            .order('created_at', { ascending: false })
+            .limit(1);
+          const newId = newData?.[0]?.id || null;
+          setQrModal({
+            open: true,
+            integrationId: newId,
+            apiUrl: data.config.api_url,
+            apiKey: data.config.api_key,
+            instanceName: data.config.instance_name || data.deviceName,
+          });
         }
       },
     });
   };
 
-  const handleEdit = async () => {
-    if (!editDevice) return;
-    const needsPhone = editDevice.provider !== 'evolution';
-    if (!editName.trim() || (needsPhone && !editPhone.trim())) {
-      toast.error(needsPhone ? 'Preencha nome e número' : 'Preencha o nome');
-      return;
-    }
-    // Save agent assignment changes
-    const deviceId = editDevice.id;
-    const allIntegrationIds = whatsappDevices.map(d => d.id);
-    const agentUpdates: Promise<any>[] = [];
-    for (const agent of editAgentsList) {
-      const wasChecked = agent.originalAllowed === null || agent.originalAllowed.includes(deviceId);
-      const isNowChecked = agent.checked;
-      if (wasChecked === isNowChecked) continue;
-      let newAllowed: string[] | null;
-      if (isNowChecked) {
-        // unchecked → checked: add this device to list (if had a list)
-        if (agent.originalAllowed === null) continue; // already gets all
-        newAllowed = [...agent.originalAllowed, deviceId];
-      } else {
-        // checked → unchecked: remove this device
-        if (agent.originalAllowed === null) {
-          // was null (all) → now exclude this device
-          newAllowed = allIntegrationIds.filter(id => id !== deviceId);
-        } else {
-          newAllowed = agent.originalAllowed.filter(id => id !== deviceId);
-        }
-      }
-      agentUpdates.push(
-        supabase.from('profiles').update({ allowed_integration_ids: newAllowed }).eq('id', agent.id)
-      );
-    }
-    if (agentUpdates.length > 0) await Promise.all(agentUpdates);
-
+  const handleEditDevice = (result: EditDeviceResult) => {
     updateDevice.mutate({
-      id: editDevice.id,
-      updates: {
-        device_name: editName,
-        phone_number: editPhone,
-        config: editConfig,
-        department_id: editDeptId === '__none__' ? null : editDeptId || null,
-      },
+      id: result.id,
+      updates: result.updates,
     }, {
       onSuccess: () => setEditDevice(null),
     });
@@ -521,7 +193,7 @@ export default function IntegracoesPage() {
         }
       />
 
-      {/* ── Folders CTA ──────────────────────────────── */}
+      {/* Folders CTA */}
       <div className="rounded-xl border border-dashed border-primary/30 bg-primary/5 p-8 text-center space-y-3">
         <FolderOpen size={32} className="mx-auto text-primary/60" />
         <div>
@@ -533,7 +205,7 @@ export default function IntegracoesPage() {
         </Button>
       </div>
 
-      {/* ── Números sem pasta ───────────────────────── */}
+      {/* Números sem pasta */}
       {orphanedDevices.length > 0 && (
         <div className="rounded-xl border border-warning/40 bg-warning/5 overflow-hidden">
           <div className="px-4 py-3 border-b border-warning/20 flex items-center gap-2">
@@ -599,7 +271,7 @@ export default function IntegracoesPage() {
         </div>
       )}
 
-      {/* ── API Info Section ────────────────────────── */}
+      {/* API Info Section */}
       <div className="rounded-xl border border-border bg-card card-shadow p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Globe size={16} className="text-primary" />
@@ -645,279 +317,32 @@ export default function IntegracoesPage() {
         )}
       </div>
 
-      {/* ── Add Device Modal ────────────────────────── */}
-      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { resetForm(); setStep(1); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Adicionar Número</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-1">
-              {quickAddMode ? 'Digite o nome do número e escaneie o QR Code para conectar.' : 'Siga os passos abaixo para conectar um número de WhatsApp'}
-            </p>
-          </DialogHeader>
+      {/* Add Device Modal */}
+      <AddDeviceDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        departments={departments}
+        existingEvolutionConfig={
+          existingEvolution
+            ? { api_url: existingEvolution.config.api_url as string, api_key: existingEvolution.config.api_key as string }
+            : undefined
+        }
+        isPending={addDevice.isPending}
+        onSubmit={handleAddDevice}
+      />
 
-          {/* ── Quick Add (Evolution credentials already exist) ── */}
-          {quickAddMode ? (
-            <div className="space-y-4 py-2">
-              <div>
-                <Label className="text-xs">Nome do aparelho</Label>
-                <Input
-                  className="mt-1"
-                  value={deviceName}
-                  onChange={e => setDeviceName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !addDevice.isPending) handleQuickAdd(); }}
-                  placeholder="Ex: Vendas - Principal"
-                  autoFocus
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na sua equipe</p>
-              </div>
-              {departments.length > 0 && (
-                <div>
-                  <Label className="text-xs">Departamento</Label>
-                  <Select value={deptId} onValueChange={setDeptId}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Selecione o departamento (opcional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Nenhum</SelectItem>
-                      {departments.map(d => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
-                <p className="text-xs text-primary font-medium flex items-center gap-1.5">
-                  <QrCode size={12} /> Número detectado pelo QR Code
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Após clicar em Adicionar, escaneie o QR Code com o WhatsApp para conectar.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* ── Full Stepper (no existing Evolution credentials) ── */}
-              <div className="flex items-center gap-2 py-2">
-                {[1, 2, 3].map(s => (
-                  <div key={s} className="flex items-center gap-2 flex-1">
-                    <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold shrink-0 transition-colors ${step >= s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                      {step > s ? <Check size={14} /> : s}
-                    </div>
-                    <span className={`text-xs hidden sm:inline ${step >= s ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                      {s === 1 ? 'Provedor' : s === 2 ? 'Dados' : 'Credenciais'}
-                    </span>
-                    {s < 3 && <div className={`h-px flex-1 ${step > s ? 'bg-primary' : 'bg-border'}`} />}
-                  </div>
-                ))}
-              </div>
+      {/* Edit Device Modal */}
+      <EditDeviceDialog
+        device={editDevice}
+        onClose={() => setEditDevice(null)}
+        departments={departments}
+        companyId={companyId}
+        whatsappDeviceIds={whatsappDevices.map(d => d.id)}
+        isPending={updateDevice.isPending}
+        onSubmit={handleEditDevice}
+      />
 
-              {step === 1 && (
-                <div className="space-y-4 py-2">
-                  <div className="rounded-lg bg-secondary/50 p-3 space-y-2">
-                    <p className="text-xs font-semibold text-foreground">📋 Como conectar?</p>
-                    <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
-                      <li>Para <strong>API oficial</strong>: escolha Meta, Twilio, 360dialog ou Gupshup e use suas credenciais</li>
-                      <li>Para <strong>QR Code</strong>: escolha <strong>Evolution API</strong> (requer servidor próprio via Docker)</li>
-                      <li>Obtenha as credenciais de API (token, chave, URL, etc.)</li>
-                      <li>Cole as credenciais aqui no passo 3</li>
-                    </ol>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Selecione o provedor</Label>
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      {PROVIDERS.map(p => (
-                        <button key={p.value} type="button"
-                          onClick={() => { setProvider(p.value); setConfig({}); }}
-                          className={`rounded-lg border p-3 text-left text-xs font-medium transition-all hover:border-primary/50 truncate ${provider === p.value ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card text-foreground'}`}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {step === 2 && (
-                <div className="space-y-4 py-2">
-                  <div>
-                    <Label className="text-xs">Nome do aparelho</Label>
-                    <Input className="mt-1" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="Ex: Vendas - Principal" />
-                    <p className="text-[11px] text-muted-foreground mt-1">Um nome para identificar este número na sua equipe</p>
-                  </div>
-                  {departments.length > 0 && (
-                    <div>
-                      <Label className="text-xs">Departamento</Label>
-                      <Select value={deptId} onValueChange={setDeptId}>
-                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o departamento (opcional)" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Nenhum</SelectItem>
-                          {departments.map(d => (<SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  {provider !== 'evolution' && (
-                    <div>
-                      <Label className="text-xs">Número de telefone</Label>
-                      <Input className="mt-1" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+5511999999999" />
-                      <p className="text-[11px] text-muted-foreground mt-1">Número com código do país (ex: +55 para Brasil)</p>
-                    </div>
-                  )}
-                  {provider === 'evolution' && (
-                    <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
-                      <p className="text-xs text-primary font-medium">Número detectado automaticamente</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Após escanear o QR Code, o número será detectado e salvo automaticamente.</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {step === 3 && (
-                <div className="space-y-4 py-2">
-                  <div className="rounded-lg bg-secondary/50 p-3">
-                    <p className="text-xs text-muted-foreground mb-1">Provedor selecionado</p>
-                    <p className="text-sm font-semibold text-foreground">{providerLabel(provider)}</p>
-                  </div>
-                  <ProviderFields provider={provider} config={config} onChange={setConfig} />
-                  <div className="rounded-lg bg-secondary/50 p-3">
-                    <p className="text-xs text-muted-foreground mb-1">Webhook URL (copie para o painel do provedor)</p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs text-foreground bg-muted rounded px-2 py-1.5 truncate">{WEBHOOK_URL}</code>
-                      <Button variant="outline" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopy(WEBHOOK_URL)}>
-                        {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          <DialogFooter className="gap-2">
-            {!quickAddMode && step > 1 && (
-              <Button variant="outline" onClick={() => setStep(s => s - 1)}>Voltar</Button>
-            )}
-            {quickAddMode ? (
-              <Button onClick={handleQuickAdd} disabled={addDevice.isPending}>
-                {addDevice.isPending ? 'Salvando...' : 'Adicionar'}
-              </Button>
-            ) : step < 3 ? (
-              <Button
-                onClick={() => {
-                  if (step === 1 && !provider) { toast.error('Selecione um provedor'); return; }
-                  if (step === 2 && !deviceName.trim()) { toast.error('Preencha o nome do aparelho'); return; }
-                  if (step === 2 && provider !== 'evolution' && !phoneNumber.trim()) { toast.error('Preencha o número de telefone'); return; }
-                  setStep(s => s + 1);
-                }}
-              >
-                Próximo
-              </Button>
-            ) : (
-              <Button onClick={handleAdd} disabled={addDevice.isPending}>
-                {addDevice.isPending ? 'Salvando...' : 'Salvar aparelho'}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Edit Device Modal ───────────────────────── */}
-      <Dialog open={!!editDevice} onOpenChange={v => { if (!v) setEditDevice(null); }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Editar Aparelho</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-1">Altere o nome, número ou credenciais deste aparelho</p>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-xs">Nome do aparelho</Label>
-              <Input className="mt-1" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Ex: Vendas - Principal" />
-            </div>
-            {editDevice?.provider !== 'evolution' && (
-              <div>
-                <Label className="text-xs">Número de telefone</Label>
-                <Input className="mt-1" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+5511999999999" />
-              </div>
-            )}
-
-            {departments.length > 0 && (
-              <div>
-                <Label className="text-xs">Departamento</Label>
-                <Select value={editDeptId} onValueChange={setEditDeptId}>
-                  <SelectTrigger className="mt-1 h-9 text-sm">
-                    <SelectValue placeholder="Nenhum departamento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Nenhum</SelectItem>
-                    {departments.map(d => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {editDevice && (
-              <>
-                <div className="rounded-lg bg-secondary/50 p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Provedor</p>
-                  <p className="text-sm font-semibold text-foreground">{providerLabel(editDevice.provider)}</p>
-                </div>
-                <ProviderFields provider={editDevice.provider} config={editConfig} onChange={setEditConfig} />
-              </>
-            )}
-
-            {/* Agent assignment section */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Users size={14} className="text-muted-foreground" />
-                <Label className="text-xs font-semibold">Agentes que atendem este número</Label>
-              </div>
-              {editAgentsList.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic pl-5">Carregando agentes...</p>
-              ) : (
-                <div className="rounded-lg border border-border divide-y divide-border max-h-48 overflow-y-auto">
-                  {editAgentsList.map(agent => (
-                    <label
-                      key={agent.id}
-                      className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-secondary/40 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded accent-primary"
-                        checked={agent.checked}
-                        onChange={() =>
-                          setEditAgentsList(prev =>
-                            prev.map(a => a.id === agent.id ? { ...a, checked: !a.checked } : a)
-                          )
-                        }
-                      />
-                      <span className="text-sm text-foreground flex-1">{agent.name}</span>
-                      {agent.originalAllowed === null && (
-                        <span className="text-[11px] text-muted-foreground">todos os números</span>
-                      )}
-                    </label>
-                  ))}
-                </div>
-              )}
-              <p className="text-[11px] text-muted-foreground pl-5">
-                Agentes marcados recebem conversas deste número. Desmarcar restringe o agente a outros números apenas.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDevice(null)}>Cancelar</Button>
-            <Button onClick={handleEdit} disabled={updateDevice.isPending}>
-              {updateDevice.isPending ? 'Salvando...' : 'Salvar alterações'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Confirm Disconnect ──────────────────────── */}
+      {/* Confirm Disconnect */}
       <ConfirmDialog
         open={!!confirmId}
         onOpenChange={() => setConfirmId(null)}
@@ -929,7 +354,7 @@ export default function IntegracoesPage() {
         }}
       />
 
-      {/* ── Confirm Delete ──────────────────────────── */}
+      {/* Confirm Delete */}
       <ConfirmDialog
         open={!!deleteId}
         onOpenChange={() => setDeleteId(null)}
@@ -941,7 +366,7 @@ export default function IntegracoesPage() {
         }}
       />
 
-      {/* ── Evolution QR Code Modal ─────────────────── */}
+      {/* Evolution QR Code Modal */}
       <EvolutionQRModal
         open={qrModal.open}
         onOpenChange={(v) => setQrModal(prev => ({ ...prev, open: v }))}

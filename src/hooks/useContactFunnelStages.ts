@@ -92,11 +92,14 @@ export function useMoveContactStage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, newStageId }: { id: string; newStageId: string }) => {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('contact_funnel_stages')
         .update({ stage_id: newStageId })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id')
+        .single();
       if (error) throw error;
+      if (!updated) throw new Error('Falha ao mover contato — possível problema de permissão');
     },
     onMutate: async ({ id, newStageId }) => {
       await qc.cancelQueries({ queryKey: ['contact-funnel-stages'] });
@@ -132,19 +135,24 @@ export function useAddContactToStage() {
       stageId: string;
     }) => {
       // Upsert: remove existing entry for this contact in this funnel, then insert
-      await supabase
+      const { error: delError } = await supabase
         .from('contact_funnel_stages')
         .delete()
         .eq('contact_id', contactId)
         .eq('funnel_id', funnelId);
+      if (delError) throw delError;
 
-      const { error } = await supabase
+      const { data: inserted, error } = await supabase
         .from('contact_funnel_stages')
-        .insert({ contact_id: contactId, funnel_id: funnelId, stage_id: stageId });
+        .insert({ contact_id: contactId, funnel_id: funnelId, stage_id: stageId })
+        .select('id')
+        .single();
       if (error) throw error;
+      if (!inserted) throw new Error('Falha ao salvar etapa — possível problema de permissão');
     },
     onSuccess: () => {
       invalidateFunnelStages(qc);
+      qc.invalidateQueries({ queryKey: ['leads-report'] });
       toast.success('Contato adicionado à etapa');
     },
     onError: (err: Error) => toast.error(err.message),

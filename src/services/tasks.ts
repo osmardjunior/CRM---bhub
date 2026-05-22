@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { ApiError } from '@/services/api';
 
 export type TaskRecord = {
@@ -57,7 +58,7 @@ export async function listTasks(companyId: string): Promise<TaskWithRelations[]>
 export async function createTask(payload: TaskInsert): Promise<TaskRecord> {
   const { data, error } = await supabase
     .from('tasks')
-    .insert(payload as any)
+    .insert(payload as TablesInsert<'tasks'>)
     .select()
     .single();
 
@@ -68,7 +69,7 @@ export async function createTask(payload: TaskInsert): Promise<TaskRecord> {
 export async function updateTask(id: string, payload: TaskUpdate): Promise<TaskRecord> {
   const { data, error } = await supabase
     .from('tasks')
-    .update(payload as any)
+    .update(payload as TablesUpdate<'tasks'>)
     .eq('id', id)
     .select()
     .single();

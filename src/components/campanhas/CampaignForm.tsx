@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,13 +8,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Save, Send, Plus, X } from 'lucide-react';
+import { ArrowLeft, Save, Send, Plus, X, Users, Loader2 } from 'lucide-react';
 import { Campaign } from '@/hooks/useCampaigns';
 import { useChatbotFlows } from '@/hooks/useChatbotFlows';
 import { useTags } from '@/hooks/useTags';
 import { useTeamProfiles } from '@/hooks/useTeamProfiles';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useFunnels } from '@/contexts/FunnelContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import CampaignFilters, { EMPTY_FILTERS } from './CampaignFilters';
 
 const ACTION_TYPES = [
@@ -57,15 +59,22 @@ function initActions(campaign?: Campaign | null): CampaignAction[] {
 export default function CampaignForm({ campaign, onSave, onCancel, saving }: Props) {
   const [name, setName] = useState(campaign?.name ?? '');
   const [description, setDescription] = useState(campaign?.description ?? '');
-  const [campaignDeptId, setCampaignDeptId] = useState((campaign as any)?.department_id ?? '');
+  const [campaignDeptId, setCampaignDeptId] = useState((campaign as Partial<Campaign> & { department_id?: string })?.department_id ?? '');
   const [actions, setActions] = useState<CampaignAction[]>(() => initActions(campaign));
   const [scheduleAt, setScheduleAt] = useState(campaign?.schedule_at ? campaign.schedule_at.slice(0, 16) : '');
   const [deadlineAt, setDeadlineAt] = useState(campaign?.deadline_at ? campaign.deadline_at.slice(0, 16) : '');
   const [skipWeekends, setSkipWeekends] = useState(campaign?.skip_weekends ?? false);
-  const [sendWindowStart, setSendWindowStart] = useState((campaign?.send_window as any)?.start ?? '');
-  const [sendWindowEnd, setSendWindowEnd] = useState((campaign?.send_window as any)?.end ?? '');
-  const [filters, setFilters] = useState(campaign?.filters ? { ...EMPTY_FILTERS, ...(campaign.filters as any) } : { ...EMPTY_FILTERS });
+  const [sendWindowStart, setSendWindowStart] = useState((campaign?.send_window as { start?: string; end?: string } | null)?.start ?? '');
+  const [sendWindowEnd, setSendWindowEnd] = useState((campaign?.send_window as { start?: string; end?: string } | null)?.end ?? '');
+  const [filters, setFilters] = useState(campaign?.filters ? { ...EMPTY_FILTERS, ...(campaign.filters as Record<string, unknown>) } : { ...EMPTY_FILTERS });
+  const [minDelay, setMinDelay] = useState(campaign?.min_delay_seconds ?? 3);
+  const [maxDelay, setMaxDelay] = useState(campaign?.max_delay_seconds ?? 8);
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set(campaign?.excluded_contact_ids ?? []));
+  const [previewContacts, setPreviewContacts] = useState<Array<{ id: string; name: string; phone: string }>>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
 
+  const { companyId } = useAuth();
   const { flows } = useChatbotFlows();
   const { data: tags = [] } = useTags();
   const { data: team = [] } = useTeamProfiles();
@@ -82,6 +91,87 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
 
   const cfgAction = (i: number, k: string, v: any) =>
     setActions(prev => prev.map((a, idx) => idx === i ? { ...a, [k]: v } : a));
+
+  // ── Preview ────────────────────────────────────────────────
+  const loadPreview = useCallback(async () => {
+    if (!companyId) return;
+    setPreviewLoading(true);
+    try {
+      let query = supabase
+        .from('contacts')
+        .select('id, name, phone, conversations(id, status, channel, last_message_at, assigned_user_id)')
+        .eq('company_id', companyId)
+        .eq('is_group', false);
+
+      if (filters.registered_from) query = query.gte('created_at', filters.registered_from);
+      if (filters.registered_to) query = query.lte('created_at', `${filters.registered_to}T23:59:59Z`);
+
+      const { data: raw } = await query;
+      const contacts = (raw ?? []) as Array<{ id: string; name: string; phone: string; conversations: any[] }>;
+
+      // Include/exclude tags
+      let includeTagIds: Set<string> | null = null;
+      let excludeTagIds: Set<string> | null = null;
+      if (filters.include_tags?.length > 0) {
+        const { data: tagRows } = await supabase.from('contact_tags').select('contact_id').in('tag_id', filters.include_tags).eq('company_id', companyId);
+        includeTagIds = new Set((tagRows ?? []).map((r: any) => r.contact_id));
+      }
+      if (filters.exclude_tags?.length > 0) {
+        const { data: exRows } = await supabase.from('contact_tags').select('contact_id').in('tag_id', filters.exclude_tags).eq('company_id', companyId);
+        excludeTagIds = new Set((exRows ?? []).map((r: any) => r.contact_id));
+      }
+
+      // Funnel filter
+      let funnelIds: Set<string> | null = null;
+      if (filters.funnel_id && filters.funnel_id !== 'all') {
+        const fq = supabase.from('contact_funnel_stages').select('contact_id').eq('funnel_id', filters.funnel_id);
+        if (filters.funnel_stage_id && filters.funnel_stage_id !== 'all') fq.eq('stage_id', filters.funnel_stage_id);
+        const { data: fRows } = await fq;
+        funnelIds = new Set((fRows ?? []).map((r: any) => r.contact_id));
+      }
+
+      const filtered = contacts.filter(c => {
+        if (includeTagIds && !includeTagIds.has(c.id)) return false;
+        if (excludeTagIds && excludeTagIds.has(c.id)) return false;
+        if (funnelIds && !funnelIds.has(c.id)) return false;
+        const convs = c.conversations ?? [];
+        if (convs.length === 0) return false;
+        const latest = [...convs].sort((a: any, b: any) => new Date(b.last_message_at ?? 0).getTime() - new Date(a.last_message_at ?? 0).getTime())[0];
+        if (filters.conversation_status && filters.conversation_status !== 'all') {
+          const map: Record<string, string[]> = { open: ['open', 'new'], new: ['new'], pending: ['pending'], closed: ['closed', 'resolved'] };
+          const allowed = map[filters.conversation_status] ?? [filters.conversation_status];
+          if (!allowed.includes(latest.status)) return false;
+        }
+        if (filters.responsible_user_id && filters.responsible_user_id !== 'all' && latest.assigned_user_id !== filters.responsible_user_id) return false;
+        if (filters.include_channels?.length > 0 && !filters.include_channels.includes(latest.channel)) return false;
+        if (filters.exclude_channels?.length > 0 && filters.exclude_channels.includes(latest.channel)) return false;
+        if (filters.inactive_days_min != null || filters.inactive_days_max != null) {
+          const days = (Date.now() - new Date(latest.last_message_at ?? 0).getTime()) / 86400000;
+          if (filters.inactive_days_min != null && days < filters.inactive_days_min) return false;
+          if (filters.inactive_days_max != null && days > filters.inactive_days_max) return false;
+        }
+        return true;
+      });
+
+      setPreviewContacts(filtered.map(c => ({ id: c.id, name: c.name || c.phone || 'Sem nome', phone: c.phone || '—' })));
+      setPreviewLoaded(true);
+    } catch (err) {
+      console.error('Preview error:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [companyId, filters]);
+
+  // Reset preview when filters change
+  useEffect(() => { setPreviewLoaded(false); }, [filters]);
+
+  const toggleExclude = (contactId: string) => {
+    setExcludedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(contactId)) next.delete(contactId); else next.add(contactId);
+      return next;
+    });
+  };
 
   // ── Submit ─────────────────────────────────────────────────
   const validateActions = (): string | null => {
@@ -100,6 +190,8 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
   const handleSubmit = (status: 'draft' | 'scheduled') => {
     const validationError = validateActions();
     if (validationError) { alert(validationError); return; }
+    if (minDelay < 2 || maxDelay < 2) { alert('Delay mínimo é 2 segundos.'); return; }
+    if (minDelay > maxDelay) { alert('Delay mínimo não pode ser maior que o máximo.'); return; }
     onSave({
       id: campaign?.id,
       name,
@@ -111,9 +203,12 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
       deadline_at: deadlineAt ? new Date(deadlineAt).toISOString() : null,
       skip_weekends: skipWeekends,
       send_window: sendWindowStart || sendWindowEnd ? { start: sendWindowStart, end: sendWindowEnd } : {},
+      min_delay_seconds: minDelay,
+      max_delay_seconds: maxDelay,
+      excluded_contact_ids: Array.from(excludedIds),
       status,
       ...(campaignDeptId ? { department_id: campaignDeptId } : {}),
-    } as any);
+    } as Partial<Campaign>);
   };
 
   return (
@@ -124,12 +219,15 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
       </div>
 
       <Tabs defaultValue="info" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="info">Informações</TabsTrigger>
           <TabsTrigger value="action">
             Ações {actions.length > 0 && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{actions.length}</Badge>}
           </TabsTrigger>
-          <TabsTrigger value="contacts">Filtros de Contatos</TabsTrigger>
+          <TabsTrigger value="contacts">Filtros</TabsTrigger>
+          <TabsTrigger value="preview">
+            Preview {previewLoaded && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{previewContacts.length - excludedIds.size}</Badge>}
+          </TabsTrigger>
         </TabsList>
 
         {/* ── TAB 1: Informações ─────────────────────── */}
@@ -162,7 +260,7 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
                   <p className="text-[11px] text-muted-foreground">Define qual departamento é responsável por esta campanha.</p>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Agendado para</Label>
                   <Input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} />
@@ -173,7 +271,7 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
                   <Input type="datetime-local" value={deadlineAt} onChange={e => setDeadlineAt(e.target.value)} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Janela de envio — início</Label>
                   <Input type="time" value={sendWindowStart} onChange={e => setSendWindowStart(e.target.value)} />
@@ -186,6 +284,18 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
               <p className="text-[11px] text-muted-foreground -mt-2">
                 O disparo só ocorre dentro do horário definido. Deixe vazio para sem restrição.
               </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Delay mínimo entre envios (segundos)</Label>
+                  <Input type="number" min={2} value={minDelay} onChange={e => setMinDelay(Math.max(2, Number(e.target.value)))} />
+                  <p className="text-[11px] text-muted-foreground">Mínimo: 2 segundos</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Delay máximo entre envios (segundos)</Label>
+                  <Input type="number" min={2} value={maxDelay} onChange={e => setMaxDelay(Math.max(2, Number(e.target.value)))} />
+                  <p className="text-[11px] text-muted-foreground">Intervalo aleatório entre min e máx</p>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={skipWeekends} onCheckedChange={v => setSkipWeekends(!!v)} />
                 Ignorar fins de semana (Sábado e Domingo)
@@ -304,7 +414,7 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
                   )}
 
                   {action.type === 'delegate' && (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label className="text-xs">Atribuir ao usuário</Label>
                         <Select
@@ -335,7 +445,7 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
                   )}
 
                   {action.type === 'move_funnel' && (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label className="text-xs">Funil</Label>
                         <Select
@@ -417,9 +527,79 @@ export default function CampaignForm({ campaign, onSave, onCancel, saving }: Pro
             </CardContent>
           </Card>
         </TabsContent>
+        {/* ── TAB 4: Preview ─────────────────────────── */}
+        <TabsContent value="preview">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users size={18} />
+                Preview de Destinatários
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Visualize quais contatos receberão esta campanha. Desmarque para excluir individualmente.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button variant="outline" onClick={loadPreview} disabled={previewLoading}>
+                {previewLoading ? <><Loader2 size={16} className="mr-2 animate-spin" /> Carregando...</> : 'Carregar Preview'}
+              </Button>
+
+              {previewLoaded && (
+                <>
+                  <div className="flex items-center gap-3 text-sm">
+                    <Badge variant="secondary">{previewContacts.length} contatos encontrados</Badge>
+                    {excludedIds.size > 0 && (
+                      <Badge variant="destructive">{excludedIds.size} excluído(s)</Badge>
+                    )}
+                    <span className="text-muted-foreground">
+                      Envio para <strong>{previewContacts.length - excludedIds.size}</strong> contato(s)
+                    </span>
+                  </div>
+
+                  <div className="max-h-[400px] overflow-y-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-muted">
+                        <tr>
+                          <th className="p-2 text-left w-10">
+                            <Checkbox
+                              checked={excludedIds.size === 0}
+                              onCheckedChange={(checked) => {
+                                if (checked) setExcludedIds(new Set());
+                                else setExcludedIds(new Set(previewContacts.map(c => c.id)));
+                              }}
+                            />
+                          </th>
+                          <th className="p-2 text-left">Contato</th>
+                          <th className="p-2 text-left">Telefone</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewContacts.map(c => (
+                          <tr key={c.id} className={`border-t border-border ${excludedIds.has(c.id) ? 'opacity-40' : ''}`}>
+                            <td className="p-2">
+                              <Checkbox
+                                checked={!excludedIds.has(c.id)}
+                                onCheckedChange={() => toggleExclude(c.id)}
+                              />
+                            </td>
+                            <td className="p-2">{c.name}</td>
+                            <td className="p-2 font-mono text-xs">{c.phone}</td>
+                          </tr>
+                        ))}
+                        {previewContacts.length === 0 && (
+                          <tr><td colSpan={3} className="p-4 text-center text-muted-foreground">Nenhum contato encontrado com os filtros atuais.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
-      <div className="flex items-center gap-3 justify-end">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:justify-end">
         <Button variant="outline" onClick={onCancel}>Cancelar</Button>
         <Button variant="secondary" onClick={() => handleSubmit('draft')} disabled={!name || saving}>
           <Save size={16} className="mr-2" /> Salvar Rascunho

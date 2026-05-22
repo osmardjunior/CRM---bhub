@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { ApiError } from '@/services/api';
 
 export type Deal = {
@@ -59,7 +60,7 @@ export async function listDeals(companyId: string): Promise<DealWithRelations[]>
 export async function createDeal(payload: DealInsert): Promise<Deal> {
   const { data, error } = await supabase
     .from('deals')
-    .insert(payload as any)
+    .insert(payload as TablesInsert<'deals'>)
     .select()
     .single();
 
@@ -70,7 +71,7 @@ export async function createDeal(payload: DealInsert): Promise<Deal> {
 export async function updateDeal(id: string, payload: DealUpdate): Promise<Deal> {
   const { data, error } = await supabase
     .from('deals')
-    .update(payload as any)
+    .update(payload as TablesUpdate<'deals'>)
     .eq('id', id)
     .select()
     .single();

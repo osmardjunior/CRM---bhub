@@ -36,6 +36,8 @@ interface AgentChatSummary {
   open: number;
   inProgress: number;
   waiting: number;
+  resolved: number;
+  closed: number;
   total: number;
 }
 
@@ -52,7 +54,7 @@ function useChatsOverview() {
         .from('conversations')
         .select('id, status, assigned_user_id, profiles:assigned_user_id(id, name, email)')
         .eq('company_id', companyId!)
-        .in('status', ['new', 'open', 'pending']);
+        .in('status', ['new', 'open', 'pending', 'resolved', 'closed']);
 
       if (projectId) {
         query = query.eq('project_id', projectId);
@@ -63,7 +65,7 @@ function useChatsOverview() {
       if (error) throw error;
 
       const agentMap: Record<string, AgentChatSummary> = {
-        __unassigned__: { id: null, name: 'Ninguém Delegado', email: null, open: 0, inProgress: 0, waiting: 0, total: 0 },
+        __unassigned__: { id: null, name: 'Ninguém Delegado', email: null, open: 0, inProgress: 0, waiting: 0, resolved: 0, closed: 0, total: 0 },
       };
 
       // Pre-populate with active team members from this area
@@ -88,19 +90,19 @@ function useChatsOverview() {
       for (const p of allProfiles ?? []) {
         if (p.is_active === false) continue;
         if (allowedMemberIds && !allowedMemberIds.has(p.id)) continue;
-        agentMap[p.id] = { id: p.id, name: p.name ?? 'Sem nome', email: p.email ?? null, open: 0, inProgress: 0, waiting: 0, total: 0 };
+        agentMap[p.id] = { id: p.id, name: p.name ?? 'Sem nome', email: p.email ?? null, open: 0, inProgress: 0, waiting: 0, resolved: 0, closed: 0, total: 0 };
       }
 
       for (const conv of conversations ?? []) {
         const userId = conv.assigned_user_id ?? '__unassigned__';
-        const profile = conv.profiles as any;
+        const profile = conv.profiles as { id: string; name: string | null; email: string | null } | null;
 
         if (!agentMap[userId]) {
           agentMap[userId] = {
             id: profile?.id ?? null,
             name: profile?.name ?? 'Desconhecido',
             email: profile?.email ?? null,
-            open: 0, inProgress: 0, waiting: 0, total: 0,
+            open: 0, inProgress: 0, waiting: 0, resolved: 0, closed: 0, total: 0,
           };
         }
 
@@ -111,6 +113,10 @@ function useChatsOverview() {
           else agentMap['__unassigned__'].open += 1;
         } else if (conv.status === 'pending') {
           agentMap[userId].waiting += 1;
+        } else if (conv.status === 'resolved') {
+          agentMap[userId].resolved += 1;
+        } else if (conv.status === 'closed') {
+          agentMap[userId].closed += 1;
         }
         agentMap[userId].total += 1;
       }
@@ -121,6 +127,8 @@ function useChatsOverview() {
         open: rows.reduce((s, r) => s + r.open, 0),
         inProgress: rows.reduce((s, r) => s + r.inProgress, 0),
         waiting: rows.reduce((s, r) => s + r.waiting, 0),
+        resolved: rows.reduce((s, r) => s + r.resolved, 0),
+        closed: rows.reduce((s, r) => s + r.closed, 0),
         total: rows.reduce((s, r) => s + r.total, 0),
       };
 
@@ -173,9 +181,9 @@ function OverviewTable() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border shrink-0">
-        <h2 className="text-base font-bold text-foreground">Chats não resolvidos/fechados</h2>
+        <h2 className="text-base font-bold text-foreground">Visão Geral dos Chats</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Visualize todos os chats que ainda não tiveram o atendimento concluído. Clique nos números para ver no Inbox.
+          Visualize todos os chats por status e agente. Clique nos números para ver no Inbox.
         </p>
       </div>
 
@@ -200,6 +208,16 @@ function OverviewTable() {
               <th className="px-4 py-3 text-center min-w-[170px] hidden lg:table-cell">
                 <span className="inline-flex items-center justify-center gap-1 bg-warning/15 text-warning rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
                   Aguardando{totals ? ` (${totals.waiting})` : ''}
+                </span>
+              </th>
+              <th className="px-4 py-3 text-center min-w-[160px] hidden lg:table-cell">
+                <span className="inline-flex items-center justify-center gap-1 bg-green-500/15 text-green-600 dark:text-green-400 rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
+                  Resolvidos{totals ? ` (${totals.resolved})` : ''}
+                </span>
+              </th>
+              <th className="px-4 py-3 text-center min-w-[140px] hidden xl:table-cell">
+                <span className="inline-flex items-center justify-center gap-1 bg-muted text-muted-foreground rounded-md px-3 py-1 font-bold text-xs uppercase tracking-wide">
+                  Fechado{totals ? ` (${totals.closed})` : ''}
                 </span>
               </th>
               <th className="px-5 py-3 text-center min-w-[90px]">
@@ -305,6 +323,34 @@ function OverviewTable() {
                         )}
                       </td>
 
+                      {/* Resolvidos — clickable */}
+                      <td className="px-4 py-3 text-center hidden lg:table-cell">
+                        {row.resolved > 0 ? (
+                          <button
+                            onClick={() => handleCellClick(row.id, 'resolved')}
+                            className="inline-flex items-center justify-center min-w-[52px] bg-green-500/10 text-green-600 dark:text-green-400 rounded-md px-3 py-1.5 text-sm font-semibold hover:bg-green-500/20 transition-colors cursor-pointer"
+                          >
+                            {row.resolved}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">0</span>
+                        )}
+                      </td>
+
+                      {/* Fechado — clickable */}
+                      <td className="px-4 py-3 text-center hidden xl:table-cell">
+                        {row.closed > 0 ? (
+                          <button
+                            onClick={() => handleCellClick(row.id, 'closed')}
+                            className="inline-flex items-center justify-center min-w-[52px] bg-muted text-muted-foreground rounded-md px-3 py-1.5 text-sm font-semibold hover:bg-accent transition-colors cursor-pointer"
+                          >
+                            {row.closed}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">0</span>
+                        )}
+                      </td>
+
                       {/* Total */}
                       <td className="px-5 py-3 text-center">
                         <span className="text-sm font-semibold text-foreground">{row.total}</span>
@@ -312,6 +358,32 @@ function OverviewTable() {
                     </tr>
                   );
                 })}
+            {/* TOTAL row */}
+            {!isLoading && totals && (
+              <tr className="border-t-2 border-border bg-muted/40">
+                <td className="px-5 py-3">
+                  <span className="text-sm font-bold text-foreground">TOTAL</span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className="text-sm font-bold text-destructive">{totals.open}</span>
+                </td>
+                <td className="px-4 py-3 text-center hidden lg:table-cell">
+                  <span className="text-sm font-bold text-info">{totals.inProgress}</span>
+                </td>
+                <td className="px-4 py-3 text-center hidden lg:table-cell">
+                  <span className="text-sm font-bold text-warning">{totals.waiting}</span>
+                </td>
+                <td className="px-4 py-3 text-center hidden lg:table-cell">
+                  <span className="text-sm font-bold text-green-600 dark:text-green-400">{totals.resolved}</span>
+                </td>
+                <td className="px-4 py-3 text-center hidden xl:table-cell">
+                  <span className="text-sm font-bold text-muted-foreground">{totals.closed}</span>
+                </td>
+                <td className="px-5 py-3 text-center">
+                  <span className="text-sm font-bold text-foreground">{totals.total}</span>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -325,21 +397,22 @@ export default function ChatsOverview() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({});
 
+  const { play: playNotification } = useNotificationSound();
+  const { isSubscribed } = useInboxRealtime(selectedId, playNotification);
+
   const {
     data: infiniteData,
     isLoading: listLoading,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useInfiniteConversations(filters);
+  } = useInfiniteConversations(filters, { realtimeActive: isSubscribed });
 
   const conversations = useMemo(() => infiniteData?.pages.flat() ?? [], [infiniteData]);
   const { data: unreadCounts } = useUnreadCounts(conversations);
   const markRead = useMarkConversationRead();
 
   const effectiveSelectedId = selectedId ?? conversations[0]?.id ?? null;
-  const { play: playNotification } = useNotificationSound();
-  useInboxRealtime(effectiveSelectedId, playNotification);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);

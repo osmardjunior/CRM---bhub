@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface FunnelStage {
   id: string;
@@ -37,13 +38,16 @@ const FunnelContext = createContext<FunnelContextType | null>(null);
 export function FunnelProvider({ children }: { children: ReactNode }) {
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [loading, setLoading] = useState(true);
+  const { companyId } = useAuth();
 
   const fetchFunnels = useCallback(async () => {
+    if (!companyId) { setLoading(false); return; }
     try {
       const { data: funnelsData, error: fErr } = await supabase
         .from('funnels')
-        .select('*')
-        .order('created_at', { ascending: true });
+        .select('id, name, department_id, project_id, created_at')
+        .order('created_at', { ascending: true })
+        .limit(100);
 
       if (fErr) throw fErr;
       if (!funnelsData || funnelsData.length === 0) {
@@ -56,9 +60,10 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       const [{ data: stagesData, error: sErr }, { data: countsData }] = await Promise.all([
         supabase
           .from('funnel_stages')
-          .select('*')
+          .select('id, funnel_id, label, position')
           .in('funnel_id', funnelIds)
-          .order('position', { ascending: true }),
+          .order('position', { ascending: true })
+          .limit(500),
         // Count contacts per stage from contact_funnel_stages
         supabase
           .from('contact_funnel_stages')
@@ -77,8 +82,8 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       const mapped: Funnel[] = funnelsData.map((f) => ({
         id: f.id,
         name: f.name,
-        department_id: (f as any).department_id ?? null,
-        project_id: (f as any).project_id ?? null,
+        department_id: f.department_id ?? null,
+        project_id: f.project_id ?? null,
         expanded: true,
         stages: (stagesData || [])
           .filter((s) => s.funnel_id === f.id)
@@ -91,7 +96,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [companyId]);
 
   useEffect(() => {
     fetchFunnels();
@@ -194,7 +199,7 @@ export function FunnelProvider({ children }: { children: ReactNode }) {
       p_position_a: sorted[targetIdx].position,
       p_stage_id_b: sorted[targetIdx].id,
       p_position_b: sorted[idx].position,
-    } as any);
+    });
 
     if (error) {
       toast.error('Erro ao mover etapa');

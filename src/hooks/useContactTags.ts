@@ -19,11 +19,14 @@ export function useContactTags(contactId: string | undefined) {
 
       if (error) throw error;
 
-      return (data ?? []).map((row: any) => ({
-        tag_id: row.tag_id,
-        tag_name: row.tags?.name ?? '',
-        tag_color: row.tags?.color ?? '#6366f1',
-      })) as ContactTag[];
+      return (data ?? []).map((row) => {
+        const tag = row.tags as { name: string; color: string } | null;
+        return {
+          tag_id: row.tag_id,
+          tag_name: tag?.name ?? '',
+          tag_color: tag?.color ?? '#6366f1',
+        };
+      }) as ContactTag[];
     },
     enabled: !!contactId,
   });
@@ -35,7 +38,7 @@ export function useAddContactTag() {
     mutationFn: async ({ contactId, tagId }: { contactId: string; tagId: string }) => {
       const { error } = await supabase
         .from('contact_tags')
-        .insert({ contact_id: contactId, tag_id: tagId } as any);
+        .insert({ contact_id: contactId, tag_id: tagId });
       if (error) throw error;
     },
     onSuccess: (_, vars) => {

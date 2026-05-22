@@ -743,6 +743,7 @@ export type Database = {
           created_at: string
           id: string
           last_message_at: string | null
+          last_message_preview: string | null
           status: Database["public"]["Enums"]["conversation_status"]
           updated_at: string
         }
@@ -757,6 +758,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_message_at?: string | null
+          last_message_preview?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           updated_at?: string
         }
@@ -771,6 +773,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_message_at?: string | null
+          last_message_preview?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           updated_at?: string
         }
@@ -1067,22 +1070,28 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string
+          department_id: string | null
           id: string
           name: string
+          project_id: string | null
           updated_at: string
         }
         Insert: {
           company_id: string
           created_at?: string
+          department_id?: string | null
           id?: string
           name: string
+          project_id?: string | null
           updated_at?: string
         }
         Update: {
           company_id?: string
           created_at?: string
+          department_id?: string | null
           id?: string
           name?: string
+          project_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1188,8 +1197,10 @@ export type Database = {
           conversation_id: string
           created_at: string
           deleted_at: string | null
+          deleted_by: string | null
           delivery_status: string | null
           direction: string | null
+          edited_at: string | null
           external_message_id: string | null
           id: string
           is_annotation: boolean | null
@@ -1212,8 +1223,10 @@ export type Database = {
           conversation_id: string
           created_at?: string
           deleted_at?: string | null
+          deleted_by?: string | null
           delivery_status?: string | null
           direction?: string | null
+          edited_at?: string | null
           external_message_id?: string | null
           id?: string
           is_annotation?: boolean | null
@@ -1236,8 +1249,10 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           deleted_at?: string | null
+          deleted_by?: string | null
           delivery_status?: string | null
           direction?: string | null
+          edited_at?: string | null
           external_message_id?: string | null
           id?: string
           is_annotation?: boolean | null
@@ -1283,6 +1298,21 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profile_departments: {
+        Row: {
+          department_id: string
+          profile_id: string
+        }
+        Insert: {
+          department_id: string
+          profile_id: string
+        }
+        Update: {
+          department_id?: string
+          profile_id?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -1355,6 +1385,7 @@ export type Database = {
           created_at: string
           id: string
           message: string
+          project_id: string | null
           shortcut: string
           updated_at: string
           user_id: string
@@ -1364,6 +1395,7 @@ export type Database = {
           created_at?: string
           id?: string
           message: string
+          project_id?: string | null
           shortcut: string
           updated_at?: string
           user_id: string
@@ -1373,6 +1405,7 @@ export type Database = {
           created_at?: string
           id?: string
           message?: string
+          project_id?: string | null
           shortcut?: string
           updated_at?: string
           user_id?: string
@@ -1538,22 +1571,28 @@ export type Database = {
           color: string
           company_id: string
           created_at: string
+          department_id: string | null
           id: string
           name: string
+          project_id: string | null
         }
         Insert: {
           color?: string
           company_id: string
           created_at?: string
+          department_id?: string | null
           id?: string
           name: string
+          project_id?: string | null
         }
         Update: {
           color?: string
           company_id?: string
           created_at?: string
+          department_id?: string | null
           id?: string
           name?: string
+          project_id?: string | null
         }
         Relationships: [
           {
@@ -1681,6 +1720,70 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      swap_funnel_stage_positions: {
+        Args: {
+          p_stage_id_a: string
+          p_position_a: number
+          p_stage_id_b: string
+          p_position_b: number
+        }
+        Returns: undefined
+      }
+      get_funnel_contact_ids: {
+        Args: {
+          p_funnel_id: string
+          p_stage_id?: string | null
+        }
+        Returns: { contact_id: string }[]
+      }
+      get_funnel_contact_ids_multi: {
+        Args: {
+          p_funnel_ids: string[]
+          p_stage_ids?: string[] | null
+        }
+        Returns: { contact_id: string }[]
+      }
+      get_stage_contact_ids: {
+        Args: {
+          p_stage_ids: string[]
+        }
+        Returns: { contact_id: string }[]
+      }
+      get_funnel_filtered_conversation_ids: {
+        Args: {
+          p_company_id: string
+          p_date_from: string
+          p_date_to: string
+          p_project_id?: string | null
+          p_funnel_ids?: string[] | null
+          p_stage_ids?: string[] | null
+          p_exclude_funnel_ids?: string[] | null
+          p_exclude_stage_ids?: string[] | null
+          p_agent_id?: string | null
+          p_unassigned?: boolean
+          p_status?: string | null
+          p_integration_id?: string | null
+          p_tag_ids?: string[] | null
+          p_exclude_tag_ids?: string[] | null
+        }
+        Returns: { conversation_id: string }[]
+      }
+      get_sidebar_unread_count: {
+        Args: {
+          p_company_id: string
+          p_user_id: string
+          p_project_id?: string | null
+        }
+        Returns: { total_unread: number }[]
+      }
+      get_unread_conversation_ids: {
+        Args: {
+          p_company_id: string
+          p_user_id: string
+          p_project_id?: string | null
+        }
+        Returns: { conversation_id: string }[]
       }
     }
     Enums: {

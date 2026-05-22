@@ -3,18 +3,18 @@
  * Used to assign unique colors to group chat participants.
  */
 const SENDER_COLORS = [
-  'hsl(210, 70%, 45%)',  // blue
-  'hsl(340, 65%, 47%)',  // rose
-  'hsl(160, 60%, 38%)',  // emerald
-  'hsl(270, 55%, 50%)',  // purple
-  'hsl(25, 75%, 47%)',   // orange
-  'hsl(190, 65%, 40%)',  // teal
-  'hsl(45, 70%, 42%)',   // amber
-  'hsl(300, 50%, 45%)',  // fuchsia
-  'hsl(140, 55%, 35%)',  // green
-  'hsl(0, 60%, 50%)',    // red
-  'hsl(220, 60%, 55%)',  // indigo
-  'hsl(330, 55%, 50%)',  // pink
+  'hsl(210, 45%, 48%)',  // blue
+  'hsl(340, 40%, 50%)',  // rose
+  'hsl(160, 40%, 42%)',  // emerald
+  'hsl(270, 35%, 52%)',  // purple
+  'hsl(25, 50%, 50%)',   // orange
+  'hsl(190, 40%, 44%)',  // teal
+  'hsl(45, 45%, 45%)',   // amber
+  'hsl(300, 30%, 48%)',  // fuchsia
+  'hsl(140, 35%, 40%)',  // green
+  'hsl(0, 40%, 52%)',    // red
+  'hsl(220, 40%, 55%)',  // indigo
+  'hsl(330, 35%, 52%)',  // pink
 ];
 
 const SENDER_BG_COLORS = [

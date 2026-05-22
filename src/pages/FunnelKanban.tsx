@@ -111,7 +111,7 @@ function StageColumn({
 
   return (
     <>
-      <div className="flex flex-col w-[220px] min-w-[220px] bg-muted/50 rounded-lg overflow-hidden border border-border shrink-0">
+      <div className="flex flex-col w-[180px] min-w-[180px] sm:w-[220px] sm:min-w-[220px] bg-muted/50 rounded-lg overflow-hidden border border-border shrink-0">
         {/* Header */}
         <div className="flex items-center justify-between bg-sidebar px-3 py-2.5">
           <div>
@@ -139,7 +139,7 @@ function StageColumn({
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className={`flex-1 overflow-y-auto p-2 space-y-1.5 min-h-[300px] max-h-[calc(100vh-260px)] transition-colors ${snapshot.isDraggingOver ? 'bg-primary/5' : ''}`}
+              className={`flex-1 overflow-y-auto p-2 space-y-1.5 min-h-[300px] max-h-[calc(100dvh-260px)] transition-colors ${snapshot.isDraggingOver ? 'bg-primary/5' : ''}`}
             >
               {contacts.length === 0 && !snapshot.isDraggingOver && (
                 <div className="flex flex-col items-center justify-center h-full py-6 text-center">
@@ -215,7 +215,7 @@ export default function FunnelKanban() {
 
   if (!funnel) {
     return (
-      <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden items-center justify-center">
+      <div className="flex flex-col h-[calc(100dvh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden items-center justify-center">
         <FunnelNotFound onBack={() => navigate('/pipeline')} />
       </div>
     );
@@ -244,7 +244,7 @@ export default function FunnelKanban() {
   const existingContactIds = funnelContacts.map((c) => c.contact_id);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden">
+    <div className="flex flex-col h-[calc(100dvh-7rem)] -mt-2 -mx-4 lg:-mx-6 overflow-hidden">
       {/* Top toolbar */}
       <div className="flex items-center gap-2 bg-sidebar px-4 py-2.5 shrink-0">
         <button onClick={() => navigate('/pipeline')} className="flex items-center gap-1.5 text-sidebar-foreground hover:text-sidebar-accent-foreground text-sm font-medium transition-colors mr-1">

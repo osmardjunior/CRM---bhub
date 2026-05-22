@@ -5,8 +5,10 @@ import { useCampaigns, useCreateCampaign, useUpdateCampaign, useDeleteCampaign, 
 import CampaignList from '@/components/campanhas/CampaignList';
 import CampaignForm from '@/components/campanhas/CampaignForm';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export default function Campanhas() {
+  const permissions = usePermissions();
   const { data: campaigns = [], isLoading } = useCampaigns();
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
@@ -47,9 +49,11 @@ export default function Campanhas() {
           <h2 className="text-2xl font-bold">Campanhas</h2>
           <p className="text-sm text-muted-foreground">Ações em massa sobre contatos e conversas do CRM</p>
         </div>
-        <Button onClick={() => setEditing('new')}>
-          <Plus size={16} className="mr-2" /> Nova Campanha
-        </Button>
+        {permissions.can('campaigns_create') && (
+          <Button onClick={() => setEditing('new')}>
+            <Plus size={16} className="sm:mr-2" /> <span className="hidden sm:inline">Nova Campanha</span>
+          </Button>
+        )}
       </div>
 
       {isLoading ? (

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifyAuth, unauthorizedResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,6 +9,12 @@ const corsHeaders = {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // ── Auth: require JWT or service-role key ──────────────────────────────
+  const auth = await verifyAuth(req);
+  if (!auth.authenticated) {
+    return unauthorizedResponse(corsHeaders, auth.error);
+  }
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -108,6 +115,11 @@ serve(async (req) => {
     const filters = (campaign.filters ?? {}) as Record<string, any>;
     const actionConfig = (campaign.action_config ?? {}) as Record<string, any>;
     const companyId = campaign.company_id as string;
+    const minDelay = Math.max(2, (campaign.min_delay_seconds as number) ?? 3);
+    const maxDelay = Math.max(minDelay, (campaign.max_delay_seconds as number) ?? 8);
+    const excludedSet = new Set<string>(
+      Array.isArray(campaign.excluded_contact_ids) ? campaign.excluded_contact_ids as string[] : []
+    );
 
     // ── Resolve actions to run (multi-action or legacy single) ──────────
     const actionsToRun: Array<Record<string, any>> =
@@ -186,6 +198,9 @@ serve(async (req) => {
 
     // ── Apply in-memory filters ──────────────────────────────────────────
     const filtered = contacts.filter((contact: any) => {
+      // Excluded contacts (manually unchecked in preview)
+      if (excludedSet.has(contact.id)) return false;
+
       // Funnel filter (pre-fetched above)
       if (funnelContactIds !== null && !funnelContactIds.has(contact.id)) return false;
 
@@ -403,6 +418,12 @@ serve(async (req) => {
         processed++;
         if (processed % 10 === 0) {
           await supabase.from("campaigns").update({ processed }).eq("id", campaign_id);
+        }
+
+        // Random delay between sends to avoid WhatsApp restrictions
+        if (processed < filtered.length) {
+          const delayMs = (minDelay + Math.random() * (maxDelay - minDelay)) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delayMs));
         }
       } catch (e) {
         console.error(`[execute-campaign] Failed contact ${contact.id}:`, e);

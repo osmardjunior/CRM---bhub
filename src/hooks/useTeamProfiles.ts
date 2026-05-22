@@ -50,12 +50,12 @@ export function useTeamProfiles(includeInactive = false) {
       return (profiles ?? []).map(p => ({
         ...p,
         display_name: p.display_name ?? null,
-        spy_mode: (p as any).spy_mode ?? false,
-        access_hours: ((p as any).access_hours ?? { enabled: false, intervals: [], blocked_days: [] }) as AccessHours,
-        custom_permissions: ((p as any).custom_permissions ?? {}) as Record<string, boolean>,
-        is_active: (p as any).is_active !== false,
-        round_robin_weight: (p as any).round_robin_weight ?? 1,
-        last_seen_at: (p as any).last_seen_at ?? null,
+        spy_mode: p.spy_mode ?? false,
+        access_hours: (p.access_hours ?? { enabled: false, intervals: [], blocked_days: [] }) as AccessHours,
+        custom_permissions: (p.custom_permissions ?? {}) as Record<string, boolean>,
+        is_active: p.is_active !== false,
+        round_robin_weight: p.round_robin_weight ?? 1,
+        last_seen_at: p.last_seen_at ?? null,
         role: roleMap.get(p.id) ?? 'agent',
       })) as TeamMember[];
     },

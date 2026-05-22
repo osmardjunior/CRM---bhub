@@ -26,7 +26,11 @@ import {
   Smartphone,
   ArrowLeftRight,
   AlertTriangle,
-  FolderOpen,
+  Pencil,
+  Copy,
+  PanelLeftClose,
+  PanelLeftOpen,
+  CheckCircle,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -59,14 +63,17 @@ import { ListSkeleton } from '@/components/shared/LoadingSkeletons';
 import MessageBubble from '@/components/inbox/MessageBubble';
 import ConversationAvatar from '@/components/inbox/ConversationAvatar';
 import AudioRecorder from '@/components/inbox/AudioRecorder';
-import MediaPickerModal from '@/components/inbox/MediaPickerModal';
 import { useSendMessage } from '@/hooks/useConversations';
-import { useTeamMembers } from '@/hooks/useContacts';
+import { useTypingIndicator } from '@/hooks/useInboxRealtime';
+import { useTeamProfiles } from '@/hooks/useTeamProfiles';
+import { useUserProjects } from '@/hooks/useUserProjects';
+import { useMyProjects } from '@/hooks/useProjects';
 import { useIntegrations } from '@/hooks/useIntegrations';
+import { useProjectContext } from '@/contexts/ProjectContext';
 import { usePermissions, getPermissionTooltip } from '@/hooks/usePermissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuickReplies } from '@/hooks/useQuickReplies';
-import { isGroupChat, createAnnotation, sendViaWhatsApp, deleteMessage, markConversationUnread } from '@/services/api';
+import { isGroupChat, createAnnotation, sendViaWhatsApp, deleteMessage, markConversationUnread, closeConversation } from '@/services/api';
 
 const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -74,9 +81,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { ConversationDetail, Annotation, MessageWithSender } from '@/services/api';
-import { listAnnotations } from '@/services/api';
+import { listAnnotations, updateAnnotation, deleteAnnotation } from '@/services/api';
 import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -87,6 +95,7 @@ type MergedItem =
 import AIChatAssistDrawer from '@/components/ai/AIChatAssistDrawer';
 import AIAnnotationHelper from '@/components/ai/AIAnnotationHelper';
 import { useChatStore } from '@/store/chatStore';
+import ScheduleMessageButton from '@/components/inbox/ScheduleMessageButton';
 
 function groupMessagesByDate(items: MergedItem[]) {
   const groups: { date: string; messages: MergedItem[] }[] = [];
@@ -104,143 +113,106 @@ function groupMessagesByDate(items: MergedItem[]) {
   return groups;
 }
 
-// ── Schedule Message Button ──────────────────────────
-function ScheduleMessageButton({
-  conversationId,
-  companyId,
-  userId,
-  messageBody,
-  onScheduled,
-}: {
-  conversationId: string;
-  companyId: string | null;
-  userId: string | undefined;
-  messageBody: string;
-  onScheduled: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [date, setDate] = useState<Date | undefined>(undefined);
-  const [time, setTime] = useState('12:00');
-  const [scheduling, setScheduling] = useState(false);
-
-  const handleSchedule = async () => {
-    if (!date || !companyId || !userId) return;
-    const [hours, minutes] = time.split(':').map(Number);
-    // Use UTC date components to avoid off-by-one-day issues when the
-    // Calendar returns dates at midnight UTC (which in UTC-3 is still
-    // the previous local day).
-    const scheduledAt = new Date(
-      date.getUTCFullYear(),
-      date.getUTCMonth(),
-      date.getUTCDate(),
-      hours,
-      minutes,
-      0,
-      0,
-    );
-
-    if (scheduledAt <= new Date()) {
-      toast.error('Selecione um horário futuro.');
-      return;
-    }
-
-    setScheduling(true);
-    try {
-      const { error } = await supabase.from('scheduled_messages').insert({
-        conversation_id: conversationId,
-        company_id: companyId,
-        created_by: userId,
-        content: messageBody,
-        scheduled_at: scheduledAt.toISOString(),
-      });
-      if (error) throw error;
-      toast.success(`Mensagem agendada para ${format(scheduledAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`);
-      setOpen(false);
-      setDate(undefined);
-      setTime('12:00');
-      onScheduled();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao agendar mensagem');
-    } finally {
-      setScheduling(false);
-    }
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Agendar mensagem">
-          <Clock size={15} />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-3" align="end" side="top">
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-foreground">Agendar envio</p>
-          <Calendar
-            mode="single"
-            selected={date}
-            onSelect={setDate}
-            disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
-            className={cn("p-2 pointer-events-auto")}
-            locale={ptBR}
-          />
-          <div className="flex items-center gap-2">
-            <CalendarIcon size={14} className="text-muted-foreground" />
-            <Input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              className="h-8 w-28 text-xs"
-            />
-          </div>
-          <Button
-            size="sm"
-            className="w-full h-8 text-xs"
-            disabled={!date || scheduling}
-            onClick={handleSchedule}
-          >
-            {scheduling ? <Loader2 size={13} className="animate-spin mr-1" /> : <Clock size={13} className="mr-1" />}
-            Agendar
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 interface Props {
   conversation: ConversationDetail | null;
   loading: boolean;
   onToggleProfile: () => void;
   profileOpen: boolean;
-  onBack?: () => void;
+  onBack?: (opts?: { skipAutoSelect?: boolean }) => void;
+  listCollapsed?: boolean;
+  onToggleList?: () => void;
 }
 
-export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen, onBack }: Props) {
+export default function ChatPanel({ conversation, loading, onToggleProfile, profileOpen, onBack, listCollapsed, onToggleList }: Props) {
   const [input, setInput] = useState('');
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
-  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [quickReplySelectedIdx, setQuickReplySelectedIdx] = useState(0);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
   const [isAnnotationMode, setIsAnnotationMode] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [pendingMedia, setPendingMedia] = useState<{
+    file?: File;
+    url?: string;
+    mimeType: string;
+    fileName: string;
+    previewUrl?: string;
+  } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageWithSender | null>(null);
+  const [editingMessage, setEditingMessage] = useState<MessageWithSender | null>(null);
+  const [editingAnnotation, setEditingAnnotation] = useState<{ id: string; body: string } | null>(null);
+  const isContactTyping = useTypingIndicator(conversation?.id ?? null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Stable ref — always holds the last known conversation ID so handleSend works
-  // even if the `conversation` prop briefly flickers to null during React Query refetches.
-  const conversationIdRef = useRef<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useSendMessage();
-  const { data: teamMembers } = useTeamMembers();
+  const { data: allTeamMembers = [] } = useTeamProfiles();
   const { data: quickReplies = [] } = useQuickReplies();
   const permissions = usePermissions();
   const { user, companyId, role } = useAuth();
   const queryClient = useQueryClient();
   const [closing, setClosing] = useState(false);
   const [changeNumberOpen, setChangeNumberOpen] = useState(false);
+
+  // Scheduled messages for this conversation
+  const { data: scheduledMsgs = [] } = useQuery({
+    queryKey: ['scheduled-messages-banner', conversation?.id],
+    enabled: !!conversation?.id,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('scheduled_messages')
+        .select('id, content, scheduled_at')
+        .eq('conversation_id', conversation!.id)
+        .is('sent_at', null)
+        .is('cancelled_at', null)
+        .order('scheduled_at', { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
   const { setAIDrawerOpen } = useChatStore();
 
-  const { data: allIntegrations } = useIntegrations();
+  // Auto-focus input when switching conversations
+  useEffect(() => {
+    if (conversation?.id) {
+      setTimeout(() => inputRef.current?.focus(), 80);
+    }
+  }, [conversation?.id]);
+
+  // Clear pending media and upload state when switching conversations
+  useEffect(() => {
+    if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
+    setPendingMedia(null);
+    setUploading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation?.id]);
+
+  // Reset textarea height when input is cleared (after sending)
+  useEffect(() => {
+    if (!input && inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
+  }, [input]);
+
+  const { projectId } = useProjectContext();
+  const { data: myProjects = [] } = useMyProjects();
+  const projectMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of myProjects) map[p.id] = p.name;
+    return map;
+  }, [myProjects]);
+  const showProjectBadge = !projectId;
+
+  // Use conversation's project_id for filtering delegation candidates
+  const convProjectId = conversation?.project_id ?? projectId;
+  const { data: projectMembers = [] } = useUserProjects(convProjectId || '');
+  // If conversation has a project, prefer members from that project
+  // But always show all team members as fallback so delegation is never blocked
+  const projectFilteredMembers = convProjectId
+    ? allTeamMembers.filter(m => projectMembers.some(pm => pm.user_id === m.id))
+    : [];
+  const teamMembers = projectFilteredMembers.length > 1 ? projectFilteredMembers : allTeamMembers;
+  const { data: allIntegrations } = useIntegrations(projectId || undefined);
   const whatsappIntegrations = allIntegrations?.filter(i => i.channel === 'whatsapp') ?? [];
 
   const handleChangeIntegration = async (integrationId: string) => {
@@ -260,12 +232,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     }
   };
 
-  const canReassign = permissions.canReassignConversations;
-  const reassignTooltip = getPermissionTooltip('canReassignConversations', permissions);
+  // Everyone can delegate — as long as there are other members to delegate to
+  const canReassign = teamMembers.length > 1;
+  const reassignTooltip = !canReassign ? 'Nenhum colega disponível para delegar' : undefined;
 
-  const availableMembers = canReassign
-    ? (teamMembers ?? [])
-    : (teamMembers ?? []).filter((m) => m.id === user?.id);
+  const availableMembers = teamMembers;
 
   // Fetch annotations for current conversation
   const { data: annotations = [] } = useQuery({
@@ -281,60 +252,158 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       [
         ...messages.map((m) => ({ ...m, _type: 'message' as const })),
         ...annotations.map((a) => ({ ...a, _type: 'annotation' as const })),
-      ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+      ].sort((a, b) => {
+        const diff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        if (diff !== 0) return diff;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      }),
     [messages, annotations],
   );
   const grouped = useMemo(() => groupMessagesByDate(mergedItems), [mergedItems]);
-
-  // Keep the ref in sync so handleSend never misses the conversation ID
-  useEffect(() => {
-    if (conversation?.id) conversationIdRef.current = conversation.id;
-  }, [conversation?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [mergedItems.length]);
 
+  const handleEditMessage = (msg: MessageWithSender) => {
+    setEditingMessage(msg);
+    setReplyingTo(null);
+    setInput(msg.body ?? '');
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const handleSendEdit = async (newBody: string) => {
+    if (!editingMessage?.id || !conversation) return;
+    try {
+      // Optimistic update
+      queryClient.setQueryData<ConversationDetail>(['conversation', conversation.id], (old) => {
+        if (!old) return old;
+        return { ...old, messages: old.messages.map((m) => m.id === editingMessage.id ? { ...m, body: newBody, edited_at: new Date().toISOString() } : m) };
+      });
+      // DB update
+      await supabase.from('messages').update({ body: newBody, edited_at: new Date().toISOString() }).eq('id', editingMessage.id);
+      // Evolution edit (best-effort) — fetch external_message_id from DB if not in cache
+      let extId = editingMessage.external_message_id;
+      if (!extId) {
+        const { data: dbMsg } = await supabase.from('messages').select('external_message_id').eq('id', editingMessage.id).maybeSingle();
+        extId = dbMsg?.external_message_id ?? null;
+      }
+      // Send edit to WhatsApp via Evolution API
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        try {
+          const editRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+            body: JSON.stringify({ conversation_id: conversation.id, message_id: editingMessage.id, external_message_id: extId, new_body: newBody }),
+          });
+          const editData = await editRes.json();
+          if (!editData.ok) {
+            toast.warning(`Mensagem editada no CRM, mas não no WhatsApp: ${editData.error}`);
+          }
+        } catch {
+          toast.warning('Mensagem editada no CRM, mas falha ao comunicar com WhatsApp.');
+        }
+      }
+    } catch {
+      toast.error('Erro ao editar mensagem');
+      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+    }
+    setEditingMessage(null);
+    setInput('');
+  };
+
   const handleSend = async () => {
-    // Use ref as primary source of conversationId — it survives brief `conversation` prop flickers
-    // caused by React Query background refetches (which temporarily set data to undefined).
-    const convId = conversationIdRef.current ?? conversation?.id ?? null;
-    if (!input.trim() || !convId) {
-      console.warn('[handleSend] blocked — inputEmpty:', !input.trim(), '| noConvId:', !convId);
+    if (!conversation) return;
+
+    // Sending media with optional caption
+    if (pendingMedia) {
+      if (uploading) return;
+      setUploading(true);
+      try {
+        let mediaUrl = pendingMedia.url;
+        // If it's a local file, upload first
+        if (pendingMedia.file && companyId) {
+          const ext = pendingMedia.fileName.split('.').pop() ?? 'bin';
+          const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
+          const { error: uploadErr } = await supabase.storage.from('chat-media').upload(path, pendingMedia.file);
+          if (uploadErr) throw new Error(`Falha no upload: ${uploadErr.message}`);
+          const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
+          mediaUrl = urlData.publicUrl;
+        }
+        if (!mediaUrl) throw new Error('URL da mídia não disponível');
+        const caption = input.trim() || pendingMedia.fileName.replace(/^\d+_/, '');
+        await sendMediaMessage(mediaUrl, caption);
+        toast.success('Arquivo enviado!');
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo');
+      } finally {
+        if (pendingMedia.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
+        setPendingMedia(null);
+        setInput('');
+        setUploading(false);
+      }
+      return;
+    }
+
+    if (!input.trim()) return;
+    if (editingMessage) {
+      await handleSendEdit(input.trim());
       return;
     }
     if (isAnnotationMode) {
       try {
-        await createAnnotation(convId, input.trim());
+        await createAnnotation(conversation.id, input.trim());
         setInput('');
-        queryClient.invalidateQueries({ queryKey: ['annotations', convId] });
+        queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
       } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Erro ao salvar anotação');
       }
     } else {
-      sendMessage.mutate({ conversationId: convId, body: input.trim(), replyToId: replyingTo?.id });
+      const body = input.trim();
       setInput('');
+      // 0.5s delay before sending — humanized behavior
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      sendMessage.mutate({ conversationId: conversation.id, body, replyToId: replyingTo?.id });
       setReplyingTo(null);
+      // Auto-change status from "Aberto" to "Em Atendimento" on first agent message
+      if (conversation.status === 'new') {
+        supabase.from('conversations').update({ status: 'open' }).eq('id', conversation.id).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+          queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
+        });
+      }
     }
-    // Re-focus textarea so the user can type the next message immediately
-    textareaRef.current?.focus();
   };
 
-  const handleQuickReply = (text: string) => {
-    setInput(text);
+  const handleQuickReply = (text: string, mediaUrl?: string | null, mediaFileName?: string | null) => {
     setQuickReplyOpen(false);
     setQuickReplyFilter('');
+    setQuickReplySelectedIdx(0);
+    setInput(text);
+    // If quick reply has a media attachment, set as pending preview
+    if (mediaUrl && mediaFileName) {
+      const mimeType = mediaFileName.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? 'image/jpeg'
+        : mediaFileName.match(/\.(mp4|mov|avi|webm)$/i) ? 'video/mp4'
+        : mediaFileName.match(/\.(mp3|ogg|wav|aac)$/i) ? 'audio/mpeg'
+        : 'application/octet-stream';
+      if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
+      setPendingMedia({ url: mediaUrl, mimeType, fileName: mediaFileName });
+    }
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  // Slash command detection
+  // Slash command detection — opens on "/" alone (shows all) or "/text" (filters)
   const handleInputChange = (value: string) => {
     setInput(value);
-    if (value.startsWith('/') && value.length > 1) {
-      setQuickReplyFilter(value.slice(1).toLowerCase());
+    if (value.startsWith('/')) {
+      setQuickReplyFilter(value.length > 1 ? value.slice(1).toLowerCase() : '');
       setQuickReplyOpen(true);
-    } else if (quickReplyOpen && !value.startsWith('/')) {
+      setQuickReplySelectedIdx(0);
+    } else if (quickReplyOpen) {
       setQuickReplyOpen(false);
       setQuickReplyFilter('');
+      setQuickReplySelectedIdx(0);
     }
   };
 
@@ -346,118 +415,68 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       )
     : quickReplies;
 
-  // File upload
-  const handleFileSelect = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0 || !conversation || !companyId || !user) return;
+  // File upload — prepare preview instead of sending immediately
+  const handleFileSelect = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0 || !conversation) return;
     const file = files[0];
     if (file.size > MAX_FILE_SIZE) {
       toast.error(`Arquivo muito grande. Máximo: ${MAX_FILE_SIZE_MB}MB`);
       return;
     }
-    setUploading(true);
-    try {
-      const ext = file.name.split('.').pop() ?? 'bin';
-      const path = `${companyId}/${conversation.id}/${Date.now()}.${ext}`;
-      const { error: uploadErr } = await supabase.storage
-        .from('chat-media')
-        .upload(path, file);
-      if (uploadErr) throw new Error(`Falha no upload: ${uploadErr.message}`);
+    // Revoke previous preview URL if any
+    if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
+    const previewUrl = file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : undefined;
+    setPendingMedia({ file, mimeType: file.type, fileName: file.name, previewUrl });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [conversation, pendingMedia?.previewUrl]);
 
-      const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
-      const mediaUrl = urlData.publicUrl;
-
-      const body = file.type.startsWith('image/') ? '📷 Imagem' : file.type.startsWith('audio/') ? '🎵 Áudio' : `📎 ${file.name}`;
-
-      const { error: msgErr } = await supabase.from('messages').insert({
-        conversation_id: conversation.id,
-        company_id: companyId,
-        sender_type: 'agent',
-        sender_id: user.id,
-        body,
-        media_url: mediaUrl,
-      });
-      if (msgErr) throw new Error(`Falha ao salvar mensagem: ${msgErr.message}`);
-
-      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
-
-      // Send via WhatsApp — check delivery and show feedback
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl }),
-          });
-          const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
-          if (!whatsappData.delivered) {
-            toast.warning('Arquivo salvo, mas não foi possível encaminhar via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
-          }
-        }
-      } catch {
-        // WhatsApp send failure is non-fatal — file was already saved
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      toast.success('Arquivo enviado!');
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [conversation, companyId, user, queryClient]);
-
-  // Send file from media library (no re-upload needed)
-  const handleMediaPickerSelect = useCallback(async (url: string, mimeType: string, fileName: string) => {
+  // Actually send media (file or url) with caption
+  const sendMediaMessage = useCallback(async (mediaUrl: string, body: string) => {
     if (!conversation || !companyId || !user) return;
+    const { data: insertedMsg, error: msgErr } = await supabase.from('messages').insert({
+      conversation_id: conversation.id,
+      company_id: companyId,
+      sender_type: 'agent',
+      sender_id: user.id,
+      body,
+      media_url: mediaUrl,
+    }).select('id').single();
+    if (msgErr) throw new Error(`Falha ao salvar mensagem: ${msgErr.message}`);
+
+    await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
+
+    // Send via WhatsApp (pass message_id so external_message_id is saved for edit/delete)
     try {
-      const body = mimeType.startsWith('image/') ? '📷 Imagem' : mimeType.startsWith('audio/') ? '🎵 Áudio' : mimeType.startsWith('video/') ? '🎬 Vídeo' : `📎 ${fileName.replace(/^\d+_/, '')}`;
-
-      const { error: msgErr } = await supabase.from('messages').insert({
-        conversation_id: conversation.id,
-        company_id: companyId,
-        sender_type: 'agent',
-        sender_id: user.id,
-        body,
-        media_url: url,
-      });
-      if (msgErr) throw new Error(msgErr.message);
-
-      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
-
-      // Send via WhatsApp
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conversation.id, body, media_url: url }),
-          });
-          const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
-          if (!whatsappData.delivered) {
-            toast.warning('Arquivo salvo, mas não encaminhado via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
-          }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const whatsappRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ conversation_id: conversation.id, body, media_url: mediaUrl, message_id: insertedMsg.id }),
+        });
+        const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
+        if (!whatsappData.delivered) {
+          toast.warning('Arquivo salvo, mas não encaminhado via WhatsApp: ' + (whatsappData.error ?? whatsappData.reason ?? 'integração não encontrada'));
         }
-      } catch {
-        // WhatsApp send is non-fatal
       }
+    } catch {
+      // WhatsApp send is non-fatal
+    }
 
-      queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      toast.success('Arquivo enviado!');
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao enviar arquivo');
+    queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+
+    // Auto-change status from "Aberto" to "Em Atendimento"
+    if (conversation.status === 'new') {
+      supabase.from('conversations').update({ status: 'open' }).eq('id', conversation.id).then(() => {
+        queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+        queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
+      });
     }
   }, [conversation, companyId, user, queryClient]);
 
@@ -483,19 +502,19 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
       const mediaUrl = urlData.publicUrl;
 
-      const { error: msgErr } = await supabase.from('messages').insert({
+      const { data: insertedAudioMsg, error: msgErr } = await supabase.from('messages').insert({
         conversation_id: conversation.id,
         company_id: companyId,
         sender_type: 'agent',
         sender_id: user.id,
         body: '🎤 Áudio',
         media_url: mediaUrl,
-      });
+      }).select('id').single();
       if (msgErr) throw new Error(`Falha ao salvar mensagem: ${msgErr.message}`);
 
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversation.id);
 
-      // WhatsApp send — check delivery and show feedback
+      // WhatsApp send (pass message_id so external_message_id is saved for edit/delete)
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
@@ -506,7 +525,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               'Content-Type': 'application/json',
               apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             },
-            body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl }),
+            body: JSON.stringify({ conversation_id: conversation.id, body: '🎤 Áudio', media_url: mediaUrl, message_id: insertedAudioMsg.id }),
           });
           const whatsappData = await whatsappRes.json().catch(() => ({})) as { delivered?: boolean; error?: string; reason?: string };
           if (!whatsappData.delivered) {
@@ -542,36 +561,44 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
       closed: 'Conversa fechada!',
     };
     try {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('conversations')
         .update({ status: newStatus, close_reason: closeReason })
-        .eq('id', conversation.id);
+        .eq('id', conversation.id)
+        .select('id')
+        .single();
       if (error) throw error;
+      if (!updated) throw new Error('Nenhuma conversa atualizada — possível problema de permissão');
       toast.success(statusMessages[newStatus]);
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['leads-report'] });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Erro ao alterar status');
     } finally {
       if (isClosing) setClosing(false);
     }
-    queryClient.invalidateQueries({ queryKey: ['conversations'] });
-    queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
-    queryClient.invalidateQueries({ queryKey: ['conversation'] });
-    queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
-    // Deselect so the conversation leaves the current tab view
-    if (onBack) onBack();
   };
 
   const handleAssignAgent = async (userId: string) => {
     if (!conversation) return;
     try {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('conversations')
         .update({ assigned_user_id: userId })
-        .eq('id', conversation.id);
+        .eq('id', conversation.id)
+        .select('id')
+        .single();
       if (error) throw error;
+      if (!updated) throw new Error('Falha ao atribuir agente — possível problema de permissão');
       toast.success('Agente atribuído!');
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      queryClient.invalidateQueries({ queryKey: ['leads-report'] });
+      queryClient.invalidateQueries({ queryKey: ['inbox-status-counts'] });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Erro ao atribuir agente');
     }
@@ -627,114 +654,61 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
   const contactAvatarUrl = (conversation.contact as { avatar_url?: string | null }).avatar_url;
   const isGroup = isGroupChat(conversation.contact.phone);
   // Contatos LID: chegaram com ID de dispositivo WhatsApp (@lid), sem número de telefone
-  const isLidContact = !!(conversation.contact as any).wa_identifier_raw && !(conversation.contact as any).phone;
+  const isLidContact = !!conversation.contact.wa_identifier_raw && !conversation.contact.phone;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 bg-card">
-        {/* Row 1: Back + Avatar + Name + Action buttons */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          {onBack && (
-            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8 shrink-0" onClick={onBack}>
-              <ChevronLeft size={18} />
-            </Button>
-          )}
-          <ConversationAvatar
-            name={conversation.contact.name}
-            avatarUrl={contactAvatarUrl}
-            isGroup={isGroup}
-            size="md"
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
-              {isGroup && (
-                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
-                  Grupo
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground truncate">
-              {isGroup ? 'Conversa em grupo' : conversation.contact.phone}
-            </p>
-            <Popover open={role === 'agent' ? false : changeNumberOpen} onOpenChange={role === 'agent' ? undefined : setChangeNumberOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  disabled={role === 'agent'}
-                  className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold w-fit max-w-full transition-opacity ${role !== 'agent' ? 'hover:opacity-75' : 'cursor-default'} ${
-                  conversation.integration
-                    ? conversation.integration.status === 'connected'
-                      ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                      : 'bg-red-500/15 text-red-700 dark:text-red-400'
-                    : 'bg-muted text-muted-foreground'
-                }`}>
-                  <Smartphone size={9} className="shrink-0" />
-                  {conversation.integration ? (
-                    <>
-                      <span className="truncate">{conversation.integration.device_name}</span>
-                      {conversation.integration.phone_number && (
-                        <><span className="opacity-60 shrink-0">·</span><span className="truncate hidden sm:inline">{conversation.integration.phone_number}</span></>
-                      )}
-                      <span className="opacity-60 shrink-0">·</span>
-                      <span className="shrink-0">{conversation.integration.status === 'connected' ? 'Conectado' : 'Desconectado'}</span>
-                    </>
-                  ) : (
-                    <span>Sem número vinculado</span>
-                  )}
-                  {role !== 'agent' && <ArrowLeftRight size={8} className="opacity-50 ml-0.5 shrink-0" />}
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-60 p-2" align="start" side="bottom">
-                <p className="text-xs font-semibold text-foreground mb-1">Trocar número</p>
-                <p className="text-[10px] text-muted-foreground mb-2">O número não muda automaticamente — apenas quando alterado aqui.</p>
-                <div className="space-y-0.5">
-                  {whatsappIntegrations.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic px-2 py-1">Nenhum aparelho cadastrado</p>
-                  ) : (
-                    whatsappIntegrations.map(integ => (
-                      <button
-                        key={integ.id}
-                        onClick={() => handleChangeIntegration(integ.id)}
-                        className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs transition-colors text-left ${
-                          integ.id === conversation.integration?.id
-                            ? 'bg-primary/10 text-primary font-semibold'
-                            : 'hover:bg-accent text-foreground'
-                        }`}
-                      >
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${integ.status === 'connected' ? 'bg-green-500' : 'bg-red-400'}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate">{integ.device_name}</p>
-                          {integ.phone_number && (
-                            <p className="text-[10px] text-muted-foreground truncate">{integ.phone_number}</p>
-                          )}
-                        </div>
-                        {integ.id === conversation.integration?.id && (
-                          <span className="text-[9px] text-primary shrink-0">atual</span>
-                        )}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2 bg-card overflow-hidden">
+        {onBack && (
+          <Button variant="ghost" size="icon" className="md:hidden h-7 w-7 shrink-0" onClick={onBack}>
+            <ChevronLeft size={16} />
+          </Button>
+        )}
+        {onToggleList && (
+          <Button variant="ghost" size="icon" className="hidden md:flex h-7 w-7 shrink-0" onClick={onToggleList} title={listCollapsed ? 'Mostrar conversas' : 'Ocultar conversas'}>
+            {listCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+          </Button>
+        )}
+        <ConversationAvatar
+          name={conversation.contact.name}
+          avatarUrl={contactAvatarUrl}
+          isGroup={isGroup}
+          size="md"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
+            {isGroup && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
+                Grupo
+              </span>
+            )}
+            {showProjectBadge && conversation.project_id && projectMap[conversation.project_id] && (
+              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">
+                {projectMap[conversation.project_id]}
+              </span>
+            )}
           </div>
+          <p className="text-xs text-muted-foreground truncate">
+            {isContactTyping ? (
+              <span className="text-green-500 dark:text-green-400 font-medium animate-pulse">digitando...</span>
+            ) : isGroup ? 'Conversa em grupo' : conversation.contact.phone}
+          </p>
         </div>
 
-        {/* Row 2: Status + Assign + Actions (wraps to new line on small screens) */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Status dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                className={`h-7 gap-1 text-[11px] font-semibold rounded-full px-2.5 shrink-0 min-w-fit ${statusButtonClass[conversation.status] ?? statusButtonClass.closed}`}
-              >
-                {statusLabel[conversation.status] ?? conversation.status}
-                <ChevronDown size={11} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">
+        {/* Status dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              className={`h-7 gap-1 text-[11px] font-semibold rounded-full px-2.5 shrink-0 ${statusButtonClass[conversation.status] ?? statusButtonClass.closed}`}
+            >
+              {statusLabel[conversation.status] ?? conversation.status}
+              <ChevronDown size={11} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
               {conversation.status !== 'new' && (
                 <DropdownMenuItem className="text-xs flex flex-col items-start gap-0.5" onClick={() => handleChangeStatus('new')}>
                   <span className="font-semibold text-green-600 dark:text-green-400">Aberto</span>
@@ -768,85 +742,159 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Assign dropdown */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <Select
-                  value={conversation.assigned_user_id ?? ''}
-                  disabled={!canReassign && conversation.assigned_user_id === user?.id}
-                  onValueChange={handleAssignAgent}
-                >
-                  <SelectTrigger className={`h-7 w-[110px] sm:w-[140px] text-[11px] ${!canReassign ? 'opacity-60' : ''}`}>
-                    <SelectValue placeholder="Atribuir" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableMembers.map((m) => (
-                      <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </TooltipTrigger>
-            {reassignTooltip && (
-              <TooltipContent side="bottom">
-                <p className="text-xs">{reassignTooltip}</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
+        {/* Assign dropdown */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="hidden sm:block">
+              <Select
+                value={conversation.assigned_user_id ?? ''}
+                disabled={!canReassign}
+                onValueChange={handleAssignAgent}
+              >
+                <SelectTrigger className={`h-7 w-[120px] text-[11px] ${!canReassign ? 'opacity-60' : ''}`}>
+                  <SelectValue placeholder="Atribuir" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </TooltipTrigger>
+          {reassignTooltip && (
+            <TooltipContent side="bottom">
+              <p className="text-xs">{reassignTooltip}</p>
+            </TooltipContent>
+          )}
+        </Tooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7 text-primary" onClick={() => setAIDrawerOpen(true)}>
-                <Sparkles size={15} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom"><p className="text-xs">Assistente IA</p></TooltipContent>
-          </Tooltip>
+        <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7" onClick={onToggleProfile}>
+          {profileOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+        </Button>
 
-          <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7 hidden sm:flex" onClick={onToggleProfile}>
-            {profileOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-          </Button>
-
-          {/* Mais Opções */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7">
-                <MoreVertical size={15} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem className="text-xs gap-2" onClick={() => queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] })}>
-                <RefreshCw size={13} /> Recarregar mensagens
-              </DropdownMenuItem>
+        {/* Mais Opções */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="shrink-0 h-7 w-7">
+              <MoreVertical size={15} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {/* Assign agent — visible only on small screens where inline select is hidden */}
+            <div className="lg:hidden px-2 py-1.5 border-b border-border">
+              <p className="text-[10px] text-muted-foreground mb-1">Responsável</p>
+              <Select
+                value={conversation.assigned_user_id ?? ''}
+                disabled={!canReassign}
+                onValueChange={handleAssignAgent}
+              >
+                <SelectTrigger className="h-7 text-xs w-full">
+                  <SelectValue placeholder="Atribuir agente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => setAIDrawerOpen(true)}>
+              <Sparkles size={13} /> Assistente IA
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] })}>
+              <RefreshCw size={13} /> Recarregar mensagens
+            </DropdownMenuItem>
+            {permissions.can('chats_add_note') && (
               <DropdownMenuItem className="text-xs gap-2" onClick={() => setIsAnnotationMode(true)}>
                 <StickyNote size={13} /> Escrever uma anotação
               </DropdownMenuItem>
+            )}
+            {permissions.can('chatbot_execute') && (
               <DropdownMenuItem className="text-xs gap-2" onClick={() => setAIDrawerOpen(true)}>
                 <Bot size={13} /> Executar Diálogo / Chatbot
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs gap-2 sm:hidden" onClick={onToggleProfile}>
-                {profileOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
-                {profileOpen ? 'Fechar perfil' : 'Ver perfil'}
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
+            )}
+            {/* Trocar número de envio */}
+            {whatsappIntegrations.length > 1 && (
+              <div className="px-2 py-1.5 border-b border-border">
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1">
+                  <Smartphone size={10} /> Enviar por:
+                </p>
+                {whatsappIntegrations.map((integ) => (
+                  <button
+                    key={integ.id}
+                    onClick={() => handleChangeIntegration(integ.id)}
+                    className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs text-left transition-colors ${
+                      conversation.integration_id === integ.id
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'hover:bg-accent text-foreground'
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${integ.status === 'connected' ? 'bg-green-500' : 'bg-red-400'}`} />
+                    <span className="truncate">{integ.device_name || integ.phone_number || 'Número'}</span>
+                    {integ.phone_number && integ.device_name && (
+                      <span className="text-[10px] text-muted-foreground truncate">{integ.phone_number}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            <DropdownMenuItem className="text-xs gap-2" onClick={() => {
+              const url = `${window.location.origin}/inbox?id=${conversation.id}`;
+              navigator.clipboard.writeText(url);
+              toast.success('Link da conversa copiado!');
+            }}>
+              <Copy size={13} /> Copiar link da conversa
+            </DropdownMenuItem>
+            {conversation.status !== 'closed' && (
+              <DropdownMenuItem className="text-xs gap-2 text-destructive focus:text-destructive" onClick={async () => {
                 try {
-                  await markConversationUnread(conversation.id);
+                  await closeConversation(conversation.id, 'resolvido');
+                  toast.success('Conversa fechada!');
                   queryClient.invalidateQueries({ queryKey: ['conversations'] });
                   queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
-                  queryClient.invalidateQueries({ queryKey: ['unread-counts'] });
+                  queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
                   queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
-                  toast.success('Conversa marcada como não lida');
-                  if (onBack) onBack();
-                } catch {
-                  toast.error('Erro ao marcar como não lido');
-                }
+                } catch { toast.error('Erro ao fechar conversa'); }
               }}>
-                <BellRing size={13} /> Marcar como não lida
+                <CheckCircle size={13} /> Fechar conversa
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            )}
+            <DropdownMenuItem className="text-xs gap-2 text-muted-foreground" onClick={async () => {
+              try {
+                const convId = conversation.id;
+                // 1. Deselect FIRST so realtime won't re-mark as read
+                if (onBack) onBack({ skipAutoSelect: true });
+                // 2. Wait a tick for React to propagate selectedId=null to the realtime ref
+                await new Promise(r => setTimeout(r, 50));
+                // 3. Now safely delete the conversation_reads record
+                await markConversationUnread(convId);
+                // 4. Force unread badge to show (overwrite any stale optimistic state)
+                queryClient.setQueriesData<Record<string, number>>(
+                  { queryKey: ['unread-counts'] },
+                  (old) => old ? { ...old, [convId]: 1 } : old,
+                );
+                // 5. Refresh lists and sidebar
+                queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                queryClient.invalidateQueries({ queryKey: ['conversations-infinite'] });
+                queryClient.invalidateQueries({ queryKey: ['sidebar-stats'] });
+                // 6. Re-apply unread badge after sidebar refresh (prevents race with refetch)
+                setTimeout(() => {
+                  queryClient.setQueriesData<Record<string, number>>(
+                    { queryKey: ['unread-counts'] },
+                    (old) => old ? { ...old, [convId]: Math.max(old[convId] ?? 0, 1) } : old,
+                  );
+                }, 500);
+                toast.success('Conversa marcada como não lida');
+              } catch {
+                toast.error('Erro ao marcar como não lido');
+              }
+            }}>
+              <BellRing size={13} /> Marcar como não lida
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* AI Chat Assist Drawer */}
@@ -874,16 +922,96 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
               </div>
               {group.messages.map((item, idx) => {
                 if (item._type === 'annotation') {
+                  const isEditingThis = editingAnnotation?.id === item.id;
                   return (
-                    <div key={item.id} className="flex justify-center my-2">
-                      <div className="max-w-[80%] rounded-xl px-3.5 py-2 bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 shadow-sm">
+                    <div key={item.id} className="flex justify-center my-2 group/ann">
+                      <div className="max-w-[80%] rounded-xl px-3.5 py-2 bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 shadow-sm relative">
+                        {/* Action buttons */}
+                        <div className="absolute -top-1 -right-1 opacity-0 group-hover/ann:opacity-100 transition-opacity flex gap-0.5 z-10">
+                          <button
+                            className="p-1 rounded-full bg-amber-200 dark:bg-amber-800 hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors"
+                            title="Editar"
+                            onClick={() => setEditingAnnotation({ id: item.id, body: item.body })}
+                          >
+                            <Pencil size={10} className="text-amber-700 dark:text-amber-300" />
+                          </button>
+                          <button
+                            className="p-1 rounded-full bg-red-200 dark:bg-red-800 hover:bg-red-300 dark:hover:bg-red-700 transition-colors"
+                            title="Excluir"
+                            onClick={async () => {
+                              try {
+                                await deleteAnnotation(item.id);
+                                queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
+                                toast.success('Anotação excluída');
+                              } catch {
+                                toast.error('Erro ao excluir anotação');
+                              }
+                            }}
+                          >
+                            <X size={10} className="text-red-700 dark:text-red-300" />
+                          </button>
+                        </div>
                         <div className="flex items-center gap-1.5 mb-1">
                           <Lock size={10} className="text-amber-600 dark:text-amber-400" />
                           <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
                             {item.author?.name ?? 'Agente'} · Anotação interna
                           </span>
                         </div>
-                        <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{item.body}</p>
+                        {isEditingThis ? (
+                          <div className="flex flex-col gap-1.5">
+                            <textarea
+                              className="text-sm bg-white dark:bg-amber-950/50 border border-amber-400 dark:border-amber-600 rounded px-2 py-1 text-amber-900 dark:text-amber-100 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500"
+                              rows={2}
+                              value={editingAnnotation.body}
+                              onChange={(e) => setEditingAnnotation({ ...editingAnnotation, body: e.target.value })}
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') setEditingAnnotation(null);
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  const newBody = editingAnnotation.body.trim();
+                                  if (newBody) {
+                                    updateAnnotation(item.id, newBody)
+                                      .then(() => {
+                                        queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
+                                        toast.success('Anotação atualizada');
+                                      })
+                                      .catch(() => toast.error('Erro ao editar anotação'));
+                                  }
+                                  setEditingAnnotation(null);
+                                }
+                              }}
+                            />
+                            <div className="flex gap-1 justify-end">
+                              <button
+                                className="text-[10px] px-2 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-300"
+                                onClick={() => setEditingAnnotation(null)}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                className="text-[10px] px-2 py-0.5 rounded bg-amber-500 text-white hover:bg-amber-600"
+                                onClick={async () => {
+                                  const newBody = editingAnnotation.body.trim();
+                                  if (newBody) {
+                                    try {
+                                      await updateAnnotation(item.id, newBody);
+                                      queryClient.invalidateQueries({ queryKey: ['annotations', conversation.id] });
+                                      toast.success('Anotação atualizada');
+                                    } catch {
+                                      toast.error('Erro ao editar anotação');
+                                    }
+                                  }
+                                  setEditingAnnotation(null);
+                                }}
+                              >
+                                Salvar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{item.body}</p>
+                        )}
                         <p className="text-[10px] text-amber-600 dark:text-amber-400 text-right mt-0.5">
                           {new Date(item.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         </p>
@@ -902,19 +1030,51 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                 return (
                   <MessageBubble
                     key={item.id}
-                    msg={item}
+                    msg={{ ...item, deleted_by_name: item.deleted_at ? (item.sender_name ?? item.sender?.name ?? null) : null }}
                     isOutgoing={item.sender_type === 'agent' || item.sender_type === 'system'}
                     contactName={conversation.contact.name}
                     contactAvatarUrl={contactAvatarUrl}
                     isGroup={isGroup}
                     showSenderHeader={showSenderHeader}
-                    onReply={(m) => setReplyingTo(m as MessageWithSender)}
+                    isAdminView={permissions.isSupervisorOrAbove}
+                    onReply={(m) => { setReplyingTo(m as MessageWithSender); setTimeout(() => inputRef.current?.focus(), 50); }}
+                    onEdit={(m) => handleEditMessage(m as MessageWithSender)}
+                    onScrollToMessage={(msgId) => {
+                      const el = document.querySelector(`[data-message-id="${msgId}"]`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('ring-2', 'ring-primary', 'rounded-2xl');
+                        setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-2xl'), 2000);
+                      }
+                    }}
                     onDelete={async (msgId) => {
                       try {
-                        await deleteMessage(msgId);
-                        queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+                        // Optimistic delete
+                        queryClient.setQueryData<ConversationDetail>(['conversation', conversation.id], (old) => {
+                          if (!old) return old;
+                          return { ...old, messages: old.messages.map((m) => m.id === msgId ? { ...m, deleted_at: new Date().toISOString() } : m) };
+                        });
+                        await deleteMessage(msgId, user?.id);
+                        // Delete on WhatsApp via Evolution API
+                        const { data: { session } } = await supabase.auth.getSession();
+                        if (session?.access_token) {
+                          try {
+                            const delRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-whatsapp`, {
+                              method: 'DELETE',
+                              headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+                              body: JSON.stringify({ conversation_id: conversation.id, message_id: msgId }),
+                            });
+                            const delData = await delRes.json();
+                            if (!delData.ok) {
+                              toast.warning(`Mensagem apagada no CRM, mas não no WhatsApp: ${delData.error}`);
+                            }
+                          } catch {
+                            toast.warning('Mensagem apagada no CRM, mas falha ao comunicar com WhatsApp.');
+                          }
+                        }
                       } catch {
                         toast.error('Erro ao apagar mensagem');
+                        queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
                       }
                     }}
                   />
@@ -934,8 +1094,22 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
         </div>
       )}
 
+      {/* Edit preview bar */}
+      {editingMessage && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-300 dark:border-blue-700">
+          <Pencil size={13} className="text-blue-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">Editando mensagem</p>
+            <p className="text-[10px] text-muted-foreground truncate">{editingMessage.body}</p>
+          </div>
+          <button onClick={() => { setEditingMessage(null); setInput(''); }} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       {/* Reply preview bar */}
-      {replyingTo && !isAnnotationMode && (
+      {replyingTo && !isAnnotationMode && !editingMessage && (
         <div className="flex items-center gap-2 px-3 py-2 bg-secondary/60 border-t border-border">
           <Reply size={13} className="text-primary shrink-0" />
           <div className="flex-1 min-w-0">
@@ -946,6 +1120,39 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </div>
           <button onClick={() => setReplyingTo(null)} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Media preview bar */}
+      {pendingMedia && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-secondary/60 border-t border-border">
+          {pendingMedia.mimeType.startsWith('image/') && pendingMedia.previewUrl ? (
+            <img src={pendingMedia.previewUrl} alt="Preview" className="h-14 w-14 rounded-md object-cover shrink-0" />
+          ) : pendingMedia.mimeType.startsWith('image/') && pendingMedia.url ? (
+            <img src={pendingMedia.url} alt="Preview" className="h-14 w-14 rounded-md object-cover shrink-0" />
+          ) : pendingMedia.mimeType.startsWith('video/') && pendingMedia.previewUrl ? (
+            <video src={pendingMedia.previewUrl} className="h-14 w-14 rounded-md object-cover shrink-0" muted />
+          ) : (
+            <div className="h-14 w-14 rounded-md bg-muted flex items-center justify-center shrink-0">
+              <Paperclip size={20} className="text-muted-foreground" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground truncate">{pendingMedia.fileName.replace(/^\d+_/, '')}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {pendingMedia.file ? `${(pendingMedia.file.size / 1024 / 1024).toFixed(1)} MB` : 'Biblioteca de mídia'}
+              {' — '}Digite uma legenda ou envie direto
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (pendingMedia.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
+              setPendingMedia(null);
+            }}
+            className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+          >
+            <X size={16} />
           </button>
         </div>
       )}
@@ -984,19 +1191,79 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </div>
         )}
 
+        {/* Banner: número desconectado/restringido/banido */}
+        {conversation.integration && conversation.integration.status !== 'connected' && !isAnnotationMode && (
+          <div className={`flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md border ${
+            conversation.integration.status === 'banned'
+              ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800'
+              : conversation.integration.status === 'restricted'
+              ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800'
+              : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800'
+          }`}>
+            <Smartphone size={13} className={`shrink-0 ${
+              conversation.integration.status === 'banned' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
+            }`} />
+            <p className={`text-[11px] flex-1 ${
+              conversation.integration.status === 'banned' ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'
+            }`}>
+              Número <span className="font-semibold">{conversation.integration.device_name}{conversation.integration.phone_number ? ` (${conversation.integration.phone_number})` : ''}</span>
+              {' '}{conversation.integration.status === 'banned' ? 'banido' : conversation.integration.status === 'restricted' ? 'restringido' : 'desconectado'}
+              {' '}— mensagens podem ser enviadas por outro número
+            </p>
+          </div>
+        )}
+
+        {/* Banner: mensagens agendadas */}
+        {scheduledMsgs.length > 0 && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800">
+            <Clock size={13} className="text-blue-600 dark:text-blue-400 shrink-0" />
+            <p className="text-[11px] text-blue-700 dark:text-blue-300 flex-1 truncate">
+              Mensagem agendada para{' '}
+              <span className="font-semibold font-mono">
+                {format(new Date(scheduledMsgs[0].scheduled_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+              </span>
+              {scheduledMsgs.length > 1 && (
+                <span className="ml-1 text-blue-500 dark:text-blue-400">+{scheduledMsgs.length - 1} mais</span>
+              )}
+            </p>
+            <button
+              onClick={async () => {
+                if (!confirm('Cancelar esta mensagem agendada?')) return;
+                await supabase.from('scheduled_messages').update({ cancelled_at: new Date().toISOString() }).eq('id', scheduledMsgs[0].id);
+                queryClient.invalidateQueries({ queryKey: ['scheduled-messages-banner', conversation.id] });
+                queryClient.invalidateQueries({ queryKey: ['scheduled-messages-panel', conversation.id] });
+              }}
+              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+
         {/* Quick reply popover (slash command) */}
-        {quickReplyOpen && filteredQuickReplies.length > 0 && (
-          <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-border bg-popover shadow-md">
-            {filteredQuickReplies.map((qr) => (
-              <button
-                key={qr.id}
-                onClick={() => handleQuickReply(qr.message)}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center gap-2 border-b border-border/50 last:border-0"
-              >
-                <span className="text-xs font-mono text-primary font-semibold">/{qr.shortcut}</span>
-                <span className="text-muted-foreground truncate">{qr.message}</span>
-              </button>
-            ))}
+        {quickReplyOpen && (
+          <div className="mb-2 rounded-lg border border-border bg-popover shadow-md">
+            {filteredQuickReplies.length === 0 ? (
+              <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+                Nenhuma resposta encontrada
+              </div>
+            ) : (
+              <div className="max-h-52 overflow-y-auto">
+                {filteredQuickReplies.map((qr, idx) => (
+                  <button
+                    key={qr.id}
+                    onClick={() => handleQuickReply(qr.message, qr.media_url, qr.media_file_name)}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 border-b border-border/50 last:border-0 ${
+                      idx === quickReplySelectedIdx ? 'bg-accent' : 'hover:bg-accent/50'
+                    }`}
+                  >
+                    <span className="text-xs font-mono text-primary font-semibold shrink-0">/{qr.shortcut}</span>
+                    <span className="text-muted-foreground truncate text-xs">{qr.message}</span>
+                    {qr.media_file_name && <Paperclip size={10} className="shrink-0 text-primary/60" />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1018,21 +1285,6 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             >
               <Paperclip size={17} />
             </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  onClick={() => setMediaPickerOpen(true)}
-                >
-                  <FolderOpen size={17} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <p className="text-xs">Biblioteca de arquivos</p>
-              </TooltipContent>
-            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -1058,18 +1310,38 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                   <Smile size={17} />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-72 p-2" align="start" side="top">
-                <div className="grid grid-cols-8 gap-0.5">
-                  {['😀','😂','🥰','😍','🤩','😎','🥳','😊','👍','👏','🙌','🤝','❤️','🔥','⭐','✅','🎉','🎊','💪','🙏','😅','😭','😡','😱','🤔','💡','📢','📌','📅','📋','💰','💳','🛒','🏆','🎯','✨','🌟','💫','📱','💻','📧','📞','🕐','⏰','🗓️','📊','📈','📉','🔒','🔓','⚠️','✔️','❌','➕','➖','➡️','⬅️','🔄','💬','📩','📤','📥'].map((emoji) => (
-                    <button
-                      key={emoji}
-                      className="h-8 w-8 flex items-center justify-center text-lg hover:bg-accent rounded transition-colors"
-                      onClick={() => setInput((prev) => prev + emoji)}
-                    >
-                      {emoji}
-                    </button>
+              <PopoverContent className="w-80 p-0" align="start" side="top">
+                <ScrollArea className="h-72">
+                  {([
+                    { label: 'Mais usados', emojis: ['😀','😂','🥰','😍','😎','😊','👍','👏','❤️','🔥','✅','🎉','💪','🙏','🤝','✨'] },
+                    { label: 'Rostos', emojis: ['😃','😄','😁','😆','😅','🤣','😂','🙂','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🥴','😵','🤯','🥱','😤','😡','🤬','😈','👿','💀','☠️','💩','🤡','👻','👽','🤖','😺','😸','😹','😻','😼','😽','🙀','😿','😾'] },
+                    { label: 'Gestos', emojis: ['👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','💅','🤳','💪'] },
+                    { label: 'Corações', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️','🫶','😍','🥰','😘','💋','💌'] },
+                    { label: 'Mãos e Pessoas', emojis: ['🧑','👩','👨','🧑‍💼','👩‍💼','👨‍💼','🧑‍💻','👩‍💻','👨‍💻','🙋','🙋‍♀️','🙋‍♂️','💁','💁‍♀️','💁‍♂️','🙅','🙅‍♀️','🙅‍♂️','🙆','🤦','🤦‍♀️','🤦‍♂️','🤷','🤷‍♀️','🤷‍♂️','🧏','💆','💇','🚶','🏃','💃','🕺','🧑‍🤝‍🧑','👫','👬','👭'] },
+                    { label: 'Natureza', emojis: ['🌸','🌺','🌻','🌹','🌷','🌼','🪻','💐','🍀','🌿','🌱','🌵','🌴','🌳','🍃','🍂','🍁','🌾','🌊','🔥','⭐','🌟','💫','✨','☀️','🌤️','⛅','🌈','🌙','⚡','❄️','🌪️'] },
+                    { label: 'Comida', emojis: ['🍎','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍑','🥭','🍍','🥥','🍔','🍕','🌮','🌯','🥗','🍜','🍝','🍣','🍱','🍰','🎂','🍩','🍪','🍫','☕','🍵','🥤','🍺','🍷','🥂','🍾'] },
+                    { label: 'Atividades', emojis: ['⚽','🏀','🏈','⚾','🎾','🏐','🎱','🏓','🏸','🏒','🥊','🎯','🏆','🥇','🥈','🥉','🎮','🎲','🎪','🎨','🎬','🎤','🎧','🎵','🎶','🎹','🥁','🎸','🎺','🎻'] },
+                    { label: 'Viagem', emojis: ['🚗','🚕','🏎️','🚌','🚎','🚐','🛻','🚚','✈️','🚀','🛸','🚁','🛶','⛵','🚢','🏠','🏡','🏢','🏥','🏦','🏪','🏫','🏛️','⛪','🕌','🌍','🌎','🌏','🗺️','🧭'] },
+                    { label: 'Objetos', emojis: ['📱','💻','⌨️','🖥️','🖨️','📷','📹','🎥','📞','☎️','📟','📠','📺','📻','🔊','🔔','📢','📣','💡','🔦','🕯️','📖','📚','✏️','🖊️','📝','📋','📌','📎','🔗','✂️','📐','📏','🔒','🔓','🔑','🗝️'] },
+                    { label: 'Símbolos', emojis: ['✅','❌','✔️','❎','➕','➖','➡️','⬅️','⬆️','⬇️','↩️','↪️','🔄','🔃','⚠️','🚫','⛔','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤','🔶','🔷','🔸','🔹','💠','🔘','🏳️','🏴','🚩','🏁'] },
+                    { label: 'Negócios', emojis: ['💰','💵','💴','💶','💷','💳','💎','⚖️','🧰','🔧','🔨','⚙️','🧲','📊','📈','📉','📃','📄','📑','🗂️','📁','📂','🗄️','🗃️','📦','📮','📧','📩','📤','📥','✉️','💼','🏷️','🔖'] },
+                  ] as const).map((cat) => (
+                    <div key={cat.label} className="px-2 pt-2 pb-1">
+                      <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 sticky top-0 bg-popover py-0.5">{cat.label}</p>
+                      <div className="grid grid-cols-8 gap-0.5">
+                        {cat.emojis.map((emoji, i) => (
+                          <button
+                            key={`${cat.label}-${i}`}
+                            className="h-8 w-8 flex items-center justify-center text-lg hover:bg-accent rounded transition-colors"
+                            onClick={() => setInput((prev) => prev + emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </div>
+                </ScrollArea>
               </PopoverContent>
             </Popover>
 
@@ -1093,10 +1365,13 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                     quickReplies.map((qr) => (
                       <button
                         key={qr.id}
-                        onClick={() => handleQuickReply(qr.message)}
+                        onClick={() => handleQuickReply(qr.message, qr.media_url, qr.media_file_name)}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors border-b border-border/50 last:border-0"
                       >
-                        <span className="text-xs font-mono text-primary font-semibold">/{qr.shortcut}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-mono text-primary font-semibold">/{qr.shortcut}</span>
+                          {qr.media_file_name && <Paperclip size={10} className="text-primary/60" />}
+                        </div>
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">{qr.message}</p>
                       </button>
                     ))
@@ -1107,21 +1382,70 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </div>
 
           <Textarea
-            ref={textareaRef}
-            placeholder={isAnnotationMode ? 'Escreva uma anotação interna...' : 'Digite uma mensagem...'}
+            ref={inputRef}
+            placeholder={isAnnotationMode ? 'Escreva uma anotação interna...' : pendingMedia ? 'Digite uma legenda para o arquivo...' : 'Digite uma mensagem...'}
             value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+            onChange={(e) => {
+              handleInputChange(e.target.value);
+              // Auto-expand textarea height
+              const el = e.target;
+              el.style.height = 'auto';
+              el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+            }}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                  e.preventDefault();
+                  const file = items[i].getAsFile();
+                  if (file) {
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    handleFileSelect(dt.files);
+                  }
+                  return;
+                }
+              }
+            }}
+            onKeyDown={(e) => {
+              if (quickReplyOpen && filteredQuickReplies.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setQuickReplySelectedIdx((prev) => (prev + 1) % filteredQuickReplies.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setQuickReplySelectedIdx((prev) => (prev - 1 + filteredQuickReplies.length) % filteredQuickReplies.length);
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  const selectedQr = filteredQuickReplies[quickReplySelectedIdx];
+                  handleQuickReply(selectedQr.message, selectedQr.media_url, selectedQr.media_file_name);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setQuickReplyOpen(false);
+                  setQuickReplyFilter('');
+                  setQuickReplySelectedIdx(0);
+                  return;
+                }
+              }
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
             className={`flex-1 min-h-[38px] max-h-[120px] resize-none border-0 text-sm py-2 leading-relaxed ${isAnnotationMode ? 'bg-amber-100/50 dark:bg-amber-900/20' : 'bg-secondary'}`}
             rows={1}
           />
 
           <div className="flex items-center gap-0.5">
-            {!input.trim() && !isAnnotationMode ? (
+            {!input.trim() && !isAnnotationMode && !pendingMedia ? (
               <AudioRecorder onSend={handleAudioSend} />
             ) : null}
             {/* Schedule message button */}
-            {input.trim() && !isAnnotationMode && (
+            {input.trim() && !isAnnotationMode && permissions.can('messages_schedule') && (
               <ScheduleMessageButton
                 conversationId={conversation.id}
                 companyId={companyId}
@@ -1133,20 +1457,15 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
             <Button
               size="icon"
               onClick={handleSend}
+              disabled={(!input.trim() && !pendingMedia) || uploading || (isLidContact && !isAnnotationMode)}
               className={`h-8 w-8 rounded-full shrink-0 ${isAnnotationMode ? 'bg-amber-500 hover:bg-amber-600' : ''}`}
             >
-              <Send size={15} />
+              {uploading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Media Picker Modal */}
-      <MediaPickerModal
-        open={mediaPickerOpen}
-        onClose={() => setMediaPickerOpen(false)}
-        onSelect={handleMediaPickerSelect}
-      />
     </div>
   );
 }

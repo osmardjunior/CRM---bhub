@@ -120,7 +120,7 @@ export default function ModulosPage() {
       ))}
 
       {/* CTA */}
-      <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 flex items-center gap-4">
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 flex flex-wrap items-center gap-4">
         <Puzzle size={28} className="text-primary shrink-0" />
         <div className="flex-1">
           <p className="text-sm font-semibold text-foreground">Precisa de um módulo adicional?</p>
@@ -128,7 +128,7 @@ export default function ModulosPage() {
             Entre em contato com nossa equipe de suporte para contratar módulos adicionais ou tirar dúvidas sobre funcionalidades.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => window.open('https://chatguru.com.br', '_blank')}>
+        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => window.open('https://all-in-crm.vercel.app/suporte', '_blank')}>
           <ExternalLink size={13} /> Falar com suporte
         </Button>
       </div>

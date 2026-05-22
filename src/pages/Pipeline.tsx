@@ -25,6 +25,7 @@ import { useFunnels, Funnel } from '@/contexts/FunnelContext';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useProjects } from '@/hooks/useProjects';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProjectContext } from '@/contexts/ProjectContext';
 
 // ── Wave SVG ──────────────────────────────────────────────
 function FunnelWave({ stages }: { stages: { label: string; count: number }[] }) {
@@ -265,7 +266,7 @@ function FunnelCard({
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
             <Filter size={11} />
-            Métricas
+            <span className="hidden sm:inline">Métricas</span>
           </Button>
           {isAdmin && (
             <button
@@ -273,7 +274,7 @@ function FunnelCard({
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1 transition-colors hover:bg-accent"
             >
               <Plus size={12} />
-              Mais Opções
+              <span className="hidden sm:inline">Mais Opções</span>
             </button>
           )}
         </div>
@@ -340,20 +341,20 @@ function FunnelCard({
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex gap-2">
+          <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-primary text-primary hover:bg-primary hover:text-primary-foreground" onClick={() => { setRenameValue(funnel.name); setRenameOpen(true); }}>
                 <Pencil size={11} />
-                Alterar Nome
+                <span className="hidden sm:inline">Alterar Nome</span>
               </Button>
               <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-info text-info hover:bg-info hover:text-white">
                 <Download size={11} />
-                Exportar em CSV
+                <span className="hidden sm:inline">Exportar em CSV</span>
               </Button>
             </div>
             <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5" onClick={() => setConfirmDelete(true)}>
               <Trash2 size={11} />
-              Apagar Funil
+              <span className="hidden sm:inline">Apagar Funil</span>
             </Button>
           </div>
         </div>
@@ -423,10 +424,16 @@ function FunnelEmptyState({ onCreate }: { onCreate: () => void }) {
 // ── Page ─────────────────────────────────────────────────
 export default function PipelinePage() {
   const navigate = useNavigate();
-  const { funnels, addFunnel, deleteFunnel, renameFunnel } = useFunnels();
+  const { funnels: allFunnels, addFunnel, deleteFunnel, renameFunnel } = useFunnels();
   const [showCreate, setShowCreate] = useState(false);
   const { role } = useAuth();
   const isAdmin = role === 'admin';
+
+  // Filter funnels by selected project (show project-specific + global funnels)
+  const { projectId } = useProjectContext();
+  const funnels = projectId
+    ? allFunnels.filter(f => f.project_id === projectId || !f.project_id)
+    : allFunnels;
 
   return (
     <div className="flex flex-col gap-0">
@@ -444,7 +451,7 @@ export default function PipelinePage() {
             onClick={() => setShowCreate(true)}
           >
             <Plus size={14} />
-            Criar novo funil
+            <span className="hidden sm:inline">Criar novo funil</span>
           </Button>
         )}
       </div>

@@ -16,7 +16,7 @@ export function useUserProjects(projectId: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('user_projects')
-        .select('*')
+        .select('user_id, project_id, active, created_at')
         .eq('project_id', projectId)
         .eq('active', true);
       if (error) throw error;

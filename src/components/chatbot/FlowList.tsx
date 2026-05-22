@@ -63,7 +63,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   none: 'Manual',
   first_message: '1ª mensagem',
   any_message: 'Qualquer msg',
-  keyword: 'Palavra-chave',
+  keyword: 'Frase-chave',
   status_resolved: 'Resolvido',
   status_opened: 'Em Atend.',
   new_contact: 'Novo contato',
@@ -80,13 +80,15 @@ type NavigationLevel = 'departments' | 'projects' | 'flows';
 interface FlowListProps {
   flows: ChatbotFlow[];
   onSelect: (flow: ChatbotFlow) => void;
-  onCreate: (name: string | { name: string; department_id?: string | null; project_id?: string | null }) => void;
-  onCreateFromTemplate: (name: string, nodes: Array<{ node_type: ChatbotNode['node_type']; config: Record<string, unknown> }>) => void;
-  onDelete: (id: string) => void;
-  onToggleActive: (id: string, active: boolean) => void;
+  onCreate?: ((name: string | { name: string; department_id?: string | null; project_id?: string | null }) => void) | undefined;
+  onCreateFromTemplate?: ((name: string, nodes: Array<{ node_type: ChatbotNode['node_type']; config: Record<string, unknown> }>) => void) | undefined;
+  onDelete?: ((id: string) => void) | undefined;
+  onToggleActive?: ((id: string, active: boolean) => void) | undefined;
+  /** When a global project is selected, skip dept/project navigation and show flows flat */
+  activeProjectId?: string | null;
 }
 
-export default function FlowList({ flows, onSelect, onCreate, onCreateFromTemplate, onDelete, onToggleActive }: FlowListProps) {
+export default function FlowList({ flows, onSelect, onCreate, onCreateFromTemplate, onDelete, onToggleActive, activeProjectId }: FlowListProps) {
   const { data: departments = [] } = useDepartments();
 
   // Navigation state
@@ -344,6 +346,44 @@ export default function FlowList({ flows, onSelect, onCreate, onCreateFromTempla
       />
     </>
   );
+
+  // --- PROJECT SELECTED GLOBALLY: flat list, no navigation hierarchy ---
+  if (activeProjectId) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">{flows.length} fluxo(s)</p>
+          {onCreate && (
+            <Button onClick={() => setShowCreate(true)} size="sm">
+              <Plus size={16} className="mr-2" /> Novo fluxo
+            </Button>
+          )}
+        </div>
+        {flows.length === 0 ? (
+          <div className="py-10 text-center">
+            <div className="h-14 w-14 rounded-2xl bg-accent flex items-center justify-center mx-auto mb-3">
+              <Plus size={24} className="text-accent-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">Nenhum fluxo neste projeto.</p>
+            {onCreate && (
+              <Button onClick={() => setShowCreate(true)} size="sm">
+                <Plus size={14} className="mr-2" /> Criar fluxo
+              </Button>
+            )}
+            {templatesSection}
+          </div>
+        ) : (
+          <FlowCardList
+            flows={flows}
+            onSelect={onSelect}
+            onToggleActive={onToggleActive}
+            onDelete={id => setDeleteId(id)}
+          />
+        )}
+        {dialogs}
+      </div>
+    );
+  }
 
   // --- DEPARTMENT LEVEL ---
   if (level === 'departments') {

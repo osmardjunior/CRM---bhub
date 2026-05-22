@@ -1,22 +1,33 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const STORAGE_KEY = 'notification-sound-enabled';
 
 export function useNotificationSound() {
-  const play = useCallback(() => {
-    try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-      oscillator.frequency.value = 880;
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + 0.3);
-    } catch {
-      // Audio not available
-    }
+  const [enabled, setEnabled] = useState(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored === null ? true : stored === 'true';
+  });
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    audioRef.current = new Audio('/sounds/notification.mp3');
+    audioRef.current.volume = 0.5;
   }, []);
 
-  return { play };
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, String(enabled));
+  }, [enabled]);
+
+  const play = useCallback(() => {
+    if (!enabled || !audioRef.current) return;
+    audioRef.current.currentTime = 0;
+    audioRef.current.play().catch(() => {});
+  }, [enabled]);
+
+  const toggle = useCallback(() => {
+    setEnabled(prev => !prev);
+  }, []);
+
+  return { enabled, toggle, play };
 }

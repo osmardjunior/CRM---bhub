@@ -52,11 +52,11 @@ export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePaus
       <TableHeader>
         <TableRow>
           <TableHead>Nome</TableHead>
-          <TableHead>Ação</TableHead>
+          <TableHead className="hidden sm:table-cell">Ação</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Progresso</TableHead>
-          <TableHead>Recipientes</TableHead>
-          <TableHead>Criada em</TableHead>
+          <TableHead className="hidden md:table-cell">Progresso</TableHead>
+          <TableHead className="hidden md:table-cell">Recipientes</TableHead>
+          <TableHead className="hidden lg:table-cell">Criada em</TableHead>
           <TableHead className="w-10" />
         </TableRow>
       </TableHeader>
@@ -67,11 +67,11 @@ export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePaus
           return (
             <TableRow key={c.id}>
               <TableCell className="font-medium">{c.name}</TableCell>
-              <TableCell className="text-sm text-muted-foreground">{ACTION_LABELS[c.action_type] ?? c.action_type}</TableCell>
+              <TableCell className="text-sm text-muted-foreground hidden sm:table-cell">{ACTION_LABELS[c.action_type] ?? c.action_type}</TableCell>
               <TableCell>
                 <Badge variant={st.variant}>{st.label}</Badge>
               </TableCell>
-              <TableCell>
+              <TableCell className="hidden md:table-cell">
                 {c.status === 'completed' && c.total_contacts === 0 ? (
                   <span className="text-xs text-amber-500">Nenhum contato encontrado</span>
                 ) : (
@@ -81,10 +81,10 @@ export default function CampaignList({ campaigns, onEdit, onDelete, onTogglePaus
                   </div>
                 )}
               </TableCell>
-              <TableCell className="text-sm">
+              <TableCell className="text-sm hidden md:table-cell">
                 {c.status === 'completed' ? `${c.processed} / ${c.total_contacts}` : c.total_contacts}
               </TableCell>
-              <TableCell className="text-sm text-muted-foreground">
+              <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
                 {format(new Date(c.created_at), 'dd/MM/yyyy')}
               </TableCell>
               <TableCell>

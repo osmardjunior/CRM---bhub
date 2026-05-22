@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, RefreshCw, CheckCircle2, Wifi, QrCode, Copy, Check } from 'lucide-react';
+import { Loader2, RefreshCw, CheckCircle2, Wifi, QrCode, Copy, Check, Download } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -30,6 +30,8 @@ export default function EvolutionQRModal({
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncDone, setSyncDone] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qrRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -48,13 +50,13 @@ export default function EvolutionQRModal({
         // Try to extract the actual error message from the response body
         let msg = error.message;
         try {
-          const ctx = (error as any).context;
+          const ctx = (error as Record<string, unknown>).context as { json?: () => Promise<Record<string, string>>; text?: () => Promise<string> } | undefined;
           if (ctx?.json) {
             const json = await ctx.json();
             msg = json?.error || json?.message || msg;
           } else if (typeof ctx?.text === 'function') {
             const text = await ctx.text();
-            const parsed = JSON.parse(text);
+            const parsed = JSON.parse(text) as Record<string, string>;
             msg = parsed?.error || parsed?.message || msg;
           }
         } catch { /* use original message */ }
@@ -105,6 +107,8 @@ export default function EvolutionQRModal({
         if (qrRefreshRef.current) clearInterval(qrRefreshRef.current);
         pollRef.current = null;
         qrRefreshRef.current = null;
+        // Auto-configure: ignore groups to reduce server load
+        callEvolution('update-groups-setting').catch(() => {});
         toast.success('WhatsApp conectado com sucesso!');
       }
     } catch {
@@ -259,6 +263,47 @@ export default function EvolutionQRModal({
                 <Wifi size={12} className="text-success" />
                 <span className="text-xs font-medium text-success">Online</span>
               </div>
+
+              {!syncDone && (
+                <div className="w-full rounded-lg bg-secondary/50 p-3 text-center">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Deseja importar as conversas existentes desse número?
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={syncing}
+                    onClick={async () => {
+                      setSyncing(true);
+                      try {
+                        const result = await callEvolution('sync-history');
+                        setSyncDone(true);
+                        toast.success(
+                          `Sincronizado! ${result.synced_chats} conversa(s) e ${result.synced_messages} mensagem(ns) importadas.`
+                        );
+                      } catch (err: unknown) {
+                        toast.error(err instanceof Error ? err.message : 'Erro ao sincronizar histórico');
+                      } finally {
+                        setSyncing(false);
+                      }
+                    }}
+                  >
+                    {syncing ? (
+                      <><Loader2 size={14} className="animate-spin" /> Sincronizando...</>
+                    ) : (
+                      <><Download size={14} /> Importar conversas</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {syncDone && (
+                <Badge variant="outline" className="text-[11px] gap-1 bg-success/10 text-success border-success/20">
+                  <CheckCircle2 size={10} /> Conversas importadas
+                </Badge>
+              )}
+
               <Button size="sm" onClick={() => handleClose(false)}>
                 Fechar
               </Button>

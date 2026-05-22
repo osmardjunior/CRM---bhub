@@ -18,22 +18,25 @@ export function useDepartments() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('departments')
-        .select('*')
+        .select('id, company_id, name, created_at')
         .eq('company_id', companyId!)
-        .order('name');
+        .order('name')
+        .limit(100);
       if (error) throw error;
       return (data ?? []) as Department[];
     },
+    staleTime: 120_000,
   });
 }
 
 export function useCreateDepartment() {
   const qc = useQueryClient();
+  const { companyId } = useAuth();
   return useMutation({
     mutationFn: async (name: string) => {
       const { error } = await supabase
         .from('departments')
-        .insert({ name } as any);
+        .insert({ name, company_id: companyId! });
       if (error) throw error;
     },
     onSuccess: () => {

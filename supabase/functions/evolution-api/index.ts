@@ -69,7 +69,7 @@ serve(async (req) => {
         );
       }
 
-      // Create instance
+      // Create instance — groups_ignore stops group messages at source
       const createResp = await fetch(`${baseUrl}/instance/create`, {
         method: "POST",
         headers: {
@@ -80,6 +80,9 @@ serve(async (req) => {
           instanceName: instance_name,
           qrcode: true,
           integration: "WHATSAPP-BAILEYS",
+          groups_ignore: true,
+          always_online: false,
+          reject_call: false,
         }),
       });
 
@@ -312,6 +315,9 @@ serve(async (req) => {
           },
           events: [
             "MESSAGES_UPSERT",
+            "MESSAGES_UPDATE",
+            "MESSAGES_DELETE",
+            "PRESENCE_UPDATE",
             "CONNECTION_UPDATE",
             "QRCODE_UPDATED",
           ],
@@ -341,6 +347,36 @@ serve(async (req) => {
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
+      );
+    }
+
+    // ── Action: update-groups-setting ────────────────
+    if (action === "update-groups-setting") {
+      if (!instance_name) {
+        return new Response(
+          JSON.stringify({ error: "instance_name is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Update instance settings to ignore groups
+      const settingsResp = await fetch(
+        `${baseUrl}/settings/set/${encodeURIComponent(instance_name)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: api_key },
+          body: JSON.stringify({
+            groups_ignore: true,
+            always_online: false,
+            reject_call: false,
+          }),
+        }
+      );
+
+      const settingsData = await settingsResp.json().catch(() => ({}));
+      return new Response(
+        JSON.stringify({ success: settingsResp.ok, settings: settingsData }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -413,9 +449,290 @@ serve(async (req) => {
       );
     }
 
+    // ── Action: sync-history ─────────────────────────
+    if (action === "sync-history") {
+      if (!instance_name || !integration_id) {
+        return new Response(
+          JSON.stringify({ error: "instance_name and integration_id are required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Get integration details (company_id, channel)
+      const { data: integration } = await supabase
+        .from("integrations")
+        .select("company_id, channel, phone_number")
+        .eq("id", integration_id)
+        .single();
+
+      if (!integration) {
+        return new Response(
+          JSON.stringify({ error: "Integration not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const companyId = integration.company_id;
+
+      // 1. Fetch chats from Evolution API (try multiple endpoint variants)
+      let chats: any[] = [];
+      const chatEndpoints = [
+        { method: "POST", url: `${baseUrl}/chat/findChats/${encodeURIComponent(instance_name)}`, body: JSON.stringify({}) },
+        { method: "GET", url: `${baseUrl}/chat/findChats/${encodeURIComponent(instance_name)}`, body: null },
+        { method: "POST", url: `${baseUrl}/chat/findContacts/${encodeURIComponent(instance_name)}`, body: JSON.stringify({}) },
+        { method: "GET", url: `${baseUrl}/chat/findContacts/${encodeURIComponent(instance_name)}`, body: null },
+      ];
+
+      for (const ep of chatEndpoints) {
+        if (chats.length > 0) break;
+        try {
+          const opts: RequestInit = {
+            method: ep.method,
+            headers: ep.body
+              ? { "Content-Type": "application/json", apikey: api_key }
+              : { apikey: api_key },
+          };
+          if (ep.body) opts.body = ep.body;
+          const resp = await fetch(ep.url, opts);
+          console.log(`sync-history: ${ep.method} ${ep.url} → ${resp.status}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (Array.isArray(data) && data.length > 0) {
+              chats = data;
+            }
+          }
+        } catch (e) {
+          console.error(`sync-history: failed ${ep.url}:`, e);
+        }
+      }
+
+      if (!Array.isArray(chats) || chats.length === 0) {
+        return new Response(
+          JSON.stringify({ success: true, synced_chats: 0, synced_messages: 0, message: "Nenhuma conversa encontrada" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Filter only individual chats (not groups, status, newsletters)
+      const individualChats = chats.filter((c: any) => {
+        const jid = c.id || c.remoteJid || c.jid || "";
+        return jid.endsWith("@s.whatsapp.net") && !jid.startsWith("status@");
+      }).slice(0, 30); // Limit to 30 chats to avoid timeout
+
+      let syncedChats = 0;
+      let syncedMessages = 0;
+
+      for (const chat of individualChats) {
+       try {
+        const remoteJid = chat.id || chat.remoteJid || chat.jid || "";
+        const rawPhone = remoteJid.replace(/@.*$/, "").replace(/:.*$/, "");
+        const phone = rawPhone.replace(/\D/g, "");
+        if (!phone || phone.length < 8) continue;
+
+        const contactName = chat.name || chat.pushName || chat.contact || phone;
+
+        // Find or create contact
+        let contactId: string | null = null;
+        const { data: existingContact } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("phone", phone)
+          .maybeSingle();
+
+        if (existingContact) {
+          contactId = existingContact.id;
+        } else {
+          const { data: newContact } = await supabase
+            .from("contacts")
+            .insert({
+              company_id: companyId,
+              phone,
+              phone_e164: phone.length >= 10 ? `+${phone}` : null,
+              name: contactName,
+              source: "whatsapp",
+            })
+            .select("id")
+            .single();
+          contactId = newContact?.id || null;
+        }
+
+        if (!contactId) continue;
+
+        // Find or create conversation
+        let conversationId: string | null = null;
+        const { data: existingConv } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("contact_id", contactId)
+          .eq("integration_id", integration_id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existingConv) {
+          conversationId = existingConv.id;
+        } else {
+          const { data: newConv } = await supabase
+            .from("conversations")
+            .insert({
+              company_id: companyId,
+              contact_id: contactId,
+              integration_id,
+              channel: "whatsapp",
+              status: "open",
+            })
+            .select("id")
+            .single();
+          conversationId = newConv?.id || null;
+        }
+
+        if (!conversationId) continue;
+
+        // 2. Fetch messages for this chat (try multiple payload formats)
+        let messages: any[] = [];
+        const msgPayloads = [
+          { where: { key: { remoteJid } }, limit: 50 },
+          { where: { key: { remoteJid } } },
+          { remoteJid, limit: 50 },
+          { number: rawPhone, limit: 50 },
+        ];
+
+        for (const payload of msgPayloads) {
+          if (messages.length > 0) break;
+          try {
+            const msgsResp = await fetch(`${baseUrl}/chat/findMessages/${encodeURIComponent(instance_name)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: api_key },
+              body: JSON.stringify(payload),
+            });
+            console.log(`sync-history: findMessages ${remoteJid} payload=${JSON.stringify(payload)} → ${msgsResp.status}`);
+            if (msgsResp.ok) {
+              const msgsData = await msgsResp.json();
+              // Response can be: array directly, { messages: [...] }, { messages: { records: [...] } }
+              const extracted = Array.isArray(msgsData)
+                ? msgsData
+                : Array.isArray(msgsData?.messages)
+                  ? msgsData.messages
+                  : Array.isArray(msgsData?.messages?.records)
+                    ? msgsData.messages.records
+                    : [];
+              if (extracted.length > 0) {
+                messages = extracted;
+                console.log(`sync-history: got ${messages.length} messages for ${remoteJid}`);
+              }
+            }
+          } catch (e) {
+            console.error(`sync-history: findMessages error for ${remoteJid}:`, e);
+          }
+        }
+
+        if (messages.length === 0) {
+          syncedChats++;
+          continue;
+        }
+
+        // 3. Insert messages (with dedup)
+        const messagesToInsert: any[] = [];
+        for (const msg of messages) {
+          try {
+          const key = msg.key || {};
+          const msgId = key.id || msg.messageId || msg.id || msg.key?.id;
+          if (!msgId) continue;
+
+          const message = msg.message || {};
+          const msgBody =
+            message.conversation ||
+            message.extendedTextMessage?.text ||
+            message.imageMessage?.caption ||
+            message.videoMessage?.caption ||
+            message.documentMessage?.caption ||
+            msg.body ||
+            msg.content ||
+            msg.text ||
+            "";
+
+          // Detect media type
+          const hasAudio = !!message.audioMessage;
+          const hasImage = !!message.imageMessage;
+          const hasVideo = !!message.videoMessage;
+          const hasDocument = !!message.documentMessage;
+          const hasSticker = !!message.stickerMessage;
+          const msgType = hasAudio ? "audio" : hasImage ? "image" : hasVideo ? "video" : hasDocument ? "document" : hasSticker ? "sticker" : "text";
+
+          const isFromMe = !!(key.fromMe ?? msg.fromMe);
+          const rawTs = msg.messageTimestamp || msg.timestamp || msg.createdAt;
+          let ts: string;
+          if (rawTs) {
+            const num = typeof rawTs === "number" ? rawTs : parseInt(rawTs);
+            // If timestamp is in seconds (< year 2100 in ms), convert; otherwise treat as ms
+            ts = new Date(num < 1e12 ? num * 1000 : num).toISOString();
+          } else {
+            ts = new Date().toISOString();
+          }
+
+          messagesToInsert.push({
+            company_id: companyId,
+            conversation_id: conversationId,
+            sender_type: isFromMe ? "agent" : "user",
+            body: msgBody,
+            type: msgType,
+            direction: isFromMe ? "outbound" : "inbound",
+            external_message_id: msgId,
+            created_at: ts,
+          });
+          } catch { /* skip unparseable message */ }
+        }
+
+        if (messagesToInsert.length > 0) {
+          // Insert one by one, skipping existing (no UNIQUE constraint on external_message_id)
+          for (const m of messagesToInsert) {
+            try {
+              const { data: existing } = await supabase
+                .from("messages")
+                .select("id")
+                .eq("external_message_id", m.external_message_id)
+                .maybeSingle();
+              if (!existing) {
+                const { error: insErr } = await supabase.from("messages").insert(m);
+                if (!insErr) syncedMessages++;
+              }
+            } catch {
+              // skip individual message errors
+            }
+          }
+
+          // Update conversation last_message_at
+          const lastTs = messagesToInsert[messagesToInsert.length - 1]?.created_at;
+          if (lastTs) {
+            await supabase
+              .from("conversations")
+              .update({ last_message_at: lastTs })
+              .eq("id", conversationId);
+          }
+        }
+
+        syncedChats++;
+       } catch (chatErr) {
+        console.error(`sync-history: error processing chat:`, chatErr);
+       }
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          synced_chats: syncedChats,
+          synced_messages: syncedMessages,
+          total_chats_found: chats.length,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({
-        error: "Invalid action. Use: create-instance, get-qrcode, check-status, set-webhook, fetch-phone",
+        error: "Invalid action. Use: create-instance, get-qrcode, check-status, set-webhook, fetch-phone, sync-history",
       }),
       {
         status: 400,

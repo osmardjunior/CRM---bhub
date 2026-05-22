@@ -71,7 +71,7 @@ export default function NodeEditModal({ open, onOpenChange, node, onSave, isNew 
             </div>
             <div className="space-y-2">
               <Label>Opções</Label>
-              {(config.options as any[] || []).map((opt: any, i: number) => (
+              {((config.options ?? []) as { label: string; next_position: number | null }[]).map((opt, i: number) => (
                 <div key={i} className="flex items-center gap-2">
                   <span className="text-sm font-medium text-muted-foreground w-6">{i + 1}.</span>
                   <Input value={opt.label} onChange={e => {
@@ -80,7 +80,7 @@ export default function NodeEditModal({ open, onOpenChange, node, onSave, isNew 
                     setConfig({ ...config, options: opts });
                   }} placeholder="Nome da opção" className="flex-1" />
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => {
-                    const opts = (config.options || []).filter((_: any, j: number) => j !== i);
+                    const opts = (config.options || []).filter((_: unknown, j: number) => j !== i);
                     setConfig({ ...config, options: opts });
                   }}><Trash2 size={14} /></Button>
                 </div>

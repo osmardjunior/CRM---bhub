@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -30,52 +30,52 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#1a1a2e] p-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <div className="mx-auto mb-5 flex items-center justify-center">
-            <img src="/logo-dark.png" alt="ALL·IN" className="h-10 w-auto object-contain" />
+            <img src="/logo-dark.png" alt="ALL·IN" className="h-12 w-auto object-contain" />
           </div>
-          <h1 className="text-xl font-bold text-foreground">ALL·IN — Comercial</h1>
-          <p className="text-sm text-muted-foreground mt-1">Faça login para continuar</p>
+          <p className="text-sm text-gray-400 mt-1">Faça login para continuar</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="rounded-xl border border-border bg-card card-shadow p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-6 space-y-4">
           <div>
-            <Label className="text-xs">Email</Label>
+            <Label className="text-xs text-gray-300">Email</Label>
             <Input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
-              className="mt-1"
+              className="mt-1 bg-white/10 border-white/10 text-white placeholder:text-gray-500"
               required
             />
           </div>
           <div>
-            <Label className="text-xs">Senha</Label>
+            <Label className="text-xs text-gray-300">Senha</Label>
             <Input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••"
-              className="mt-1"
+              className="mt-1 bg-white/10 border-white/10 text-white placeholder:text-gray-500"
               required
             />
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-red-400">{error}</p>}
 
-          <Button type="submit" className="w-full gap-2" disabled={loading}>
+          <Button type="submit" className="w-full gap-2 bg-[#c8944a] hover:bg-[#b8843a] text-white" disabled={loading}>
             <LogIn size={16} />
             {loading ? 'Entrando...' : 'Entrar'}
           </Button>
 
-          <div className="text-[11px] text-muted-foreground text-center space-y-1">
-            <p className="font-medium">Contas de teste:</p>
-            <p>davi@allin.com / 123456 (Admin)</p>
-            <p>ana@allin.com / 123456 (Supervisor)</p>
-          </div>
+          <p className="text-xs text-center text-gray-400">
+            Não tem conta?{' '}
+            <Link to="/cadastro" className="text-[#c8944a] hover:underline font-medium">
+              Criar empresa
+            </Link>
+          </p>
         </form>
       </div>
     </div>

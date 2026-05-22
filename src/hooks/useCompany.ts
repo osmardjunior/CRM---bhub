@@ -11,13 +11,14 @@ export function useCompany() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('companies')
-        .select('*')
+        .select('id, name, slug, round_robin_mode, priority_online_agents, created_at')
         .eq('id', companyId!)
         .single();
       if (error) throw error;
       return data;
     },
     enabled: !!companyId,
+    staleTime: 120_000,
   });
 }
 
@@ -29,7 +30,7 @@ export function useUpdateCompany() {
     mutationFn: async (updates: { name?: string; round_robin_mode?: 'weight' | 'percentage'; priority_online_agents?: boolean }) => {
       const { error } = await supabase
         .from('companies')
-        .update(updates as any)
+        .update(updates)
         .eq('id', companyId!);
       if (error) throw error;
     },
