@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 const INTERVAL_MS = 60_000; // 60 seconds
+const SCREEN_TIME_INCREMENT = 60; // seconds per heartbeat tick
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
 
@@ -41,7 +42,7 @@ function createWorkerTimer(ms: number, callback: () => void): () => void {
  * On tab close / beforeunload, clears `last_seen_at` → instant offline.
  */
 export function usePresenceHeartbeat() {
-  const { user, session } = useAuth();
+  const { user, session, companyId } = useAuth();
   const userIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
 
@@ -53,6 +54,47 @@ export function usePresenceHeartbeat() {
   useEffect(() => {
     if (!user?.id) return;
     userIdRef.current = user.id;
+
+    const trackScreenTime = async () => {
+      if (!companyId) return;
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const now = new Date().toISOString();
+      try {
+        // Try upsert: increment total_seconds by SCREEN_TIME_INCREMENT
+        const { error } = await supabase.rpc('increment_screen_time' as string, {
+          p_user_id: user.id,
+          p_company_id: companyId,
+          p_date: today,
+          p_seconds: SCREEN_TIME_INCREMENT,
+          p_now: now,
+        });
+        if (error) {
+          // Fallback: direct upsert via REST if RPC doesn't exist yet
+          const s = await supabase.auth.getSession();
+          const token = s.data.session?.access_token;
+          if (token && SUPABASE_URL) {
+            await fetch(`${SUPABASE_URL}/rest/v1/screen_time?on_conflict=user_id,date`, {
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates,return=minimal',
+              },
+              body: JSON.stringify({
+                user_id: user.id,
+                company_id: companyId,
+                date: today,
+                total_seconds: SCREEN_TIME_INCREMENT,
+                last_heartbeat_at: now,
+              }),
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // Silent
+      }
+    };
 
     const beat = async () => {
       const ts = new Date().toISOString();
@@ -85,6 +127,8 @@ export function usePresenceHeartbeat() {
       } catch {
         // Silent — will retry on next tick
       }
+      // Also track screen time
+      trackScreenTime();
     };
 
     // Fire immediately

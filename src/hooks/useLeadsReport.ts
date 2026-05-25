@@ -10,6 +10,9 @@ export interface LeadsReportFilters {
   tagIds?: string[];
   funnelIds?: string[];
   stageIds?: string[];
+  excludeTagIds?: string[];
+  excludeFunnelIds?: string[];
+  excludeStageIds?: string[];
   integrationId?: string;
   status?: string;
   search?: string;
@@ -46,7 +49,10 @@ function hasAdvancedFilters(filters: LeadsReportFilters): boolean {
   return !!(
     (filters.funnelIds && filters.funnelIds.length > 0) ||
     (filters.stageIds && filters.stageIds.length > 0) ||
-    (filters.tagIds && filters.tagIds.length > 0)
+    (filters.tagIds && filters.tagIds.length > 0) ||
+    (filters.excludeFunnelIds && filters.excludeFunnelIds.length > 0) ||
+    (filters.excludeStageIds && filters.excludeStageIds.length > 0) ||
+    (filters.excludeTagIds && filters.excludeTagIds.length > 0)
   );
 }
 
@@ -55,8 +61,9 @@ function hasAdvancedFilters(filters: LeadsReportFilters): boolean {
  */
 async function getAdvancedContactIds(
   filters: LeadsReportFilters,
-): Promise<{ include: string[] | null }> {
+): Promise<{ include: string[] | null; exclude: string[] | null }> {
   let include: string[] | null = null;
+  let exclude: string[] | null = null;
 
   // --- INCLUDE: funnel filter ---
   if (filters.funnelIds?.length) {
@@ -89,7 +96,38 @@ async function getAdvancedContactIds(
     include = include === null ? ids : include.filter(id => new Set(ids).has(id));
   }
 
-  return { include };
+  // --- EXCLUDE: funnel filter ---
+  if (filters.excludeFunnelIds?.length) {
+    const { data, error } = await supabase.rpc('get_funnel_contact_ids_multi', {
+      p_funnel_ids: filters.excludeFunnelIds,
+      p_stage_ids: null,
+    });
+    if (error) throw error;
+    const ids = (data ?? []).map((r: { contact_id: string }) => r.contact_id);
+    exclude = exclude === null ? ids : [...new Set([...exclude, ...ids])];
+  }
+
+  // --- EXCLUDE: stage filter ---
+  if (filters.excludeStageIds?.length) {
+    const { data, error } = await supabase.rpc('get_stage_contact_ids', {
+      p_stage_ids: filters.excludeStageIds,
+    });
+    if (error) throw error;
+    const ids = (data ?? []).map((r: { contact_id: string }) => r.contact_id);
+    exclude = exclude === null ? ids : [...new Set([...exclude, ...ids])];
+  }
+
+  // --- EXCLUDE: tag filter ---
+  if (filters.excludeTagIds?.length) {
+    const { data } = await supabase
+      .from('contact_tags')
+      .select('contact_id')
+      .in('tag_id', filters.excludeTagIds);
+    const ids = [...new Set((data ?? []).map(r => r.contact_id as string))];
+    exclude = exclude === null ? ids : [...new Set([...exclude, ...ids])];
+  }
+
+  return { include, exclude };
 }
 
 export function useLeadsReport(filters: LeadsReportFilters) {
@@ -114,7 +152,7 @@ export function useLeadsReport(filters: LeadsReportFilters) {
       }
 
       // Build base query (used in both paths)
-      const buildQuery = (includeContactIds: string[] | null) => {
+      const buildQuery = (includeContactIds: string[] | null, excludeContactIds: string[] | null = null) => {
         let q = supabase
           .from('conversations')
           .select('id, contact_id, status, assigned_user_id, created_at, contact:contacts!inner(id, name, phone, phone_e164)', { count: 'exact' })
@@ -146,6 +184,12 @@ export function useLeadsReport(filters: LeadsReportFilters) {
           q = q.in('contact_id', includeContactIds);
         }
 
+        // Exclude contact IDs (from exclude tags/funnels/stages)
+        if (excludeContactIds !== null && excludeContactIds.length > 0) {
+          // Supabase .not + .in combo: NOT IN
+          q = q.not('contact_id', 'in', `(${excludeContactIds.join(',')})`);
+        }
+
         // Unread filter: restrict to conversation IDs from RPC
         if (filters.unreadIds && filters.unreadIds.length > 0) {
           q = q.in('id', filters.unreadIds);
@@ -155,14 +199,14 @@ export function useLeadsReport(filters: LeadsReportFilters) {
       };
 
       if (useAdvanced) {
-        const { include } = await getAdvancedContactIds(filters);
+        const { include, exclude } = await getAdvancedContactIds(filters);
 
         if (include !== null && include.length === 0) {
           const agentCounts = await fetchAgentCounts(companyId!, filters, role!, user?.id, projectId);
           return { rows: [], total: 0, agentCounts };
         }
 
-        let query = buildQuery(include);
+        let query = buildQuery(include, exclude);
         query = query.order('created_at', { ascending: false });
         const offset = (filters.page - 1) * filters.pageSize;
         query = query.range(offset, offset + filters.pageSize - 1);

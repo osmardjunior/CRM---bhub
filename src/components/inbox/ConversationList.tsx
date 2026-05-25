@@ -269,10 +269,10 @@ export default function ConversationList({
 
   const activeStatus = (filters as any).archived ? '_archived' : filters.status;
   const filtered = useMemo(() => {
-    let list = conversations.filter((c) => !isGroupChat(c.contact.phone));
+    let list = conversations.filter((c) => c.contact && !isGroupChat(c.contact.phone));
 
     if (quickFilter === 'favorites') {
-      list = list.filter((c) => c.contact.is_favorite);
+      list = list.filter((c) => c.contact?.is_favorite);
     } else if (quickFilter === 'unread') {
       // Server-side filter via has_unread handles this — no client-side filtering needed.
       // Only keep client-side as fallback in case unreadCounts data is stale.

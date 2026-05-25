@@ -65,6 +65,9 @@ export default function RelatoriosPage() {
   const initialTags = searchParams.get('tags')?.split(',').filter(Boolean) || [];
   const initialFunnels = searchParams.get('funnels')?.split(',').filter(Boolean) || [];
   const initialStages = searchParams.get('stages')?.split(',').filter(Boolean) || [];
+  const initialExcludeTags = searchParams.get('xtags')?.split(',').filter(Boolean) || [];
+  const initialExcludeFunnels = searchParams.get('xfunnels')?.split(',').filter(Boolean) || [];
+  const initialExcludeStages = searchParams.get('xstages')?.split(',').filter(Boolean) || [];
   const initialUnread = searchParams.get('unread') === '1';
   const initialPage = parseInt(searchParams.get('page') || '1', 10) || 1;
   const initialDateFrom = searchParams.get('from') ? new Date(searchParams.get('from')!) : subDays(new Date(), 30);
@@ -77,6 +80,9 @@ export default function RelatoriosPage() {
   const [tagIds, setTagIds] = useState<string[]>(initialTags);
   const [funnelIds, setFunnelIds] = useState<string[]>(initialFunnels);
   const [stageIds, setStageIds] = useState<string[]>(initialStages);
+  const [excludeTagIds, setExcludeTagIds] = useState<string[]>(initialExcludeTags);
+  const [excludeFunnelIds, setExcludeFunnelIds] = useState<string[]>(initialExcludeFunnels);
+  const [excludeStageIds, setExcludeStageIds] = useState<string[]>(initialExcludeStages);
   const [integrationFilter, setIntegrationFilter] = useState<string>(initialIntegration);
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
   const [searchText, setSearchText] = useState(initialSearch);
@@ -121,13 +127,19 @@ export default function RelatoriosPage() {
       else params.delete('funnels');
       if (stageIds.length > 0) params.set('stages', stageIds.join(','));
       else params.delete('stages');
+      if (excludeTagIds.length > 0) params.set('xtags', excludeTagIds.join(','));
+      else params.delete('xtags');
+      if (excludeFunnelIds.length > 0) params.set('xfunnels', excludeFunnelIds.join(','));
+      else params.delete('xfunnels');
+      if (excludeStageIds.length > 0) params.set('xstages', excludeStageIds.join(','));
+      else params.delete('xstages');
       if (unreadOnly) params.set('unread', '1');
       else params.delete('unread');
       if (page > 1) params.set('page', String(page));
       else params.delete('page');
       return params;
     }, { replace: true });
-  }, [agentId, statusFilter, integrationFilter, searchText, dateFrom, dateTo, tagIds, funnelIds, stageIds, unreadOnly, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentId, statusFilter, integrationFilter, searchText, dateFrom, dateTo, tagIds, funnelIds, stageIds, excludeTagIds, excludeFunnelIds, excludeStageIds, unreadOnly, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stages filtered by selected funnels
   const allStages = useMemo(() => {
@@ -150,13 +162,16 @@ export default function RelatoriosPage() {
     tagIds: tagIds.length > 0 ? tagIds : undefined,
     funnelIds: funnelIds.length > 0 ? funnelIds : undefined,
     stageIds: stageIds.length > 0 ? stageIds : undefined,
+    excludeTagIds: excludeTagIds.length > 0 ? excludeTagIds : undefined,
+    excludeFunnelIds: excludeFunnelIds.length > 0 ? excludeFunnelIds : undefined,
+    excludeStageIds: excludeStageIds.length > 0 ? excludeStageIds : undefined,
     integrationId: integrationFilter !== 'all' ? integrationFilter : undefined,
     status: statusFilter !== 'all' ? statusFilter : undefined,
     search: searchText.trim() || undefined,
     unreadIds: unreadOnly ? (unreadIds ?? undefined) : undefined,
     page,
     pageSize: PAGE_SIZE,
-  }), [dateFrom, dateTo, agentId, tagIds, funnelIds, stageIds, integrationFilter, statusFilter, searchText, unreadOnly, unreadIds, page]);
+  }), [dateFrom, dateTo, agentId, tagIds, funnelIds, stageIds, excludeTagIds, excludeFunnelIds, excludeStageIds, integrationFilter, statusFilter, searchText, unreadOnly, unreadIds, page]);
 
   const { data, isLoading, error } = useLeadsReport(filters);
   const rows = data?.rows ?? [];
@@ -172,6 +187,9 @@ export default function RelatoriosPage() {
   const removeTag = (id: string) => { setTagIds(v => v.filter(x => x !== id)); setPage(1); };
   const removeFunnel = (id: string) => { setFunnelIds(v => v.filter(x => x !== id)); setPage(1); };
   const removeStage = (id: string) => { setStageIds(v => v.filter(x => x !== id)); setPage(1); };
+  const removeExcludeTag = (id: string) => { setExcludeTagIds(v => v.filter(x => x !== id)); setPage(1); };
+  const removeExcludeFunnel = (id: string) => { setExcludeFunnelIds(v => v.filter(x => x !== id)); setPage(1); };
+  const removeExcludeStage = (id: string) => { setExcludeStageIds(v => v.filter(x => x !== id)); setPage(1); };
 
   const agentSummary = data?.agentCounts ?? [];
   const convUrl = (id: string) => `/inbox?id=${id}${projectId ? `&project=${projectId}` : ''}`;
@@ -254,7 +272,7 @@ export default function RelatoriosPage() {
     }
   };
 
-  const hasActiveFilters = tagIds.length > 0 || funnelIds.length > 0 || stageIds.length > 0 || unreadOnly;
+  const hasActiveFilters = tagIds.length > 0 || funnelIds.length > 0 || stageIds.length > 0 || excludeTagIds.length > 0 || excludeFunnelIds.length > 0 || excludeStageIds.length > 0 || unreadOnly;
 
   return (
     <div className="space-y-5">
@@ -403,6 +421,47 @@ export default function RelatoriosPage() {
           </Select>
         </div>
 
+        {/* Row 4 — Exclude Tag / Funnel / Stage */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <Select value="" onValueChange={(v) => { if (v && !excludeTagIds.includes(v)) { setExcludeTagIds(prev => [...prev, v]); setPage(1); } }}>
+            <SelectTrigger className="h-8 text-xs border-red-500/30 text-red-500"><SelectValue placeholder="Excluir Tag" /></SelectTrigger>
+            <SelectContent>
+              {tags.filter(t => !excludeTagIds.includes(t.id) && !tagIds.includes(t.id)).length === 0 ? (
+                <div className="px-3 py-2 text-xs text-muted-foreground">Nenhuma tag disponível</div>
+              ) : tags.filter(t => !excludeTagIds.includes(t.id) && !tagIds.includes(t.id)).map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: t.color || '#6366f1' }} />
+                    {t.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value="" onValueChange={(v) => { if (v && !excludeFunnelIds.includes(v)) { setExcludeFunnelIds(prev => [...prev, v]); setPage(1); } }}>
+            <SelectTrigger className="h-8 text-xs border-red-500/30 text-red-500"><SelectValue placeholder="Excluir Funil" /></SelectTrigger>
+            <SelectContent>
+              {funnels.filter(f => !excludeFunnelIds.includes(f.id) && !funnelIds.includes(f.id)).length === 0 ? (
+                <div className="px-3 py-2 text-xs text-muted-foreground">Nenhum funil disponível</div>
+              ) : funnels.filter(f => !excludeFunnelIds.includes(f.id) && !funnelIds.includes(f.id)).map((f) => (
+                <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value="" onValueChange={(v) => { if (v && !excludeStageIds.includes(v)) { setExcludeStageIds(prev => [...prev, v]); setPage(1); } }}>
+            <SelectTrigger className="h-8 text-xs border-red-500/30 text-red-500"><SelectValue placeholder="Excluir Etapa" /></SelectTrigger>
+            <SelectContent>
+              {allStages.filter(s => !excludeStageIds.includes(s.id) && !stageIds.includes(s.id)).length === 0 ? (
+                <div className="px-3 py-2 text-xs text-muted-foreground">Nenhuma etapa disponível</div>
+              ) : allStages.filter(s => !excludeStageIds.includes(s.id) && !stageIds.includes(s.id)).map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.funnelName} › {s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Active filter chips */}
         {hasActiveFilters && (
           <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -431,6 +490,30 @@ export default function RelatoriosPage() {
                 </Badge>
               ) : null;
             })}
+            {excludeTagIds.map(id => {
+              const t = tags.find(tg => tg.id === id);
+              return t ? (
+                <Badge key={`x-${id}`} variant="destructive" className="text-[10px] gap-1 cursor-pointer pr-1" onClick={() => removeExcludeTag(id)}>
+                  Excluir: {t.name} <X size={9} />
+                </Badge>
+              ) : null;
+            })}
+            {excludeFunnelIds.map(id => {
+              const f = funnels.find(fn => fn.id === id);
+              return f ? (
+                <Badge key={`x-${id}`} variant="destructive" className="text-[10px] gap-1 cursor-pointer pr-1" onClick={() => removeExcludeFunnel(id)}>
+                  Excluir Funil: {f.name} <X size={9} />
+                </Badge>
+              ) : null;
+            })}
+            {excludeStageIds.map(id => {
+              const s = allStages.find(st => st.id === id);
+              return s ? (
+                <Badge key={`x-${id}`} variant="destructive" className="text-[10px] gap-1 cursor-pointer pr-1" onClick={() => removeExcludeStage(id)}>
+                  Excluir: {s.funnelName} › {s.label} <X size={9} />
+                </Badge>
+              ) : null;
+            })}
             {unreadOnly && (
               <Badge variant="default" className="text-[10px] gap-1 cursor-pointer pr-1 bg-primary" onClick={() => { setUnreadOnly(false); setPage(1); }}>
                 <BellDot size={9} /> Não lidos <X size={9} />
@@ -438,7 +521,7 @@ export default function RelatoriosPage() {
             )}
             <button
               className="text-[10px] text-muted-foreground hover:text-foreground underline ml-1"
-              onClick={() => { setTagIds([]); setFunnelIds([]); setStageIds([]); setUnreadOnly(false); setPage(1); }}
+              onClick={() => { setTagIds([]); setFunnelIds([]); setStageIds([]); setExcludeTagIds([]); setExcludeFunnelIds([]); setExcludeStageIds([]); setUnreadOnly(false); setPage(1); }}
             >
               Limpar tudo
             </button>

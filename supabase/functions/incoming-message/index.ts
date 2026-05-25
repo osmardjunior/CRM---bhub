@@ -1390,8 +1390,35 @@ serve(async (req) => {
         .select("id")
         .single();
 
-      if (convErr) throw convErr;
-      conversation = newConv;
+      if (convErr) {
+        // Race condition: another request created the conversation between our lookup and insert
+        // Retry the lookup once to find the existing conversation
+        if (convErr.code === "23505") {
+          console.log(`[incoming] conversation conflict — retrying lookup for contact ${contact.id}`);
+          let retryQ = supabase
+            .from("conversations")
+            .select("id, status, integration_id, assigned_user_id, archived_at")
+            .eq("company_id", company_id)
+            .eq("contact_id", contact.id)
+            .eq("channel", channel);
+          if (integrationId) {
+            retryQ = retryQ.or(`integration_id.eq.${integrationId},integration_id.is.null`);
+          }
+          const { data: retryConv } = await retryQ
+            .order("last_message_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (retryConv) {
+            conversation = retryConv;
+          } else {
+            throw convErr;
+          }
+        } else {
+          throw convErr;
+        }
+      } else {
+        conversation = newConv;
+      }
 
       if (assignedAgentId) {
         console.log(`[routing] conversa ${newConv.id} atribuída a ${assignedAgentId}`);

@@ -651,10 +651,11 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
     closed: 'bg-red-700 hover:bg-red-800 text-white',
   };
 
-  const contactAvatarUrl = (conversation.contact as { avatar_url?: string | null }).avatar_url;
-  const isGroup = isGroupChat(conversation.contact.phone);
+  const contact = conversation.contact ?? { name: 'Sem contato', phone: null, phone_e164: null, email: null, wa_identifier_raw: null, avatar_url: null, tags: null, is_group: false, source: null, id: '', responsible_user_id: null, created_at: '' };
+  const contactAvatarUrl = (contact as { avatar_url?: string | null }).avatar_url;
+  const isGroup = isGroupChat(contact.phone);
   // Contatos LID: chegaram com ID de dispositivo WhatsApp (@lid), sem número de telefone
-  const isLidContact = !!conversation.contact.wa_identifier_raw && !conversation.contact.phone;
+  const isLidContact = !!contact.wa_identifier_raw && !contact.phone;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
@@ -671,14 +672,14 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </Button>
         )}
         <ConversationAvatar
-          name={conversation.contact.name}
+          name={contact.name}
           avatarUrl={contactAvatarUrl}
           isGroup={isGroup}
           size="md"
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-foreground truncate">{conversation.contact.name}</span>
+            <span className="text-sm font-semibold text-foreground truncate">{contact.name}</span>
             {isGroup && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground shrink-0">
                 Grupo
@@ -693,7 +694,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           <p className="text-xs text-muted-foreground truncate">
             {isContactTyping ? (
               <span className="text-green-500 dark:text-green-400 font-medium animate-pulse">digitando...</span>
-            ) : isGroup ? 'Conversa em grupo' : conversation.contact.phone}
+            ) : isGroup ? 'Conversa em grupo' : contact.phone}
           </p>
         </div>
 
@@ -1032,7 +1033,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
                     key={item.id}
                     msg={{ ...item, deleted_by_name: item.deleted_at ? (item.sender_name ?? item.sender?.name ?? null) : null }}
                     isOutgoing={item.sender_type === 'agent' || item.sender_type === 'system'}
-                    contactName={conversation.contact.name}
+                    contactName={contact.name}
                     contactAvatarUrl={contactAvatarUrl}
                     isGroup={isGroup}
                     showSenderHeader={showSenderHeader}
@@ -1114,7 +1115,7 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           <Reply size={13} className="text-primary shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-semibold text-primary">
-              {replyingTo.sender_type === 'agent' ? 'Você' : (replyingTo.sender_name ?? replyingTo.sender?.name ?? conversation?.contact.name)}
+              {replyingTo.sender_type === 'agent' ? 'Você' : (replyingTo.sender_name ?? replyingTo.sender?.name ?? contact.name)}
             </p>
             <p className="text-[10px] text-muted-foreground truncate">{replyingTo.body ?? '📎 Mídia'}</p>
           </div>

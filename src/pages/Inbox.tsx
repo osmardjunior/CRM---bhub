@@ -208,7 +208,7 @@ export default function InboxPage() {
         />
       </div>
 
-      {profileOpen && detail && (
+      {profileOpen && detail && detail.contact && (
         <div className="hidden md:flex">
           <ContactProfilePanel
             conversation={detail}
@@ -217,7 +217,7 @@ export default function InboxPage() {
         </div>
       )}
       {/* Mobile: profile panel as overlay */}
-      {profileOpen && detail && (
+      {profileOpen && detail && detail.contact && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setProfileOpen(false)} />
           <div className="absolute right-0 top-0 bottom-0 w-[85vw] max-w-[320px] animate-in slide-in-from-right">

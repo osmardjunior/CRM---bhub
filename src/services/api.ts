@@ -339,7 +339,7 @@ export async function listConversations(
 
   let results = (data ?? []) as ConversationWithRelations[];
   if (filters?.sort === 'name') {
-    results.sort((a, b) => a.contact.name.localeCompare(b.contact.name));
+    results.sort((a, b) => (a.contact?.name ?? '').localeCompare(b.contact?.name ?? ''));
   }
 
   return results;

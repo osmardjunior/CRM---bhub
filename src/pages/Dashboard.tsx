@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, subDays, eachDayOfInterval, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Activity, Loader2 } from 'lucide-react';
+import { Activity, Loader2, Monitor } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,6 +45,14 @@ function fmtDate(d: Date) {
 }
 function fmtDateFull(d: Date) {
   return format(d, 'yyyy-MM-dd');
+}
+
+function fmtScreenTime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h === 0) return `${m}min`;
+  return `${h}h${m > 0 ? `${m.toString().padStart(2, '0')}m` : ''}`;
 }
 
 /* ── component ── */
@@ -116,7 +124,7 @@ export default function Dashboard() {
   }, [activeAgents, tick]);
 
   /* ── Query 1: agent table (conversations by agent × status) ── */
-  type AgentRow = { id: string | null; name: string; new: number; open: number; pending: number; closed: number; total: number };
+  type AgentRow = { id: string | null; name: string; new: number; open: number; pending: number; resolved: number; closed: number; total: number };
   const { data: agentTableData = [], isLoading } = useQuery({
     queryKey: ['dashboard-agent-table', companyId, projectId, isAgent, userId],
     queryFn: async () => {
@@ -143,15 +151,16 @@ export default function Dashboard() {
       console.log(`[Dashboard] agent table: ${allData.length} conversations loaded (project=${projectId || 'all'}, isAgent=${isAgent})`);
 
       const data = allData;
-      const map: Record<string, { new: number; open: number; pending: number; closed: number }> = {};
+      const map: Record<string, { new: number; open: number; pending: number; resolved: number; closed: number }> = {};
       const NONE = '__none__';
       for (const r of data ?? []) {
         const uid = r.assigned_user_id ?? NONE;
-        if (!map[uid]) map[uid] = { new: 0, open: 0, pending: 0, closed: 0 };
+        if (!map[uid]) map[uid] = { new: 0, open: 0, pending: 0, resolved: 0, closed: 0 };
         if (r.status === 'new') map[uid].new++;
         else if (r.status === 'open') map[uid].open++;
         else if (r.status === 'pending') map[uid].pending++;
-        else if (r.status === 'closed' || r.status === 'resolved') map[uid].closed++;
+        else if (r.status === 'resolved') map[uid].resolved++;
+        else if (r.status === 'closed') map[uid].closed++;
       }
 
       // Fetch agent names
@@ -166,13 +175,13 @@ export default function Dashboard() {
       // "Ninguém Delegado" first
       if (map[NONE]) {
         const s = map[NONE];
-        rows.push({ id: null, name: 'Ninguém Delegado', ...s, total: s.new + s.open + s.pending + s.closed });
+        rows.push({ id: null, name: 'Ninguém Delegado', ...s, total: s.new + s.open + s.pending + s.resolved + s.closed });
       }
       // Agents sorted by total desc
       const agentRows = agentIds
         .map(id => {
           const s = map[id];
-          return { id, name: nameMap[id] || 'Sem nome', ...s, total: s.new + s.open + s.pending + s.closed };
+          return { id, name: nameMap[id] || 'Sem nome', ...s, total: s.new + s.open + s.pending + s.resolved + s.closed };
         })
         .sort((a, b) => b.total - a.total);
       rows.push(...agentRows);
@@ -180,6 +189,24 @@ export default function Dashboard() {
     },
     enabled: !!companyId,
     refetchInterval: 30_000,
+  });
+
+  /* ── Query 1b: screen time (today) per agent ── */
+  const todayStr = useMemo(() => fmtDateFull(new Date()), []);
+  const { data: screenTimeMap = {} } = useQuery({
+    queryKey: ['dashboard-screen-time', companyId, todayStr],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('screen_time')
+        .select('user_id, total_seconds')
+        .eq('company_id', companyId!)
+        .eq('date', todayStr);
+      const map: Record<string, number> = {};
+      for (const row of data ?? []) map[row.user_id] = row.total_seconds;
+      return map;
+    },
+    enabled: !!companyId,
+    refetchInterval: 60_000,
   });
 
   /* ── Query 2: status cards (all statuses + unread counts) ── */
@@ -394,7 +421,14 @@ export default function Dashboard() {
                   </div>
                   <div className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-[1.5px] border-card ${dotColor}`} />
                 </div>
-                <span className="text-xs font-medium text-foreground leading-tight">{agent.name.split(' ')[0]}</span>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-foreground leading-tight">{agent.name.split(' ')[0]}</span>
+                  {screenTimeMap[agent.id] ? (
+                    <span className="text-[9px] text-muted-foreground leading-tight flex items-center gap-0.5">
+                      <Monitor size={8} /> {fmtScreenTime(screenTimeMap[agent.id])}
+                    </span>
+                  ) : null}
+                </div>
                 {s !== 'online' && (
                   <span className="text-[9px] text-muted-foreground leading-tight">{formatLastSeen(agent.last_seen_at)}</span>
                 )}
@@ -420,16 +454,18 @@ export default function Dashboard() {
                 <th className="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground bg-muted/30 w-[30%]">DEPARTAMENTO OU USUÁRIO</th>
                 <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-red-500 w-[15%]">ABERTO</th>
                 <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-blue-500 w-[15%]">EM ATENDIMENTO</th>
-                <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-amber-500 w-[15%] hidden sm:table-cell">AGUARDANDO</th>
-                <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-gray-500 w-[15%] hidden sm:table-cell">FECHADO</th>
+                <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-amber-500 w-[12%] hidden sm:table-cell">AGUARDANDO</th>
+                <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-purple-500 w-[12%] hidden sm:table-cell">RESOLVIDO</th>
+                <th className="py-2.5 px-3 text-xs font-semibold text-center text-white bg-gray-500 w-[12%] hidden sm:table-cell">FECHADO</th>
                 <th className="py-2.5 px-3 text-xs font-semibold text-center text-muted-foreground bg-muted/30 w-[10%]">TOTAL</th>
+                <th className="py-2.5 px-3 text-xs font-medium text-center text-muted-foreground bg-muted/30 w-[10%] hidden md:table-cell">TELA HOJE</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={6} className="py-8 text-center text-muted-foreground"><Loader2 size={18} className="inline animate-spin" /></td></tr>
+                <tr><td colSpan={8} className="py-8 text-center text-muted-foreground"><Loader2 size={18} className="inline animate-spin" /></td></tr>
               ) : agentTableData.length === 0 ? (
-                <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">Nenhuma conversa</td></tr>
+                <tr><td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">Nenhuma conversa</td></tr>
               ) : (
                 agentTableData.map((row, i) => (
                   <tr key={row.id ?? '__none__'} className={`border-b last:border-0 ${i === 0 && !row.id ? 'bg-muted/20' : 'hover:bg-accent/30'} transition-colors`}>
@@ -449,6 +485,7 @@ export default function Dashboard() {
                       { count: row.new, status: 'new', color: 'text-red-600 dark:text-red-400' },
                       { count: row.open, status: 'open', color: 'text-blue-600 dark:text-blue-400' },
                       { count: row.pending, status: 'pending', color: 'text-amber-600 dark:text-amber-400', hideOnMobile: true },
+                      { count: row.resolved, status: 'resolved', color: 'text-purple-600 dark:text-purple-400', hideOnMobile: true },
                       { count: row.closed, status: 'closed', color: 'text-gray-600 dark:text-gray-400', hideOnMobile: true },
                     ].map(({ count, status, color, hideOnMobile }) => (
                       <td key={status} className={`py-2.5 px-3 text-center text-sm font-bold ${hideOnMobile ? 'hidden sm:table-cell' : ''}`}>
@@ -474,6 +511,14 @@ export default function Dashboard() {
                           navigate(`/inbox?${params.toString()}`);
                         }}
                       >{row.total}</button>
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-xs text-muted-foreground hidden md:table-cell">
+                      {row.id && screenTimeMap[row.id] ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Monitor size={10} className="text-primary" />
+                          {fmtScreenTime(screenTimeMap[row.id])}
+                        </span>
+                      ) : row.id ? '—' : ''}
                     </td>
                   </tr>
                 ))
