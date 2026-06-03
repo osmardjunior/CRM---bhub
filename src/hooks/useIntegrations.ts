@@ -117,10 +117,9 @@ export function useDeleteDevice() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('integrations')
-        .delete()
-        .eq('id', id);
+      const { error } = await supabase.rpc('delete_integration', {
+        p_integration_id: id,
+      });
       if (error) throw error;
     },
     onSuccess: () => {

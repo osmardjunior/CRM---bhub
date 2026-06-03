@@ -1192,6 +1192,16 @@ export default function ChatPanel({ conversation, loading, onToggleProfile, prof
           </div>
         )}
 
+        {/* Banner: integração excluída */}
+        {!conversation.integration && conversation.integration_id && !isAnnotationMode && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md border bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800">
+            <Smartphone size={13} className="shrink-0 text-red-600 dark:text-red-400" />
+            <p className="text-[11px] flex-1 text-red-700 dark:text-red-300">
+              O número de origem desta conversa foi <span className="font-semibold">removido</span> — mensagens não podem ser enviadas por este número
+            </p>
+          </div>
+        )}
+
         {/* Banner: número desconectado/restringido/banido */}
         {conversation.integration && conversation.integration.status !== 'connected' && !isAnnotationMode && (
           <div className={`flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md border ${

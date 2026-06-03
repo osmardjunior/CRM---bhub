@@ -635,6 +635,16 @@ export async function updateContact(
 }
 
 export async function deleteContact(contactId: string): Promise<void> {
+  // Close all active conversations before deleting to avoid constraint violation
+  // (idx_conv_unique_active_contact_integration)
+  const { error: convError } = await supabase
+    .from('conversations')
+    .update({ status: 'closed' })
+    .eq('contact_id', contactId)
+    .not('status', 'in', '("closed","resolved")');
+
+  if (convError) handleError(convError);
+
   const { error } = await supabase
     .from('contacts')
     .delete()

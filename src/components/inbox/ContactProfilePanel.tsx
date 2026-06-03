@@ -381,6 +381,53 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               {contact.phone && <p className="text-xs text-primary font-medium mt-0.5">{contact.phone}</p>}
             </div>
 
+            {/* Aparelho Origem — ABOVE quick actions for visibility */}
+            {(conversation.integration || conversation.integration_id) && (
+              <div className="px-3 py-3 border-b border-border">
+                <div className="flex items-start gap-2.5">
+                  <Smartphone size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Aparelho Origem</p>
+                    {conversation.integration ? (
+                      <>
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {conversation.integration.device_name}
+                          {conversation.integration.phone_number && (
+                            <span className="text-muted-foreground ml-1">({conversation.integration.phone_number})</span>
+                          )}
+                        </p>
+                        <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium ${
+                          conversation.integration.status === 'connected' ? 'text-green-500' :
+                          conversation.integration.status === 'banned' ? 'text-red-500' :
+                          conversation.integration.status === 'restricted' ? 'text-amber-500' :
+                          'text-muted-foreground'
+                        }`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${
+                            conversation.integration.status === 'connected' ? 'bg-green-500' :
+                            conversation.integration.status === 'banned' ? 'bg-red-500' :
+                            conversation.integration.status === 'restricted' ? 'bg-amber-500' :
+                            'bg-gray-400'
+                          }`} />
+                          {conversation.integration.status === 'connected' ? 'Conectado' :
+                           conversation.integration.status === 'banned' ? 'Banido' :
+                           conversation.integration.status === 'restricted' ? 'Restringido' :
+                           'Desconectado'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs font-medium text-muted-foreground italic truncate">Número removido</p>
+                        <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-red-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                          Integração excluída
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Quick actions */}
             <div className="px-3 py-3 border-b border-border">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Ações rápidas</p>
@@ -503,37 +550,6 @@ export default function ContactProfilePanel({ conversation, onClose }: Props) {
               </div>
               {contact.email && <InfoRow icon={Mail} label="E-mail" value={contact.email} />}
               {contact.source && <InfoRow icon={Info} label="Origem" value={contact.source} />}
-              {conversation.integration && (
-                <div className="flex items-start gap-2.5 py-2 border-b border-border/50">
-                  <Smartphone size={13} className="text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Aparelho Origem</p>
-                    <p className="text-xs font-medium text-foreground truncate">
-                      {conversation.integration.device_name}
-                      {conversation.integration.phone_number && (
-                        <span className="text-muted-foreground ml-1">({conversation.integration.phone_number})</span>
-                      )}
-                    </p>
-                    <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium ${
-                      conversation.integration.status === 'connected' ? 'text-green-500' :
-                      conversation.integration.status === 'banned' ? 'text-red-500' :
-                      conversation.integration.status === 'restricted' ? 'text-amber-500' :
-                      'text-muted-foreground'
-                    }`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${
-                        conversation.integration.status === 'connected' ? 'bg-green-500' :
-                        conversation.integration.status === 'banned' ? 'bg-red-500' :
-                        conversation.integration.status === 'restricted' ? 'bg-amber-500' :
-                        'bg-gray-400'
-                      }`} />
-                      {conversation.integration.status === 'connected' ? 'Conectado' :
-                       conversation.integration.status === 'banned' ? 'Banido' :
-                       conversation.integration.status === 'restricted' ? 'Restringido' :
-                       'Desconectado'}
-                    </span>
-                  </div>
-                </div>
-              )}
               <InfoRow icon={Calendar} label="Data de cadastro" value={createdAt} />
               {contact.notes && (
                 <div className="mt-3 pt-3 border-t border-border/50">

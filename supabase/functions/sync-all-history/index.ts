@@ -220,7 +220,7 @@ async function syncIntegrationHistory(
       if (existingConv) {
         conversationId = existingConv.id;
       } else {
-        const { data: newConv } = await supabase
+        const { data: newConv, error: convErr } = await supabase
           .from("conversations")
           .insert({
             company_id: companyId,
@@ -231,7 +231,21 @@ async function syncIntegrationHistory(
           })
           .select("id")
           .single();
-        conversationId = newConv?.id || null;
+        if (convErr && convErr.code === "23505") {
+          // Race condition: conversation was created between our lookup and insert
+          const { data: retryConv } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("contact_id", contactId)
+            .eq("integration_id", integrationId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          conversationId = retryConv?.id || null;
+        } else {
+          conversationId = newConv?.id || null;
+        }
       }
       if (!conversationId) continue;
 

@@ -1322,9 +1322,32 @@ serve(async (req) => {
       const updates: Record<string, any> = {};
 
       // Fix orphaned conversations: assign integration_id if it was NULL
+      // BUT only if no other active conversation already has this integration_id
+      // (otherwise the unique constraint idx_conv_unique_active_contact_integration would fail)
       if (!conversation.integration_id && integrationId) {
-        updates.integration_id = integrationId;
-        console.log(`[routing] fixed NULL integration_id → ${integrationId} on conversation ${conversation.id}`);
+        const { data: conflicting } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("company_id", company_id)
+          .eq("contact_id", contact.id)
+          .eq("channel", channel)
+          .eq("integration_id", integrationId)
+          .not("status", "in", '("closed","resolved")')
+          .limit(1)
+          .maybeSingle();
+        if (!conflicting) {
+          updates.integration_id = integrationId;
+          console.log(`[routing] fixed NULL integration_id → ${integrationId} on conversation ${conversation.id}`);
+        } else {
+          // Another active conversation already has this integration_id.
+          // Close this NULL one and use the existing one instead.
+          await supabase
+            .from("conversations")
+            .update({ status: "closed", close_reason: "merged_null_integration" })
+            .eq("id", conversation.id);
+          conversation = conflicting;
+          console.log(`[routing] closed NULL conversation ${conversation.id}, using existing ${conflicting.id}`);
+        }
       }
 
       if (isClosed && !from_me && !isConvArchived) {

@@ -39,9 +39,32 @@ export default function ContactHistorySection({ conversationId, contactId, curre
       ]);
       const events = (eventsRes.data ?? []).map((e: Record<string, unknown>) => ({ ...e, _kind: 'event' as const }));
       const notes = (annotationsRes.data ?? []).map((a: Record<string, unknown>) => ({ ...a, _kind: 'annotation' as const }));
-      return [...events, ...notes].sort((a, b) => new Date(b.created_at as string).getTime() - new Date(a.created_at as string).getTime());
+
+      // Resolve agent names from payload.from / payload.to UUIDs
+      const agentIds = new Set<string>();
+      for (const ev of events) {
+        const p = ev.payload as Record<string, string> | undefined;
+        if (p?.from) agentIds.add(p.from);
+        if (p?.to) agentIds.add(p.to);
+      }
+      const agentMap: Record<string, string> = {};
+      if (agentIds.size > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, name, display_name, email')
+          .in('id', Array.from(agentIds));
+        for (const p of profiles ?? []) {
+          agentMap[p.id] = p.display_name || p.name || p.email || 'Agente';
+        }
+      }
+
+      const combined = [...events, ...notes].sort((a, b) => new Date(b.created_at as string).getTime() - new Date(a.created_at as string).getTime());
+      return { items: combined, agentMap };
     },
   });
+
+  const timelineItems = Array.isArray(convEvents) ? convEvents : (convEvents as { items: Record<string, unknown>[]; agentMap: Record<string, string> }).items ?? [];
+  const agentMap = Array.isArray(convEvents) ? {} : (convEvents as { items: Record<string, unknown>[]; agentMap: Record<string, string> }).agentMap ?? {};
 
   const statusColors: Record<string, string> = {
     new: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -77,7 +100,7 @@ export default function ContactHistorySection({ conversationId, contactId, curre
       )}
 
       {/* Events timeline */}
-      {convEvents.length === 0 ? (
+      {timelineItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
           <History size={28} className="mb-2 opacity-30" />
           <p className="text-xs">Nenhum evento registrado</p>
@@ -86,7 +109,7 @@ export default function ContactHistorySection({ conversationId, contactId, curre
         <div className="relative pl-4">
           <div className="absolute left-1.5 top-0 bottom-0 w-px bg-border" />
           <div className="space-y-3">
-            {convEvents.map((ev: Record<string, unknown>) => {
+            {timelineItems.map((ev: Record<string, unknown>) => {
               const date = new Date(ev.created_at as string).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
               const statusLabel: Record<string, string> = { new: 'Aberto', open: 'Em Atendimento', pending: 'Aguardando', resolved: 'Resolvido', closed: 'Fechado' };
               const statusColor: Record<string, string> = { new: 'text-green-600', open: 'text-blue-600', pending: 'text-amber-600', resolved: 'text-purple-600', closed: 'text-red-700' };
@@ -124,18 +147,42 @@ export default function ContactHistorySection({ conversationId, contactId, curre
                 </div>
               );
 
-              if (ev.event_type === 'agent_assigned') return (
-                <div key={ev.id as string} className="relative flex items-start gap-2">
-                  <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-blue-400 border-2 border-background" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1">
-                      <User size={9} className="text-blue-500" />
-                      <span className="text-[10px] text-foreground">Agente atribuído</span>
+              if (ev.event_type === 'agent_assigned') {
+                const fromAgent = payload?.from ? (agentMap[payload.from] ?? null) : null;
+                const toAgent = payload?.to ? (agentMap[payload.to] ?? null) : null;
+                const actorName = actor?.name ?? null;
+                const isAutomatic = !ev.actor_id;
+                const assignedBy = isAutomatic ? 'Sistema' : (actorName ?? 'Usuário');
+
+                let description: string;
+                if (toAgent && fromAgent) {
+                  description = `${fromAgent} → ${toAgent}`;
+                } else if (toAgent) {
+                  description = `Atribuído a ${toAgent}`;
+                } else if (payload?.to && !toAgent) {
+                  // UUID exists but name not resolved (profile deleted or not found)
+                  description = 'Agente atribuído (perfil removido)';
+                } else if (fromAgent) {
+                  description = `${fromAgent} desatribuído`;
+                } else if (payload?.from && !fromAgent) {
+                  description = 'Agente desatribuído (perfil removido)';
+                } else {
+                  description = 'Atribuição alterada';
+                }
+
+                return (
+                  <div key={ev.id as string} className="relative flex items-start gap-2">
+                    <div className={`absolute -left-[13px] top-1 h-3 w-3 rounded-full border-2 border-background ${toAgent ? 'bg-blue-400' : 'bg-orange-400'}`} />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1">
+                        <User size={9} className={toAgent ? 'text-blue-500' : 'text-orange-500'} />
+                        <span className="text-[10px] text-foreground">{description}</span>
+                      </div>
+                      <p className="text-[9px] text-muted-foreground">por {assignedBy} · {date}</p>
                     </div>
-                    <p className="text-[9px] text-muted-foreground">{date}</p>
                   </div>
-                </div>
-              );
+                );
+              }
 
               return (
                 <div key={ev.id as string} className="relative flex items-start gap-2">
