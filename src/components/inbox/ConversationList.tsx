@@ -45,12 +45,12 @@ import { toast } from 'sonner';
 
 const statusTabs: { label: string; value: Enums<'conversation_status'> | '_archived' | undefined }[] = [
   { label: 'Todos', value: undefined },
-  { label: 'Aberto', value: 'new' },
-  { label: 'Atend.', value: 'open' },
-  { label: 'Aguard.', value: 'pending' },
-  { label: 'Resolv.', value: 'resolved' },
-  { label: 'Fechado', value: 'closed' },
-  { label: 'Arquiv.', value: '_archived' },
+  { label: 'Novo', value: 'new' },
+  { label: 'Atend', value: 'open' },
+  { label: 'Aguard', value: 'pending' },
+  { label: 'Resolv', value: 'resolved' },
+  { label: 'Fech', value: 'closed' },
+  { label: 'Arq', value: '_archived' },
 ];
 
 const statusColors: Record<string, string> = {
@@ -434,128 +434,100 @@ export default function ConversationList({
         </Button>
       </div>
 
-      {/* Expandable filters */}
+      {/* Expandable filters (original order) */}
       <Collapsible open={filtersOpen}>
         <CollapsibleContent>
-          <div className="px-2.5 py-2 border-b border-border bg-secondary/20">
+          <div className="px-2.5 py-2 border-b border-border bg-secondary/10 space-y-2">
             <div className="grid grid-cols-2 gap-1.5">
-              <Input
-                value={localName}
-                onChange={(e) => setLocalName(e.target.value)}
-                className="h-6 text-[11px] bg-background border border-border rounded px-2"
-                placeholder="Nome"
-              />
-              <Input
-                value={localPhone}
-                onChange={(e) => setLocalPhone(e.target.value)}
-                className="h-6 text-[11px] bg-background border border-border rounded px-2"
-                placeholder="Telefone"
-              />
-              <Select value={localChannel} onValueChange={setLocalChannel}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Canal" />
-                </SelectTrigger>
+              {/* Agent */}
+              <Select value={localUser} onValueChange={(v) => { setLocalUser(v); }}>
+                <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Agente" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todos canais</SelectItem>
-                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                  <SelectItem value="instagram">Instagram</SelectItem>
-                  <SelectItem value="webchat">Webchat</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={localTag} onValueChange={setLocalTag}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Tag" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="qualquer">Qualquer tag</SelectItem>
-                  {tags.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={localUser} onValueChange={setLocalUser}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Agente" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="qualquer">Qualquer agente</SelectItem>
-                  <SelectItem value="__none__">Não delegado</SelectItem>
+                  <SelectItem value="qualquer">Todos agentes</SelectItem>
+                  <SelectItem value="__none__">Sem agente</SelectItem>
                   {teamMembers.map((m) => (
                     <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={localIntegration} onValueChange={setLocalIntegration}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Telefone" />
-                </SelectTrigger>
+
+              {/* Tag */}
+              <Select value={localTag} onValueChange={(v) => { setLocalTag(v); }}>
+                <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Tag" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="qualquer">Qualquer telefone</SelectItem>
-                  {integrations.map((ig) => {
-                    const isOff = ig.status !== 'connected';
-                    const statusIcon = ig.status === 'connected' ? '🟢' : ig.status === 'banned' ? '🔴' : ig.status === 'restricted' ? '🟡' : '⚪';
+                  <SelectItem value="qualquer">Todas tags</SelectItem>
+                  {tags.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Integration / Phone */}
+              <Select value={localIntegration} onValueChange={(v) => { setLocalIntegration(v); }}>
+                <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Telefone" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="qualquer">Todos telefones</SelectItem>
+                  {integrations.map((i) => {
+                    const cfg = i.config as Record<string, string> | null;
+                    const phone = cfg?.phone || cfg?.instance || i.id.slice(0, 8);
+                    const disconnected = i.status !== 'connected';
                     return (
-                      <SelectItem key={ig.id} value={ig.id} className={isOff ? 'opacity-70' : ''}>
-                        {statusIcon} {ig.device_name}{ig.phone_number ? ` (${ig.phone_number})` : ''}
+                      <SelectItem key={i.id} value={i.id}>
+                        {phone}{disconnected ? ' ⚠️' : ''}
                       </SelectItem>
                     );
                   })}
                 </SelectContent>
               </Select>
+
+              {/* Funnel */}
               <Select value={localFunnel} onValueChange={(v) => { setLocalFunnel(v); setLocalStage(''); }}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Funil" />
-                </SelectTrigger>
+                <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Funil" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="qualquer">Qualquer funil</SelectItem>
+                  <SelectItem value="qualquer">Todos funis</SelectItem>
                   {projectFunnels.map((f) => (
                     <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={localStage} onValueChange={setLocalStage} disabled={!localFunnel || localFunnel === 'qualquer'}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Etapa" />
-                </SelectTrigger>
+
+              {/* Stage (conditional) */}
+              {selectedFunnelStages.length > 0 && (
+                <Select value={localStage} onValueChange={(v) => { setLocalStage(v); }}>
+                  <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Etapa" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualquer">Todas etapas</SelectItem>
+                    {selectedFunnelStages.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Order */}
+              <Select value={localOrder} onValueChange={(v) => { setLocalOrder(v); }}>
+                <SelectTrigger className="h-7 text-[10px]"><SelectValue placeholder="Ordenar" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="qualquer">Qualquer etapa</SelectItem>
-                  {selectedFunnelStages.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={localOrder} onValueChange={setLocalOrder}>
-                <SelectTrigger className="h-6 text-[11px] bg-background border border-border rounded">
-                  <SelectValue placeholder="Ordenar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="recent">Mais recente</SelectItem>
-                  <SelectItem value="oldest">Mais antigo</SelectItem>
+                  <SelectItem value="recent">Mais recentes</SelectItem>
+                  <SelectItem value="oldest">Mais antigos</SelectItem>
                   <SelectItem value="name">Nome A-Z</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-1.5 mt-1.5">
-              <Button size="sm" className="flex-1 h-6 text-[11px]" onClick={handleApplyFilters}>
-                Aplicar
-              </Button>
-              <Button size="sm" variant="outline" className="flex-1 h-6 text-[11px]" onClick={handleClearFilters}>
-                Limpar
-              </Button>
+
+            {/* Apply / Clear buttons */}
+            <div className="flex gap-1.5">
+              <Button size="sm" className="h-6 flex-1 text-[10px]" onClick={handleApplyFilters}>Aplicar</Button>
+              <Button size="sm" variant="ghost" className="h-6 text-[10px] text-muted-foreground" onClick={handleClearFilters}>Limpar</Button>
             </div>
           </div>
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Agent leads summary cards */}
+      {/* Agent leads summary */}
       <AgentLeadsSummary
-        activeStatus={activeStatus}
         onStatusClick={(status) => {
-          if (status) {
-            onFilterChange({ status: status as Enums<'conversation_status'>, statusIn: undefined });
-          } else {
-            onFilterChange({ status: undefined, statusIn: undefined });
-          }
+          onFilterChange({ status, statusIn: undefined, archived: undefined } as any);
         }}
       />
 
@@ -573,7 +545,7 @@ export default function ConversationList({
                 onFilterChange({ status: undefined, statusIn: undefined, archived: undefined } as any);
               }
             }}
-            className={`flex-1 min-w-[48px] py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap px-1 ${
+            className={`flex-1 min-w-0 py-2 text-[10px] font-semibold uppercase transition-colors whitespace-nowrap px-1 ${
               activeStatus === tab.value
                 ? 'border-b-2 border-primary text-primary'
                 : 'text-muted-foreground hover:text-foreground'
@@ -584,8 +556,8 @@ export default function ConversationList({
         ))}
       </div>
 
-      {/* Quick filter chips — Favoritos, Não lidas, Agendados (sem "Todos" duplicado) */}
-      <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-border overflow-x-auto scrollbar-none">
+      {/* Quick filter chips */}
+      <div className="flex items-center gap-1 px-2.5 py-1 border-b border-border overflow-x-auto scrollbar-none">
         {([
           { key: 'favorites' as const, label: 'Favoritos', icon: Star, activeColor: 'bg-amber-500/15 text-amber-600 border-amber-500/30 dark:text-amber-400' },
           { key: 'unread' as const, label: 'Não lidas', icon: MailWarning, activeColor: 'bg-info/15 text-info border-info/30' },
