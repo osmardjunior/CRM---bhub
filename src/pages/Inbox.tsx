@@ -42,7 +42,7 @@ export default function InboxPage() {
   // When coming from URL with ?id=, also clear status filter to show the conversation regardless of status
   const [filters, setFilters] = useState<Omit<ConversationFilters, 'page'>>({
     status: initialStatus ?? undefined,
-    statusIn: (initialStatus || initialId) ? undefined : ['new', 'open', 'pending', 'resolved'],
+    statusIn: (initialStatus || initialId) ? undefined : undefined,
     search: initialSearch ?? undefined,
     project_id: initialProject || projectId || undefined,
     assigned_user_id: initialAssigned === 'none' ? '__none__' : initialAssigned ?? undefined,
@@ -174,10 +174,7 @@ export default function InboxPage() {
             // Restore default status filter when user starts manual navigation
             if (navigatedViaUrl.current) {
               navigatedViaUrl.current = false;
-              setFilters(prev => prev.statusIn === undefined && !prev.status
-                ? { ...prev, statusIn: ['new', 'open', 'pending', 'resolved'] }
-                : prev,
-              );
+              setFilters(prev => prev);
             }
             setSelectedId(id);
           }}

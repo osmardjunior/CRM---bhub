@@ -385,7 +385,7 @@ export default function ConversationList({
     setLocalFunnel('');
     setLocalStage('');
     setQuickFilter('all');
-    onFilterChange({ status: undefined, statusIn: ['new', 'open', 'pending', 'resolved'], channel: undefined, name: undefined, phone: undefined, tag: undefined, integration_id: undefined, funnel_id: undefined, stage_id: undefined, sort: undefined, conversation_ids: undefined, has_unread: undefined, has_unread_user_id: undefined, has_unread_company_id: undefined });
+    onFilterChange({ status: undefined, statusIn: undefined, archived: undefined, channel: undefined, name: undefined, phone: undefined, tag: undefined, integration_id: undefined, funnel_id: undefined, stage_id: undefined, sort: undefined, conversation_ids: undefined, has_unread: undefined, has_unread_user_id: undefined, has_unread_company_id: undefined } as any);
 
   }
 
@@ -554,7 +554,7 @@ export default function ConversationList({
           if (status) {
             onFilterChange({ status: status as Enums<'conversation_status'>, statusIn: undefined });
           } else {
-            onFilterChange({ status: undefined, statusIn: ['new', 'open', 'pending', 'resolved'] });
+            onFilterChange({ status: undefined, statusIn: undefined });
           }
         }}
       />
@@ -570,7 +570,7 @@ export default function ConversationList({
               } else if (tab.value) {
                 onFilterChange({ status: tab.value as any, statusIn: undefined, archived: undefined } as any);
               } else {
-                onFilterChange({ status: undefined, statusIn: ['new', 'open', 'pending', 'resolved'], archived: undefined } as any);
+                onFilterChange({ status: undefined, statusIn: undefined, archived: undefined } as any);
               }
             }}
             className={`flex-1 min-w-[48px] py-2.5 text-[11px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap px-1 ${
