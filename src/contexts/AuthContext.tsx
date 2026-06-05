@@ -1,9 +1,22 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Profile = Tables<'profiles'>;
+
+// ── Cache version: bump this to auto-clear stale app data on deploy ──
+const CACHE_VERSION = '2';
+const CACHE_KEY = 'crm_cache_v';
+(function checkCacheVersion() {
+  const stored = localStorage.getItem(CACHE_KEY);
+  if (stored !== CACHE_VERSION) {
+    // Clear app-specific keys (preserve Supabase auth)
+    ['inbox_frozen', 'inbox_filters_open', 'sound_enabled', 'notification_sound_enabled', 'crm_theme'].forEach(k => localStorage.removeItem(k));
+    sessionStorage.clear();
+    localStorage.setItem(CACHE_KEY, CACHE_VERSION);
+  }
+})();
 
 interface AuthContextType {
   user: User | null;
@@ -24,6 +37,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadingTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // Auto-recovery: if loading is stuck for 10s, clear stale auth and reload
+  useEffect(() => {
+    if (loading) {
+      loadingTimer.current = setTimeout(() => {
+        console.warn('[AuthContext] Sessão presa por 10s — limpando dados e recarregando');
+        // Clear everything except cache version
+        const cacheV = localStorage.getItem(CACHE_KEY);
+        localStorage.clear();
+        sessionStorage.clear();
+        if (cacheV) localStorage.setItem(CACHE_KEY, cacheV);
+        window.location.replace('/login');
+      }, 10_000);
+    } else if (loadingTimer.current) {
+      clearTimeout(loadingTimer.current);
+    }
+    return () => { if (loadingTimer.current) clearTimeout(loadingTimer.current); };
+  }, [loading]);
 
   const fetchProfile = async (userId: string) => {
     // Run both queries in parallel — cuts initial load time in half
@@ -103,6 +135,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setLoading(false);
       }
+    }).catch(() => {
+      // Session corrupted — clear and let user re-login
+      console.warn('[AuthContext] getSession falhou — limpando sessão');
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -122,6 +158,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', user.id);
     }
     await supabase.auth.signOut();
+    // Clear app storage to prevent stale state on next login
+    ['inbox_frozen', 'inbox_filters_open', 'sound_enabled', 'notification_sound_enabled'].forEach(k => localStorage.removeItem(k));
+    sessionStorage.clear();
     setUser(null);
     setSession(null);
     setProfile(null);
