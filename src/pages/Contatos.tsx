@@ -305,7 +305,7 @@ export default function ContatosPage() {
         </SheetContent>
       </Sheet>
 
-      <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} companyId={companyId} />
+      <NewContactModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={(id) => setSelectedId(id)} companyId={companyId} />
       <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );

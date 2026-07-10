@@ -661,7 +661,7 @@ export default function FolderNumbers() {
       {/* ── QR Modal ───────────────────────────────────────── */}
       <EvolutionQRModal
         open={qrModal.open}
-        onClose={() => setQrModal(prev => ({ ...prev, open: false }))}
+        onOpenChange={(v) => { if (!v) setQrModal(prev => ({ ...prev, open: false })); }}
         integrationId={qrModal.integrationId}
         apiUrl={qrModal.apiUrl}
         apiKey={qrModal.apiKey}

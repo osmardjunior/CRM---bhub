@@ -26,6 +26,7 @@ const sourceOptions = ['WhatsApp', 'Instagram', 'Webchat', 'Indicação', 'Googl
 interface NewContactModalProps {
   open: boolean;
   onClose: () => void;
+  onCreated?: (contactId: string) => void;
   companyId: string | null;
 }
 
@@ -35,7 +36,7 @@ interface FormErrors {
   email?: string;
 }
 
-export default function NewContactModal({ open, onClose, companyId }: NewContactModalProps) {
+export default function NewContactModal({ open, onClose, onCreated, companyId }: NewContactModalProps) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', source: '' });
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -66,6 +67,7 @@ export default function NewContactModal({ open, onClose, companyId }: NewContact
         selectedTagIds.map(tagId => ({ contact_id: newContact.id, tag_id: tagId }))
       );
     }
+    if (newContact?.id) onCreated?.(newContact.id);
     handleClose();
   };
 

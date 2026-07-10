@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, RefreshCw, CheckCircle2, Wifi, QrCode, Copy, Check, Download } from 'lucide-react';
@@ -304,9 +304,9 @@ export default function EvolutionQRModal({
                 </Badge>
               )}
 
-              <Button size="sm" onClick={() => handleClose(false)}>
-                Fechar
-              </Button>
+              <DialogClose asChild>
+                <Button size="sm">Fechar</Button>
+              </DialogClose>
             </div>
           )}
 
@@ -318,9 +318,9 @@ export default function EvolutionQRModal({
                 <p className="text-xs text-destructive/80 break-all">{error}</p>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => handleClose(false)}>
-                  Cancelar
-                </Button>
+                <DialogClose asChild>
+                  <Button variant="outline" size="sm">Cancelar</Button>
+                </DialogClose>
                 <Button size="sm" onClick={createInstance} className="gap-1.5">
                   <RefreshCw size={12} /> Tentar novamente
                 </Button>
