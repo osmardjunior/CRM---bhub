@@ -1,0 +1,1496 @@
+openapi: 3.1.0
+info:
+  title: ALL-IN CRM — API v1 (contrato lógico)
+  version: "1.0.0"
+  description: |
+    Contrato lógico da camada de API do ALL-IN CRM no modelo SaaS multi-tenant.
+
+    **Este documento é normativo junto com `docs/API-CONTRACT.md`.** A implementação
+    é híbrida (API-CONTRACT §1.2): cada operação declara `x-impl` indicando o plano
+    que a implementa — `postgrest` (CRUD + RLS), `rpc` (função no schema `api_v1`)
+    ou `edge` (Supabase Edge Function `/functions/v1/*`). Para o consumidor é uma
+    API só; o cliente TS (`src/shared/api-contracts`) esconde a diferença.
+
+    Convenções (API-CONTRACT §2): envelope `{ data }` / `{ error: { code, message, details? } }`
+    em RPCs e edges; tenant sempre do JWT (`app_metadata.tenant_id`), nunca em
+    path/payload; timestamps ISO 8601 UTC; `Idempotency-Key` obrigatório nas
+    operações marcadas; paginação por cursor (fluxos) ou offset (listas administrativas).
+  contact:
+    name: "bhub — plataforma"
+servers:
+  - url: https://{project}.supabase.co
+    description: Supabase project (planos de dados/operações/servidor)
+    variables:
+      project:
+        default: <project-ref>
+paths:
+  # ══════════════════════════ AUTH / TENANCY (§3.1) ══════════════════════════
+  /functions/v1/tenancy/signup:
+    post:
+      tags: [tenancy]
+      summary: Cadastro self-service — provisiona tenant atomicamente
+      x-impl: edge provision-tenant
+      x-authz: público (CAPTCHA obrigatório)
+      x-idempotency: required
+      operationId: tenancy_signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignupRequest' }
+      responses:
+        '201':
+          description: Tenant provisionado (trial de 14 dias)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignupResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /rest/v1/rpc/get_current_context:
+    get:
+      tags: [tenancy]
+      summary: Bootstrap da sessão (user + tenant + role + entitlements + versão de contrato)
+      x-impl: rpc api_v1.get_current_context
+      x-authz: membro
+      operationId: tenancy_current
+      responses:
+        '200':
+          description: Contexto completo da sessão
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentContextResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /functions/v1/tenancy/invites:
+    post:
+      tags: [tenancy]
+      summary: Convidar membro (valida seat limit do plano)
+      x-impl: edge invite-member
+      x-authz: admin
+      operationId: tenancy_invite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteRequest' }
+      responses:
+        '201':
+          description: Convite criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InviteResponse' }
+        '402':
+          description: Limite de seats atingido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              example:
+                error:
+                  code: PLAN_LIMIT_REACHED
+                  message: "Seu plano permite 5 agentes. Faça upgrade para adicionar mais."
+                  details: { limit: 5, current: 5, resource: seats }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /rest/v1/members:
+    get:
+      tags: [tenancy]
+      summary: Listar membros do tenant (offset)
+      x-impl: postgrest view api_v1.members (profiles + user_roles)
+      x-authz: supervisor+
+      operationId: tenancy_members_list
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/limit' }
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Página de membros
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberPage' }
+
+  /rest/v1/rpc/update_member:
+    post:
+      tags: [tenancy]
+      summary: Atualizar membro (role, permissões, integrações permitidas, ativo)
+      x-impl: rpc api_v1.update_member
+      x-authz: admin
+      operationId: tenancy_member_update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberUpdateRequest' }
+      responses:
+        '200':
+          description: Membro atualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataEnvelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /functions/v1/tenancy/members/{user_id}:
+    delete:
+      tags: [tenancy]
+      summary: Remover membro (soft — is_active=false)
+      x-impl: edge delete-user
+      x-authz: admin
+      operationId: tenancy_member_delete
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Membro desativado }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/tenant_features:
+    get:
+      tags: [tenancy]
+      summary: Entitlements do plano (feature flags contratadas)
+      x-impl: postgrest view tenant_features (somente leitura p/ membros)
+      x-authz: membro
+      operationId: tenancy_entitlements
+      responses:
+        '200':
+          description: Features ativas do tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntitlementsResponse' }
+
+  # ══════════════════════════ CONVERSATIONS (§3.2) ═══════════════════════════
+  /rest/v1/rpc/list_conversations:
+    post:
+      tags: [conversations]
+      summary: Listar conversas com todos os filtros (1 roundtrip, cursor)
+      description: |
+        Substitui `listConversations` (src/services/api.ts:154-346) — absorve as
+        RPCs get_unread_conversation_ids e get_funnel_contact_ids e elimina os
+        4 roundtrips sequenciais de busca (api.ts:279-335).
+      x-impl: rpc api_v1.list_conversations (SECURITY DEFINER, tenant do JWT)
+      x-authz: "membro (agent: escopo projeto/atribuídas aplicado server-side)"
+      operationId: conversations_list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConversationListRequest' }
+      responses:
+        '200':
+          description: Página de conversas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /rest/v1/rpc/get_conversation:
+    post:
+      tags: [conversations]
+      summary: Detalhe da conversa (contato, agente, integração)
+      x-impl: rpc api_v1.get_conversation
+      x-authz: membro no escopo
+      operationId: conversations_get
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_conversation_id]
+              properties:
+                p_conversation_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Detalhe da conversa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationDetailEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/conversations:
+    patch:
+      tags: [conversations]
+      summary: Atualizar conversa (assign, status, department)
+      x-impl: postgrest (RLS)
+      x-authz: membro no escopo
+      operationId: conversations_update
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConversationUpdateRequest' }
+      responses:
+        '200': { description: Atualizada (RLS filtra; 0 linhas = sem acesso) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /functions/v1/conversations/{id}/close:
+    post:
+      tags: [conversations]
+      summary: Fechar conversa com motivo
+      x-impl: edge (grava attendance_history + audit_log na mesma intenção)
+      x-authz: membro no escopo
+      operationId: conversations_close
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [close_reason]
+              properties:
+                close_reason: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Conversa fechada, content: { application/json: { schema: { $ref: '#/components/schemas/DataEnvelope' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/conversation_reads:
+    post:
+      tags: [conversations]
+      summary: Marcar conversa como lida (upsert)
+      x-impl: postgrest upsert on (conversation_id, user_id)
+      x-authz: membro
+      operationId: conversations_mark_read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversation_id, last_read_at]
+              properties:
+                conversation_id: { type: string, format: uuid }
+                last_read_at: { type: string, format: date-time }
+      responses:
+        '201': { description: Lida registrada }
+    delete:
+      tags: [conversations]
+      summary: Marcar conversa como NÃO lida (delete do read record)
+      x-impl: postgrest delete
+      x-authz: membro
+      operationId: conversations_mark_unread
+      parameters:
+        - name: conversation_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Marcada como não lida }
+
+  /rest/v1/rpc/get_unread_counts:
+    post:
+      tags: [conversations]
+      summary: Contadores de não-lidas por conversa
+      description: Absorve `get_unread_counts` + fallback (api.ts:718-767) — sem p_company_id/p_user_id do cliente.
+      x-impl: rpc api_v1.get_unread_counts (SECURITY DEFINER, JWT)
+      x-authz: membro
+      operationId: conversations_unread_counts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_conversation_ids]
+              properties:
+                p_conversation_ids: { type: array, items: { type: string, format: uuid } }
+                p_spy_mode: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Mapa conversation_id → unread_count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCountsEnvelope'
+
+  /rest/v1/rpc/get_sidebar_stats:
+    post:
+      tags: [conversations]
+      summary: Badge da sidebar (total de não-lidas)
+      x-impl: rpc api_v1.get_sidebar_stats (absorve get_sidebar_unread_count)
+      x-authz: membro
+      operationId: conversations_sidebar_stats
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_project_id: { type: [string, 'null'], format: uuid }
+      responses:
+        '200':
+          description: Total de não-lidas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SidebarStatsEnvelope' }
+
+  /rest/v1/annotations:
+    get:
+      tags: [conversations]
+      summary: Listar anotações da conversa
+      x-impl: postgrest (RLS)
+      x-authz: membro no escopo
+      operationId: annotations_list
+      parameters:
+        - name: conversation_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Anotações (com autor)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnnotationList' }
+    post:
+      tags: [conversations]
+      summary: Criar anotação
+      x-impl: postgrest (RLS; company_id via trigger)
+      x-authz: membro no escopo
+      operationId: annotations_create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversation_id, body]
+              properties:
+                conversation_id: { type: string, format: uuid }
+                body: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Anotação criada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Annotation' }
+    patch:
+      tags: [conversations]
+      summary: Editar anotação
+      x-impl: postgrest (RLS — autor ou admin)
+      x-authz: autor/admin
+      operationId: annotations_update
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string, minLength: 1 } }
+      responses:
+        '200': { description: Atualizada }
+    delete:
+      tags: [conversations]
+      summary: Excluir anotação
+      x-impl: postgrest (RLS — autor ou admin)
+      x-authz: autor/admin
+      operationId: annotations_delete
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Excluída }
+
+  # ══════════════════════════ MESSAGES (§3.3) ════════════════════════════════
+  /rest/v1/messages:
+    get:
+      tags: [messages]
+      summary: Listar mensagens da conversa (cursor por created_at,id)
+      x-impl: postgrest (RLS)
+      x-authz: membro no escopo
+      operationId: messages_list
+      parameters:
+        - name: conversation_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/limit' }
+        - name: cursor
+          in: query
+          description: Cursor opaco base64 [created_at, id]
+          schema: { type: string }
+      responses:
+        '200':
+          description: Página de mensagens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePage' }
+
+  /functions/v1/conversations/{id}/messages:
+    post:
+      tags: [messages]
+      summary: Enviar mensagem (async — registra intenção e enfileira entrega)
+      description: |
+        **Contrato central da v1.** Substitui o fluxo browser-grava-e-chama-edge
+        (api.ts:404-455 + api.ts:69-101) que perdia mensagens ao fechar a aba
+        (ARCHITECTURE §8 risco 2). A edge valida tenant/escopo/checa quota,
+        insere `messages` com `delivery_status='queued'` e enfileira em
+        `whatsapp_outbound` (pgmq). O worker envia e atualiza o status, que chega
+        à UI via Realtime. Resposta 202 — entrega é assíncrona.
+      x-impl: edge enqueue-outbound → pgmq → worker-send-whatsapp
+      x-authz: membro no escopo da conversa
+      x-idempotency: required
+      operationId: messages_send
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - { $ref: '#/components/parameters/Idempotency-Key' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessageRequest' }
+      responses:
+        '202':
+          description: Mensagem registrada e enfileirada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SendMessageResponse' }
+        '402':
+          description: Cota de mensagens do plano excedida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              example:
+                error:
+                  code: QUOTA_EXCEEDED
+                  message: "Cota mensal de mensagens atingida. A mensagem ficará pendente até o próximo ciclo ou upgrade."
+                  details: { used: 5000, included: 5000, message_id: "uuid" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422':
+          description: "Validação (ex.: contato LID sem telefone)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              example:
+                error:
+                  code: VALIDATION_ERROR
+                  message: "Contato identificado por LID do WhatsApp (sem número de telefone). Adicione o número ao contato para responder."
+                  details: { field: contact.phone }
+
+  /functions/v1/messages/{id}:
+    patch:
+      tags: [messages]
+      summary: Editar mensagem (best-effort remoto; edited_at sempre)
+      x-impl: edge → fila edit (Evolution /chat/updateMessage)
+      x-authz: autor ou admin
+      operationId: messages_edit
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_body]
+              properties: { new_body: { type: string, minLength: 1 } }
+      responses:
+        '202': { description: Edição aceita (remota best-effort) }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [messages]
+      summary: Excluir mensagem (soft-delete + remoto quando possível)
+      x-impl: edge → fila delete (Evolution deleteMessageForEveryone)
+      x-authz: autor ou admin
+      operationId: messages_delete
+      parameters:
+        - { $ref: '#/components/parameters/id' }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [local, everyone], default: local }
+      responses:
+        '202': { description: Exclusão aceita }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/message_reactions:
+    post:
+      tags: [messages]
+      summary: Reagir a mensagem
+      x-impl: postgrest upsert
+      x-authz: membro
+      operationId: reactions_add
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id, emoji]
+              properties:
+                message_id: { type: string, format: uuid }
+                emoji: { type: string, minLength: 1 }
+      responses:
+        '201': { description: Reação registrada }
+    delete:
+      tags: [messages]
+      summary: Remover reação
+      x-impl: postgrest delete
+      x-authz: autor da reação
+      operationId: reactions_remove
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Removida }
+
+  /rest/v1/scheduled_messages:
+    get:
+      tags: [messages]
+      summary: Listar mensagens agendadas da conversa
+      x-impl: postgrest (RLS)
+      x-authz: membro no escopo
+      operationId: scheduled_list
+      parameters:
+        - name: conversation_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Agendadas }
+    post:
+      tags: [messages]
+      summary: Agendar mensagem
+      x-impl: postgrest insert (disparo via cron process-scheduled-messages)
+      x-authz: membro no escopo
+      operationId: scheduled_create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversation_id, content, scheduled_at]
+              properties:
+                conversation_id: { type: string, format: uuid }
+                content: { type: string, minLength: 1 }
+                media_url: { type: [string, 'null'], format: uri }
+                scheduled_at: { type: string, format: date-time }
+      responses:
+        '201': { description: Agendada }
+    delete:
+      tags: [messages]
+      summary: Cancelar agendamento (set cancelled_at)
+      x-impl: postgrest update
+      x-authz: autor ou admin
+      operationId: scheduled_cancel
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Cancelada }
+
+  # ══════════════════════════ CONTACTS (§3.4) ════════════════════════════════
+  /rest/v1/contacts:
+    get:
+      tags: [contacts]
+      summary: Listar contatos (offset + filtros)
+      x-impl: postgrest (RLS)
+      x-authz: "membro (agent: escopo aplicado server-side via view)"
+      operationId: contacts_list
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/limit' }
+        - { name: q, in: query, schema: { type: string }, description: nome/telefone }
+        - { name: tag_id, in: query, schema: { type: string, format: uuid } }
+        - { name: source, in: query, schema: { type: string } }
+        - { name: assigned_user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: project_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Página de contatos (meta.page com total)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContactPage' }
+    post:
+      tags: [contacts]
+      summary: Criar contato
+      x-impl: postgrest (RLS; company_id via trigger/JWT)
+      x-authz: membro (contacts_create)
+      operationId: contacts_create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactUpsert' }
+      responses:
+        '201':
+          description: Contato criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contact' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    patch:
+      tags: [contacts]
+      summary: Atualizar contato
+      x-impl: postgrest (RLS)
+      x-authz: membro
+      operationId: contacts_update
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactUpsert' }
+      responses:
+        '200': { description: Atualizado }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/rpc/delete_contact:
+    post:
+      tags: [contacts]
+      summary: Excluir contato (fecha conversas ativas antes, transacional)
+      x-impl: rpc api_v1.delete_contact
+      x-authz: admin/supervisor
+      operationId: contacts_delete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_contact_id]
+              properties: { p_contact_id: { type: string, format: uuid } }
+      responses:
+        '204': { description: Excluído }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rest/v1/rpc/export_contacts:
+    post:
+      tags: [contacts]
+      summary: Exportar contatos (CSV, até 10k)
+      x-impl: rpc api_v1.export_contacts
+      x-authz: supervisor+ (reports_export)
+      operationId: contacts_export
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_q: { type: [string, 'null'] }
+                p_tag_id: { type: [string, 'null'], format: uuid }
+                p_source: { type: [string, 'null'] }
+      responses:
+        '200':
+          description: CSV (text/csv) ou JSON conforme Accept
+          content:
+            text/csv: { schema: { type: string } }
+
+  /rest/v1/rpc/set_contact_tags:
+    post:
+      tags: [contacts]
+      summary: Definir tags do contato (replace atômico, fonte normalizada)
+      x-impl: rpc api_v1.set_contact_tags
+      x-authz: membro
+      operationId: contacts_set_tags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_contact_id, p_tag_ids]
+              properties:
+                p_contact_id: { type: string, format: uuid }
+                p_tag_ids: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '200': { description: Tags aplicadas }
+
+  # ══════════════════════════ DEALS (§3.6) ═══════════════════════════════════
+  /rest/v1/deals:
+    get:
+      tags: [deals]
+      summary: Listar deals (kanban)
+      x-impl: postgrest (RLS)
+      x-authz: membro
+      operationId: deals_list
+      parameters:
+        - { name: stage, in: query, schema: { $ref: '#/components/schemas/DealStage' } }
+        - { name: assigned_user_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deals com contact/assigned_user
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DealWithRelations' }
+    post:
+      tags: [deals]
+      summary: Criar deal
+      x-impl: postgrest (RLS)
+      x-authz: membro
+      operationId: deals_create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DealUpsert' }
+      responses:
+        '201':
+          description: Deal criado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deal' }
+    patch:
+      tags: [deals]
+      summary: Atualizar deal (inclui mover de estágio)
+      x-impl: postgrest (RLS)
+      x-authz: membro
+      operationId: deals_update
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DealUpsert' }
+      responses:
+        '200': { description: Atualizado }
+    delete:
+      tags: [deals]
+      summary: Excluir deal
+      x-impl: postgrest (RLS)
+      x-authz: supervisor+
+      operationId: deals_delete
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Excluído }
+
+  # ══════════════════════════ BILLING (§3.14) ════════════════════════════════
+  /rest/v1/rpc/get_subscription:
+    post:
+      tags: [billing]
+      summary: Assinatura atual do tenant
+      x-impl: rpc api_v1.get_subscription (companies + tenant_features)
+      x-authz: admin
+      operationId: billing_subscription
+      responses:
+        '200':
+          description: Assinatura e ciclo de vida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionEnvelope' }
+
+  /functions/v1/billing/checkout-session:
+    post:
+      tags: [billing]
+      summary: Criar Stripe Checkout Session (assinatura/troca de plano)
+      x-impl: edge (Stripe Checkout)
+      x-authz: admin
+      x-idempotency: required
+      operationId: billing_checkout
+      parameters:
+        - { $ref: '#/components/parameters/Idempotency-Key' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_lookup_key]
+              properties:
+                price_lookup_key: { type: string, example: pro_monthly }
+      responses:
+        '200':
+          description: URL do Checkout
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionUrlEnvelope' }
+
+  /functions/v1/billing/portal-session:
+    post:
+      tags: [billing]
+      summary: Criar Stripe Customer Portal Session
+      x-impl: edge (Stripe Portal)
+      x-authz: admin
+      operationId: billing_portal
+      responses:
+        '200':
+          description: URL do Portal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionUrlEnvelope' }
+
+  /rest/v1/usage_counters:
+    get:
+      tags: [billing]
+      summary: Uso do ciclo corrente (mensagens, agentes, números)
+      x-impl: postgrest view usage_counters (somente leitura)
+      x-authz: admin
+      operationId: billing_usage
+      responses:
+        '200':
+          description: Contadores de uso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageResponse' }
+
+  /rest/v1/plan_limits:
+    get:
+      tags: [billing]
+      summary: Catálogo de planos e limites
+      x-impl: postgrest view plan_limits (somente leitura)
+      x-authz: membro
+      operationId: billing_plans
+      responses:
+        '200':
+          description: Planos disponíveis
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Plan' }
+
+  # ══════════════════════════ WEBHOOKS (§4.3/§4.4) ═══════════════════════════
+  /functions/v1/webhooks/stripe:
+    post:
+      tags: [webhooks]
+      summary: Webhook Stripe → entitlements (server-to-server)
+      description: |
+        Assinatura `Stripe-Signature` verificada; resposta 200 imediata;
+        processamento idempotente por `event.id`. Eventos: subscription
+        created/updated/deleted, invoice.payment_failed,
+        entitlements.active_entitlement_summary.updated → upsert tenant_features.
+      x-impl: edge stripe-webhook
+      x-authz: assinatura Stripe (sem JWT)
+      operationId: webhook_stripe
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: Stripe Event (payload opaco) }
+      responses:
+        '200': { description: Aceito para processamento }
+        '400': { description: Assinatura inválida }
+
+  /functions/v1/webhooks/evolution:
+    post:
+      tags: [webhooks]
+      summary: Webhook Evolution API → inbound (contrato preservado)
+      description: |
+        Payload Evolution v2 **inalterado** (ver `parseEvolutionPayload`,
+        incoming-message/index.ts:61-220). HMAC-SHA256 obrigatório por
+        integration. Dedup por `external_message_id` unique.
+        Sempre 200 em erros de negócio recuperáveis (Evolution retransmite em não-200).
+      x-impl: edge incoming-message
+      x-authz: HMAC x-evolution-signature (sem JWT)
+      operationId: webhook_evolution
+      parameters:
+        - name: x-evolution-signature
+          in: header
+          required: true
+          schema: { type: string, description: hex HMAC-SHA256 do body }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvolutionWebhook' }
+      responses:
+        '200':
+          description: Processado (ou deduplicado)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvolutionWebhookResponse' }
+        '401': { description: Assinatura inválida }
+
+components:
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Idempotency-Key:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: Gerado no cliente no momento da intenção (API-CONTRACT §2.5)
+
+  responses:
+    Unauthorized:
+      description: Não autenticado / usuário inativo
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: UNAUTHORIZED, message: "Sessão expirada. Entre novamente." } }
+    Forbidden:
+      description: Sem permissão (RLS, role ou permissão granular)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: FORBIDDEN, message: "Você não tem permissão para esta ação." } }
+    NotFound:
+      description: Não encontrado (ou invisível pelo tenant)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: NOT_FOUND, message: "Registro não encontrado." } }
+    Conflict:
+      description: Conflito de unicidade (23505)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: CONFLICT, message: "Registro duplicado. Verifique os dados e tente novamente." } }
+    ValidationError:
+      description: Payload inválido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    IdempotencyConflict:
+      description: Mesma Idempotency-Key com payload diferente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: IDEMPOTENCY_CONFLICT, message: "Esta chave de idempotência já foi usada com outro conteúdo." } }
+    RateLimited:
+      description: Rate limit excedido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { error: { code: RATE_LIMITED, message: "Muitas requisições. Tente novamente em instantes." } }
+
+  schemas:
+    # ── Envelope & erros (§2.2/§2.3) ──
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_REFERENCE,
+                     VALIDATION_ERROR, QUOTA_EXCEEDED, PLAN_LIMIT_REACHED,
+                     FEATURE_NOT_AVAILABLE, IDEMPOTENCY_CONFLICT, RATE_LIMITED,
+                     UPSTREAM_PROVIDER_ERROR, SERVICE_UNAVAILABLE, INTERNAL]
+            message: { type: string, description: pt-BR, pronta para toast }
+            details: { type: object, additionalProperties: true }
+            request_id: { type: string, format: uuid }
+    DataEnvelope:
+      type: object
+      properties:
+        data: {}
+        meta: { $ref: '#/components/schemas/Meta' }
+    Meta:
+      type: object
+      properties:
+        request_id: { type: string, format: uuid }
+        contract_version: { type: string, example: "1.0.0" }
+        page: { $ref: '#/components/schemas/PageMeta' }
+    PageMeta:
+      type: object
+      properties:
+        next_cursor: { type: [string, 'null'] }
+        has_more: { type: boolean }
+        page: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+
+    # ── Tenancy ──
+    SignupRequest:
+      type: object
+      required: [company_name, user_name, email, password]
+      properties:
+        company_name: { type: string, minLength: 2 }
+        user_name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6, description: regra atual de register-company }
+        segment: { type: string, description: para seed por segmento (INFRA-SAAS §7) }
+    SignupResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            tenant_id: { type: string, format: uuid }
+            user_id: { type: string, format: uuid }
+            trial_ends_at: { type: string, format: date-time }
+        meta: { $ref: '#/components/schemas/Meta' }
+    CurrentContextResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/Member' }
+            tenant:
+              type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+                slug: { type: string }
+                plan: { type: string, example: trial }
+                trial_ends_at: { type: [string, 'null'], format: date-time }
+            entitlements: { type: array, items: { type: string }, example: [chatbot, campaigns] }
+            contract_version: { type: string }
+            min_supported_client: { type: string }
+    InviteRequest:
+      type: object
+      required: [name, email, role]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/AppRole' }
+        allowed_integration_ids: { type: [array, 'null'], items: { type: string, format: uuid } }
+    InviteResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user_id: { type: string, format: uuid }
+            invited_at: { type: string, format: date-time }
+    AppRole:
+      type: string
+      enum: [admin, supervisor, agent]
+    Member:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/AppRole' }
+        is_active: { type: boolean }
+        custom_permissions: { type: object, additionalProperties: { type: boolean } }
+        allowed_integration_ids: { type: [array, 'null'], items: { type: string, format: uuid } }
+        avatar_url: { type: [string, 'null'], format: uri }
+    MemberPage:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Member' } }
+    MemberUpdateRequest:
+      type: object
+      required: [p_user_id]
+      properties:
+        p_user_id: { type: string, format: uuid }
+        p_role: { $ref: '#/components/schemas/AppRole' }
+        p_custom_permissions: { type: object, additionalProperties: { type: boolean } }
+        p_allowed_integration_ids: { type: [array, 'null'], items: { type: string, format: uuid } }
+        p_is_active: { type: boolean }
+    EntitlementsResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            features: { type: array, items: { type: string } }
+            plan: { type: string }
+            grace_until: { type: [string, 'null'], format: date-time, description: past_due + 7d (§5.4 INFRA-SAAS) }
+
+    # ── Conversations ──
+    ConversationStatus:
+      type: string
+      enum: [open, pending, closed, new, resolved]
+    ConversationChannel:
+      type: string
+      enum: [whatsapp, instagram, webchat]
+    ConversationListRequest:
+      type: object
+      properties:
+        p_limit: { type: integer, default: 20, maximum: 100 }
+        p_cursor: { type: [string, 'null'] }
+        p_status: { type: [array, 'null'], items: { $ref: '#/components/schemas/ConversationStatus' } }
+        p_channel: { $ref: '#/components/schemas/ConversationChannel' }
+        p_assigned_user_id: { type: [string, 'null'], format: uuid }
+        p_unassigned: { type: boolean, default: false }
+        p_integration_id: { type: [string, 'null'], format: uuid }
+        p_project_id: { type: [string, 'null'], format: uuid }
+        p_tag_ids: { type: [array, 'null'], items: { type: string, format: uuid } }
+        p_funnel_id: { type: [string, 'null'], format: uuid }
+        p_stage_id: { type: [string, 'null'], format: uuid }
+        p_q: { type: [string, 'null'], description: busca única contato+mensagem }
+        p_has_unread: { type: boolean, default: false }
+        p_archived: { type: boolean, default: false }
+        p_sort: { type: string, enum: [recent, oldest, name], default: recent }
+    ConversationSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        channel: { $ref: '#/components/schemas/ConversationChannel' }
+        last_message_at: { type: [string, 'null'], format: date-time }
+        last_message_preview: { type: [string, 'null'] }
+        contact_id: { type: string, format: uuid }
+        assigned_user_id: { type: [string, 'null'], format: uuid }
+        department_id: { type: [string, 'null'], format: uuid }
+        project_id: { type: [string, 'null'], format: uuid }
+        integration_id: { type: [string, 'null'], format: uuid }
+        chatbot_active: { type: boolean }
+        archived_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        contact: { $ref: '#/components/schemas/ContactSummary' }
+        assigned_user: { $ref: '#/components/schemas/UserSummary' }
+        unread_count: { type: integer, default: 0 }
+    ConversationPage:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/ConversationSummary' } }
+    ConversationDetailEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/ConversationSummary'
+                - type: object
+                  properties:
+                    integration: { $ref: '#/components/schemas/IntegrationSummary' }
+    ConversationUpdateRequest:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        assigned_user_id: { type: [string, 'null'], format: uuid }
+        department_id: { type: [string, 'null'], format: uuid }
+    UnreadCountsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              additionalProperties: { type: integer }
+              example: { "uuid-conversa-1": 3 }
+    SidebarStatsEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                total_unread: { type: integer }
+    Annotation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        author_id: { type: string, format: uuid }
+        body: { type: string }
+        created_at: { type: string, format: date-time }
+        author:
+          type: [object, 'null']
+          properties:
+            name: { type: string }
+            avatar_url: { type: [string, 'null'], format: uri }
+    AnnotationList:
+      type: array
+      items: { $ref: '#/components/schemas/Annotation' }
+
+    # ── Messages ──
+    DeliveryStatus:
+      type: string
+      enum: [queued, sent, delivered, failed, quota_exceeded]
+    MessageSenderType:
+      type: string
+      enum: [user, agent, system]
+    Message:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        body: { type: string }
+        type: { type: [string, 'null'], example: text }
+        media_url: { type: [string, 'null'], format: uri }
+        sender_type: { $ref: '#/components/schemas/MessageSenderType' }
+        sender_id: { type: [string, 'null'], format: uuid }
+        sender_name: { type: [string, 'null'] }
+        delivery_status: { $ref: '#/components/schemas/DeliveryStatus' }
+        external_message_id: { type: [string, 'null'] }
+        reply_to_id: { type: [string, 'null'], format: uuid }
+        edited_at: { type: [string, 'null'], format: date-time }
+        deleted_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        sender: { $ref: '#/components/schemas/UserSummary' }
+    MessagePage:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Message' } }
+    SendMessageRequest:
+      type: object
+      required: [client_request_id]
+      properties:
+        body: { type: string, description: obrigatório se media_url ausente }
+        media_url: { type: [string, 'null'], format: uri }
+        reply_to_id: { type: [string, 'null'], format: uuid }
+        client_request_id: { type: string, format: uuid, description: = Idempotency-Key; unique por tenant }
+    SendMessageResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            conversation_id: { type: string, format: uuid }
+            delivery_status: { type: string, enum: [queued] }
+            client_request_id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+        meta: { $ref: '#/components/schemas/Meta' }
+
+    # ── Contacts ──
+    ContactSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: [string, 'null'] }
+        phone_e164: { type: [string, 'null'] }
+        email: { type: [string, 'null'], format: email }
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              color: { type: string }
+        is_group: { type: boolean }
+        source: { type: [string, 'null'] }
+        avatar_url: { type: [string, 'null'], format: uri }
+    Contact:
+      allOf:
+        - $ref: '#/components/schemas/ContactSummary'
+        - type: object
+          properties:
+            responsible_user_id: { type: [string, 'null'], format: uuid }
+            is_archived: { type: boolean }
+            is_favorite: { type: boolean }
+            notes: { type: [string, 'null'] }
+            last_contact_at: { type: [string, 'null'], format: date-time }
+            created_at: { type: string, format: date-time }
+            responsible:
+              type: [object, 'null']
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+    ContactUpsert:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        phone: { type: [string, 'null'], description: E.164 ou BR — normalizado server-side }
+        email: { type: [string, 'null'], format: email }
+        source: { type: [string, 'null'] }
+        responsible_user_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'] }
+      description: company_id NUNCA enviado — vem do JWT/trigger (§6.1)
+    ContactPage:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Contact' } }
+
+    # ── Deals ──
+    DealStage:
+      type: string
+      enum: [novo_lead, em_contato, proposta, fechamento, ganho, perdido]
+      description: congelado (pt-BR) na v1 — string opaca (§2.6)
+    Deal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        contact_id: { type: [string, 'null'], format: uuid }
+        value: { type: number }
+        stage: { $ref: '#/components/schemas/DealStage' }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        assigned_user_id: { type: [string, 'null'], format: uuid }
+        department_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DealWithRelations:
+      allOf:
+        - $ref: '#/components/schemas/Deal'
+        - type: object
+          properties:
+            contact:
+              type: [object, 'null']
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+            assigned_user:
+              type: [object, 'null']
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+    DealUpsert:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        contact_id: { type: [string, 'null'], format: uuid }
+        value: { type: number, default: 0 }
+        stage: { $ref: '#/components/schemas/DealStage' }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        assigned_user_id: { type: [string, 'null'], format: uuid }
+        department_id: { type: [string, 'null'], format: uuid }
+        notes: { type: [string, 'null'] }
+      description: company_id NUNCA enviado (hoje deals.ts aceita — removido na v1)
+
+    # ── Billing ──
+    SubscriptionEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                plan: { type: string, example: pro }
+                status: { type: string, enum: [trialing, active, past_due, unpaid, canceled] }
+                trial_ends_at: { type: [string, 'null'], format: date-time }
+                seats: { $ref: '#/components/schemas/UsageLimit' }
+                whatsapp_numbers: { $ref: '#/components/schemas/UsageLimit' }
+                current_period_end: { type: [string, 'null'], format: date-time }
+                grace_until: { type: [string, 'null'], format: date-time }
+    UsageLimit:
+      type: object
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+    UsageResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            messages_outbound: { $ref: '#/components/schemas/UsageLimit' }
+            period: { type: string, example: "2026-07" }
+    Plan:
+      type: object
+      properties:
+        lookup_key: { type: string, example: pro_monthly }
+        name: { type: string, example: Pro }
+        seats_included: { type: integer }
+        whatsapp_numbers_included: { type: integer }
+        messages_included: { type: integer, example: 50000 }
+        features: { type: array, items: { type: string } }
+    SessionUrlEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/DataEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                url: { type: string, format: uri }
+                expires_at: { type: [string, 'null'], format: date-time }
+
+    # ── Webhook Evolution (payload REAL preservado) ──
+    EvolutionWebhook:
+      type: object
+      required: [event, instance, data]
+      properties:
+        event: { type: string, example: messages.upsert }
+        instance: { type: string, description: instance_name → resolve tenant }
+        data:
+          type: object
+          properties:
+            key:
+              type: object
+              properties:
+                remoteJid: { type: string, example: "5531999998888@s.whatsapp.net" }
+                fromMe: { type: boolean }
+                id: { type: string, description: stanza id — base da dedup }
+                participant: { type: string, description: remetente real em grupos }
+            message:
+              type: object
+              description: conversation | extendedTextMessage | imageMessage | audioMessage | videoMessage | documentMessage | stickerMessage | …
+              additionalProperties: true
+            pushName: { type: string }
+            messageTimestamp: { type: integer, description: epoch seconds }
+            profilePictureUrl: { type: [string, 'null'], format: uri }
+            media:
+              type: object
+              properties:
+                url: { type: string, format: uri }
+    EvolutionWebhookResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            conversation_id: { type: string, format: uuid }
+            deduplicated: { type: boolean, default: false }
+            handled: { type: string, description: para eventos não-mensagem (messages_update, connection_update…) }
+
+    # ── Shared ──
+    UserSummary:
+      type: [object, 'null']
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: [string, 'null'] }
+    IntegrationSummary:
+      type: [object, 'null']
+      description: view redigida — SEM config/api_key (§3.11/§6.1)
+      properties:
+        id: { type: string, format: uuid }
+        device_name: { type: [string, 'null'] }
+        phone_number: { type: [string, 'null'] }
+        status: { type: string }
+        provider: { type: string }
+        provider_type: { type: string, enum: [baileys, cloud_api] }
+        project_id: { type: [string, 'null'], format: uuid }
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Supabase Auth JWT. Claims esperados em `app_metadata`:
+        `tenant_id` (uuid), `user_role` (admin|supervisor|agent) —
+        injetados pelo Custom Access Token Hook (INFRA-SAAS §4.1).
+security:
+  - bearerAuth: []
+tags:
+  - { name: tenancy, description: Auth, tenant, membros, entitlements }
+  - { name: conversations, description: Inbox — conversas e anotações }
+  - { name: messages, description: Mensagens (envio assíncrono via fila) }
+  - { name: contacts, description: Contatos }
+  - { name: deals, description: Pipeline/CRM (modelo canônico) }
+  - { name: billing, description: Assinatura, checkout, uso }
+  - { name: webhooks, description: Server-to-server (Stripe, Evolution) }
